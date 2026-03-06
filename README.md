@@ -1,4 +1,4 @@
-# quickjs-wasm
+# quickjs-wasi
 
 A snapshotable JavaScript runtime via WebAssembly. Runs [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WASM, with the ability to **snapshot the entire VM state** (including pending promises) and **restore it in a fresh WASM instance**.
 
@@ -13,12 +13,10 @@ The [Workflow DevKit](https://github.com/vercel/workflow) project implements dur
 
 This project explores a fundamentally different approach: **VM snapshotting**. Instead of replaying from the beginning, we snapshot the JavaScript execution environment at each suspension point and restore it on resumption. The restored VM already has the correct state — only events since the last snapshot need to be fetched and applied.
 
-## Quick Start
+## Install
 
 ```sh
-pnpm install
-make          # builds quickjs.wasm via wasi-sdk
-pnpm test     # runs all 44 tests
+npm install quickjs-wasi
 ```
 
 ## Usage
@@ -28,7 +26,7 @@ pnpm test     # runs all 44 tests
 Both `QuickJS` and `JSValueHandle` implement `Symbol.dispose`, so you can use `using` declarations for automatic cleanup:
 
 ```typescript
-import { QuickJS } from 'quickjs-wasm';
+import { QuickJS } from 'quickjs-wasi';
 
 {
   using vm = await QuickJS.create(wasmBytes);
@@ -367,26 +365,51 @@ This design survives snapshot/restore: the ID is stored in QuickJS's heap (part 
 ## Project Structure
 
 ```
-quickjs-wasm/
+quickjs-wasi/
  |-- quickjs-ng/            # Git submodule: github.com/quickjs-ng/quickjs
  |-- c/
  |   +-- interface.c        # C wrapper (~470 lines) exporting WASM functions
- |-- ts/
+ |-- src/
  |   |-- index.ts           # QuickJS + JSValueHandle + Deferred
  |   +-- wasi-shim.ts       # Minimal WASI polyfill (6 functions)
+ |-- dist/                  # Compiled JS + declarations (not committed)
+ |-- quickjs.wasm           # Built WASM binary (not committed)
  |-- test/
- |   |-- snapshot.test.ts   # 30 core tests
- |   +-- pac-resolver/      # 14 integration tests (PAC file sandbox)
+ |   |-- snapshot.test.ts   # Core tests
+ |   +-- pac-resolver/      # Integration tests (PAC file sandbox)
  |-- Makefile
  |-- package.json
  +-- tsconfig.json
 ```
 
-## Prerequisites
+## Development
+
+### Prerequisites
 
 - [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) (tested with v30) — set `WASI_SDK` env var or defaults to `/tmp/wasi-sdk`
 - Node.js >= 22
 - pnpm
+
+### Building Locally
+
+```sh
+# Clone with submodules
+git clone --recursive https://github.com/vercel-labs/quickjs-wasm.git
+cd quickjs-wasm
+
+# Install wasi-sdk (macOS arm64 — adjust URL for your platform)
+curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-arm64-macos.tar.gz" \
+  | tar xz -C /tmp --strip-components=1 --one-top-level=wasi-sdk
+
+# Install dependencies
+pnpm install
+
+# Build WASM binary + TypeScript
+pnpm run build
+
+# Run tests
+pnpm test
+```
 
 ## Technical Details
 

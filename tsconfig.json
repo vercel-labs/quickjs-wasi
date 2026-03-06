@@ -3,9 +3,9 @@
     "target": "ES2022",
     "module": "Node16",
     "moduleResolution": "Node16",
-    "lib": ["ES2022", "ESNext.Disposable"],
+    "lib": ["ES2022", "ESNext.Disposable", "DOM"],
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "src",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -15,6 +15,6 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["ts/**/*.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "test"]
 }

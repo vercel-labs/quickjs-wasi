@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { QuickJS } from '../ts/index.ts';
+import { QuickJS } from '../src/index.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmPath = resolve(__dirname, '..', 'quickjs.wasm');

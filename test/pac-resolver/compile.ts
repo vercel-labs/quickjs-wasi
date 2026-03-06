@@ -13,7 +13,7 @@ import { types } from 'node:util';
 import { degenerator } from 'degenerator';
 import type { DegeneratorNames } from 'degenerator';
 import type { Context } from 'node:vm';
-import { QuickJS, type JSValueHandle } from '../../ts/index.ts';
+import { QuickJS, type JSValueHandle } from '../../src/index.ts';
 
 export interface CompileOptions {
   names?: DegeneratorNames;

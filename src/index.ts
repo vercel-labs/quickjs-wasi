@@ -7,7 +7,7 @@
  * WASM instance.
  */
 
-import { createWasiShim } from './wasi-shim.ts';
+import { createWasiShim } from './wasi-shim.js';
 
 // ---- Type for host callback functions ----
 
