@@ -1,245 +1,382 @@
 /**
- * Proof-of-concept test: QuickJS WASM snapshot and restore with pending promises.
- *
- * This test demonstrates:
- * 1. Creating a QuickJS VM, evaluating code that creates a pending promise
- * 2. Snapshotting the entire VM state
- * 3. Restoring the VM in a fresh WASM instance
- * 4. Resolving the pending promise in the restored VM
- * 5. Verifying the promise callback executed correctly
+ * Tests for QuickJS WASM: snapshot/restore, host callbacks, dump, promise bridging.
  */
 
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { QuickJS, type Snapshot } from '../ts/index.ts';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { QuickJS } from '../ts/index.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmPath = resolve(__dirname, '..', 'quickjs.wasm');
-const wasmBytes = readFileSync(wasmPath);
 
-let passed = 0;
-let failed = 0;
+let wasmBytes: Buffer;
 
-function assert(condition: boolean, message: string) {
-  if (!condition) {
-    console.error(`  FAIL: ${message}`);
-    failed++;
-  } else {
-    console.log(`  PASS: ${message}`);
-    passed++;
-  }
-}
+beforeAll(() => {
+  wasmBytes = readFileSync(wasmPath);
+});
 
-async function testBasicEval() {
-  console.log('\n--- Test: Basic Eval ---');
-  const vm = await QuickJS.create(wasmBytes);
+describe('Basic Eval', () => {
+  it('should evaluate arithmetic', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const result = vm.evalCode('1 + 2');
+    expect(result.isException).toBe(false);
+    expect(result.toNumber()).toBe(3);
+    result.dispose();
+    vm.dispose();
+  });
 
-  const result = vm.evalCode('1 + 2');
-  assert(!result.isException, 'eval should not throw');
-  assert(result.toNumber() === 3, '1 + 2 should equal 3');
-  result.dispose();
+  it('should evaluate string concatenation', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const result = vm.evalCode('"hello" + " " + "world"');
+    expect(result.toString()).toBe('hello world');
+    result.dispose();
+    vm.dispose();
+  });
+});
 
-  const strResult = vm.evalCode('"hello" + " " + "world"');
-  assert(strResult.toString() === 'hello world', 'string concatenation works');
-  strResult.dispose();
+describe('Promise Creation', () => {
+  it('should create and resolve a promise', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const { promise, resolve: resolveFunc, reject: rejectFunc } = vm.newPromise();
+    expect(promise.promiseState).toBe(0);
 
-  vm.dispose();
-}
+    const global = vm.getGlobal();
+    global.setProp('testPromise', promise);
 
-async function testPromiseCreation() {
-  console.log('\n--- Test: Promise Creation ---');
-  const vm = await QuickJS.create(wasmBytes);
+    vm.evalCode(`
+      globalThis.promiseResult = undefined;
+      testPromise.then(value => {
+        globalThis.promiseResult = "resolved: " + value;
+      });
+    `).dispose();
+    vm.executePendingJobs();
 
-  // Create a promise from the host side
-  const { promise, resolve: resolveFunc, reject: rejectFunc } = vm.newPromise();
-  assert(promise.promiseState === 0, 'new promise should be pending (state 0)');
+    const beforeResolve = global.getProp('promiseResult');
+    expect(beforeResolve.isUndefined).toBe(true);
+    beforeResolve.dispose();
 
-  // Set up the promise on the global object
-  const global = vm.getGlobal();
-  global.setProp('testPromise', promise);
+    const resolveValue = vm.newString('hello from host');
+    const undefinedVal = vm.getUndefined();
+    vm.callFunction(resolveFunc, undefinedVal, resolveValue).dispose();
+    vm.executePendingJobs();
 
-  // Evaluate code that attaches a .then handler
-  const evalResult = vm.evalCode(`
-    globalThis.promiseResult = undefined;
-    testPromise.then(value => {
-      globalThis.promiseResult = "resolved: " + value;
+    const afterResolve = global.getProp('promiseResult');
+    expect(afterResolve.toString()).toBe('resolved: hello from host');
+    afterResolve.dispose();
+
+    resolveValue.dispose();
+    undefinedVal.dispose();
+    resolveFunc.dispose();
+    rejectFunc.dispose();
+    promise.dispose();
+    global.dispose();
+    vm.dispose();
+  });
+});
+
+describe('Host Callbacks', () => {
+  it('should call a sync host function that adds numbers', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+
+    const addFn = vm.newFunction('add', (_this, ...args) => {
+      const a = args[0].toNumber();
+      const b = args[1].toNumber();
+      return vm.newNumber(a + b);
     });
-  `);
-  evalResult.dispose();
-  vm.executePendingJobs();
 
-  // Check that promiseResult is still undefined (promise not yet resolved)
-  const beforeResolve = global.getProp('promiseResult');
-  assert(beforeResolve.isUndefined, 'promiseResult should be undefined before resolve');
-  beforeResolve.dispose();
+    const global = vm.getGlobal();
+    global.setProp('add', addFn);
+    addFn.dispose();
 
-  // Now resolve the promise
-  const resolveValue = vm.newString('hello from host');
-  const undefinedVal = vm.getUndefined();
-  vm.callFunction(resolveFunc, undefinedVal, resolveValue);
-  vm.executePendingJobs();
+    const result = vm.evalCode('add(3, 4)');
+    expect(result.isException).toBe(false);
+    expect(result.toNumber()).toBe(7);
+    result.dispose();
 
-  // Check the result
-  const afterResolve = global.getProp('promiseResult');
-  assert(afterResolve.toString() === 'resolved: hello from host', 'promise should be resolved with correct value');
-  afterResolve.dispose();
+    global.dispose();
+    vm.dispose(false);
+  });
 
-  resolveValue.dispose();
-  undefinedVal.dispose();
-  resolveFunc.dispose();
-  rejectFunc.dispose();
-  promise.dispose();
-  global.dispose();
-  vm.dispose();
-}
+  it('should call a host function that returns a string', async () => {
+    const vm = await QuickJS.create(wasmBytes);
 
-async function testSnapshotAndRestore() {
-  console.log('\n--- Test: Snapshot and Restore (Simple State) ---');
-
-  // Phase 1: Create a VM with some state and snapshot it
-  const vm1 = await QuickJS.create(wasmBytes);
-
-  vm1.evalCode(`
-    globalThis.counter = 42;
-    globalThis.message = "hello from snapshot";
-  `);
-
-  const snapshot = vm1.snapshot();
-  console.log(`  Snapshot size: ${(snapshot.memory.length / 1024).toFixed(0)} KB`);
-  console.log(`  Memory pages: ${snapshot.memoryPages}`);
-  console.log(`  Runtime ptr: 0x${snapshot.runtimePtr.toString(16)}`);
-  console.log(`  Context ptr: 0x${snapshot.contextPtr.toString(16)}`);
-  console.log(`  Stack pointer: 0x${snapshot.stackPointer.toString(16)}`);
-
-  vm1.dispose(false); // Skip leak check - we just want to drop the instance
-
-  // Phase 2: Restore the VM from the snapshot
-  const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-
-  // Verify the state was preserved
-  const counterResult = vm2.evalCode('globalThis.counter');
-  assert(counterResult.toNumber() === 42, 'counter should be 42 after restore');
-  counterResult.dispose();
-
-  const messageResult = vm2.evalCode('globalThis.message');
-  assert(messageResult.toString() === 'hello from snapshot', 'message should be preserved after restore');
-  messageResult.dispose();
-
-  // Verify we can still do work in the restored VM
-  const newResult = vm2.evalCode('globalThis.counter + 1');
-  assert(newResult.toNumber() === 43, 'can evaluate new code in restored VM');
-  newResult.dispose();
-
-  vm2.dispose(false);
-}
-
-async function testSnapshotWithPendingPromise() {
-  console.log('\n--- Test: Snapshot with Pending Promise (THE KEY TEST) ---');
-
-  // Phase 1: Create a VM, set up a pending promise, and snapshot
-  const vm1 = await QuickJS.create(wasmBytes);
-
-  // Create a deferred promise from the host
-  const { promise, resolve: resolveFunc, reject: rejectFunc } = vm1.newPromise();
-
-  // Store the promise on the global so it's reachable from JS code
-  const global1 = vm1.getGlobal();
-  global1.setProp('pendingStep', promise);
-
-  // Evaluate code that awaits the promise
-  vm1.evalCode(`
-    globalThis.stepResult = "not yet";
-    globalThis.pendingStep.then(value => {
-      globalThis.stepResult = "completed: " + value;
+    const greetFn = vm.newFunction('greet', (_this, ...args) => {
+      const name = args[0].toString();
+      return vm.newString(`Hello, ${name}!`);
     });
-  `);
-  vm1.executePendingJobs();
+    const global = vm.getGlobal();
+    global.setProp('greet', greetFn);
+    greetFn.dispose();
 
-  // Verify promise is pending
-  const beforeSnap = global1.getProp('stepResult');
-  assert(beforeSnap.toString() === 'not yet', 'stepResult should be "not yet" before snapshot');
-  beforeSnap.dispose();
+    const result = vm.evalCode('greet("World")');
+    expect(result.toString()).toBe('Hello, World!');
+    result.dispose();
 
-  // Store the resolve function pointer so we can find it after restore.
-  // We'll save the resolve function on the global object too.
-  global1.setProp('__resolveFunc', resolveFunc);
+    global.dispose();
+    vm.dispose(false);
+  });
 
-  // SNAPSHOT the VM
-  const snapshot = vm1.snapshot();
-  console.log(`  Snapshot taken with pending promise`);
-  console.log(`  Snapshot size: ${(snapshot.memory.length / 1024).toFixed(0)} KB`);
+  it('should call a host function multiple times', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const calls: string[] = [];
 
-  // Clean up vm1 (simulate: this process is going away)
-  // We skip leak check because we intentionally have live objects in the VM
-  // that are preserved in the snapshot.
-  vm1.dispose(false);
+    const logFn = vm.newFunction('log', (_this, ...args) => {
+      calls.push(args[0].toString());
+      return vm.getUndefined();
+    });
+    const global = vm.getGlobal();
+    global.setProp('log', logFn);
+    logFn.dispose();
 
-  console.log(`  Original VM disposed. Simulating resumption in a new process...`);
+    vm.evalCode('log("first"); log("second"); log("third")').dispose();
 
-  // Phase 2: RESTORE the VM from the snapshot in a "fresh" context
-  const vm2 = await QuickJS.restore(snapshot, wasmBytes);
+    expect(calls).toEqual(['first', 'second', 'third']);
 
-  // Verify the state is still there
-  const afterRestore = vm2.evalCode('globalThis.stepResult');
-  assert(afterRestore.toString() === 'not yet', 'stepResult should still be "not yet" after restore');
-  afterRestore.dispose();
+    global.dispose();
+    vm.dispose(false);
+  });
+});
 
-  // Retrieve the resolve function from the restored VM
-  const global2 = vm2.getGlobal();
-  const restoredResolve = global2.getProp('__resolveFunc');
-  assert(!restoredResolve.isUndefined, 'resolve function should be available after restore');
+describe('Async Host Callback', () => {
+  it('should simulate an async host function with promise bridging', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const global = vm.getGlobal();
 
-  // NOW: Resolve the pending promise in the restored VM!
-  // This simulates: new events arrived that tell us the step completed.
-  const resolveArg = vm2.newString('step-42-result');
-  const undefinedVal = vm2.getUndefined();
-  const callResult = vm2.callFunction(restoredResolve, undefinedVal, resolveArg);
+    const dnsResolveFn = vm.newFunction('dnsResolve', (_this, ...args) => {
+      const hostname = args[0].toString();
+      const { promise, resolve, reject } = vm.newPromise();
 
-  if (callResult.isException) {
-    const exc = vm2.getException();
-    console.error(`  Exception calling resolve: ${exc.toString()}`);
-    exc.dispose();
-  }
-  callResult.dispose();
+      const ip = hostname === 'example.com' ? '93.184.216.34' : '127.0.0.1';
+      const ipHandle = vm.newString(ip);
+      const undef = vm.getUndefined();
+      vm.callFunction(resolve, undef, ipHandle).dispose();
+      vm.executePendingJobs();
+      ipHandle.dispose();
+      undef.dispose();
+      resolve.dispose();
+      reject.dispose();
 
-  // Execute the promise reaction jobs
-  const jobsRun = vm2.executePendingJobs();
-  console.log(`  Executed ${jobsRun} pending jobs after resolving promise`);
+      return promise;
+    });
 
-  // CHECK: Did the .then handler run?
-  const finalResult = global2.getProp('stepResult');
-  const finalValue = finalResult.toString();
-  console.log(`  Final stepResult: "${finalValue}"`);
-  assert(
-    finalValue === 'completed: step-42-result',
-    'Promise .then handler should have executed in the restored VM!'
-  );
-  finalResult.dispose();
+    global.setProp('dnsResolve', dnsResolveFn);
+    dnsResolveFn.dispose();
 
-  resolveArg.dispose();
-  undefinedVal.dispose();
-  restoredResolve.dispose();
-  global2.dispose();
-  vm2.dispose(false);
-}
+    vm.evalCode(`
+      globalThis.resolvedIP = "pending";
+      dnsResolve("example.com").then(ip => {
+        globalThis.resolvedIP = ip;
+      });
+    `).dispose();
+    vm.executePendingJobs();
 
-// Run all tests
-async function main() {
-  console.log('=== QuickJS WASM Snapshot/Restore PoC ===');
+    const ipResult = global.getProp('resolvedIP');
+    expect(ipResult.toString()).toBe('93.184.216.34');
+    ipResult.dispose();
 
-  try {
-    await testBasicEval();
-    await testPromiseCreation();
-    await testSnapshotAndRestore();
-    await testSnapshotWithPendingPromise();
-  } catch (err) {
-    console.error('\nUNEXPECTED ERROR:', err);
-    failed++;
-  }
+    global.dispose();
+    vm.dispose(false);
+  });
+});
 
-  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
-  process.exit(failed > 0 ? 1 : 0);
-}
+describe('dump()', () => {
+  it('should dump primitives', async () => {
+    const vm = await QuickJS.create(wasmBytes);
 
-main();
+    expect(vm.evalCode('42').consume(h => vm.dump(h))).toBe(42);
+    expect(vm.evalCode('"hello"').consume(h => vm.dump(h))).toBe('hello');
+    expect(vm.evalCode('true').consume(h => vm.dump(h))).toBe(true);
+    expect(vm.evalCode('null').consume(h => vm.dump(h))).toBe(null);
+    expect(vm.evalCode('undefined').consume(h => vm.dump(h))).toBe(undefined);
+
+    vm.dispose(false);
+  });
+
+  it('should dump arrays', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+
+    const arr = vm.evalCode('[1, 2, 3]');
+    const dumped = vm.dump(arr) as number[];
+    expect(Array.isArray(dumped)).toBe(true);
+    expect(dumped).toEqual([1, 2, 3]);
+    arr.dispose();
+
+    vm.dispose(false);
+  });
+
+  it('should dump Error objects', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+
+    const err = vm.evalCode('new Error("test error")');
+    const dumped = vm.dump(err);
+    expect(dumped).toBeInstanceOf(Error);
+    expect((dumped as Error).message).toBe('test error');
+    err.dispose();
+
+    vm.dispose(false);
+  });
+});
+
+describe('typeof', () => {
+  it('should return correct typeof strings', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+
+    const cases: [string, string][] = [
+      ['42', 'number'],
+      ['"hello"', 'string'],
+      ['true', 'boolean'],
+      ['undefined', 'undefined'],
+      ['null', 'object'],
+      ['({})', 'object'],
+      ['(() => {})', 'function'],
+    ];
+
+    for (const [code, expected] of cases) {
+      const handle = vm.evalCode(code);
+      expect(vm.typeof(handle)).toBe(expected);
+      handle.dispose();
+    }
+
+    vm.dispose(false);
+  });
+});
+
+describe('handle.consume()', () => {
+  it('should use-then-dispose a handle', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+
+    const result = vm.evalCode('1 + 2').consume(h => h.toNumber());
+    expect(result).toBe(3);
+
+    const global = vm.getGlobal();
+    vm.newString('consumed').consume(h => global.setProp('test', h));
+    const check = global.getProp('test');
+    expect(check.toString()).toBe('consumed');
+    check.dispose();
+
+    global.dispose();
+    vm.dispose(false);
+  });
+});
+
+describe('hostToHandle', () => {
+  it('should convert host values to QuickJS handles', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const global = vm.getGlobal();
+
+    vm.hostToHandle('hello').consume(h => global.setProp('s', h));
+    vm.hostToHandle(42).consume(h => global.setProp('n', h));
+    vm.hostToHandle(true).consume(h => global.setProp('b', h));
+    vm.hostToHandle(null).consume(h => global.setProp('nil', h));
+    vm.hostToHandle([1, 2, 3]).consume(h => global.setProp('arr', h));
+    vm.hostToHandle({ x: 10, y: 20 }).consume(h => global.setProp('obj', h));
+
+    expect(vm.evalCode('s').consume(h => h.toString())).toBe('hello');
+    expect(vm.evalCode('n').consume(h => h.toNumber())).toBe(42);
+    expect(vm.evalCode('b').consume(h => vm.dump(h))).toBe(true);
+    expect(vm.evalCode('nil').consume(h => vm.dump(h))).toBe(null);
+    expect(vm.evalCode('arr.length').consume(h => h.toNumber())).toBe(3);
+    expect(vm.evalCode('arr[1]').consume(h => h.toNumber())).toBe(2);
+    expect(vm.evalCode('obj.x').consume(h => h.toNumber())).toBe(10);
+
+    global.dispose();
+    vm.dispose(false);
+  });
+});
+
+describe('Snapshot and Restore', () => {
+  it('should preserve simple state across snapshot/restore', async () => {
+    const vm1 = await QuickJS.create(wasmBytes);
+    vm1.evalCode(`
+      globalThis.counter = 42;
+      globalThis.message = "hello from snapshot";
+    `).dispose();
+
+    const snapshot = vm1.snapshot();
+    vm1.dispose(false);
+
+    const vm2 = await QuickJS.restore(snapshot, wasmBytes);
+
+    expect(vm2.evalCode('globalThis.counter').consume(h => h.toNumber())).toBe(42);
+    expect(vm2.evalCode('globalThis.message').consume(h => h.toString())).toBe('hello from snapshot');
+    expect(vm2.evalCode('globalThis.counter + 1').consume(h => h.toNumber())).toBe(43);
+
+    vm2.dispose(false);
+  });
+
+  it('should resolve a pending promise in a restored VM', async () => {
+    const vm1 = await QuickJS.create(wasmBytes);
+    const { promise, resolve: resolveFunc } = vm1.newPromise();
+    const global1 = vm1.getGlobal();
+    global1.setProp('pendingStep', promise);
+    global1.setProp('__resolveFunc', resolveFunc);
+
+    vm1.evalCode(`
+      globalThis.stepResult = "not yet";
+      globalThis.pendingStep.then(value => {
+        globalThis.stepResult = "completed: " + value;
+      });
+    `).dispose();
+    vm1.executePendingJobs();
+
+    expect(global1.getProp('stepResult').consume(h => h.toString())).toBe('not yet');
+
+    const snapshot = vm1.snapshot();
+    vm1.dispose(false);
+
+    // Restore in a fresh instance
+    const vm2 = await QuickJS.restore(snapshot, wasmBytes);
+
+    expect(vm2.evalCode('globalThis.stepResult').consume(h => h.toString())).toBe('not yet');
+
+    const global2 = vm2.getGlobal();
+    const restoredResolve = global2.getProp('__resolveFunc');
+    expect(restoredResolve.isUndefined).toBe(false);
+
+    const resolveArg = vm2.newString('step-42-result');
+    const undef = vm2.getUndefined();
+    vm2.callFunction(restoredResolve, undef, resolveArg).dispose();
+    vm2.executePendingJobs();
+
+    expect(global2.getProp('stepResult').consume(h => h.toString())).toBe('completed: step-42-result');
+
+    resolveArg.dispose();
+    undef.dispose();
+    restoredResolve.dispose();
+    global2.dispose();
+    vm2.dispose(false);
+  });
+
+  it('should support host callback re-registration after restore', async () => {
+    const vm1 = await QuickJS.create(wasmBytes);
+    const global1 = vm1.getGlobal();
+
+    const fn = vm1.newFunction('hostAdd', (_this, ...args) => {
+      return vm1.newNumber(args[0].toNumber() + args[1].toNumber());
+    });
+    global1.setProp('hostAdd', fn);
+    fn.dispose();
+
+    expect(vm1.evalCode('hostAdd(10, 20)').consume(h => h.toNumber())).toBe(30);
+
+    const snapshot = vm1.snapshot();
+    global1.dispose();
+    vm1.dispose(false);
+
+    const vm2 = await QuickJS.restore(snapshot, wasmBytes);
+
+    // Re-register callback ID 1
+    vm2.registerHostCallback(1, (_this, ...args) => {
+      return vm2.newNumber(args[0].toNumber() + args[1].toNumber());
+    });
+
+    const result = vm2.evalCode('hostAdd(100, 200)');
+    expect(result.isException).toBe(false);
+    expect(result.toNumber()).toBe(300);
+    result.dispose();
+
+    vm2.dispose(false);
+  });
+});

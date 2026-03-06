@@ -7,10 +7,11 @@
     "build:wasm": "make",
     "build:ts": "tsc",
     "build": "pnpm run build:wasm && pnpm run build:ts",
-    "test": "node --experimental-strip-types test/snapshot.test.ts"
+    "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^4.0.18"
   }
 }

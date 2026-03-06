@@ -26,6 +26,76 @@ static JSValue *jsvalue_to_heap(JSValue val) {
     return ptr;
 }
 
+/* ---- Host callback support ---- */
+
+/*
+ * Imported from the host environment. When QuickJS calls a host function,
+ * this import is invoked with:
+ *   func_id  - the callback ID assigned by the host
+ *   this_ptr - pointer to heap-allocated JSValue for 'this'
+ *   argc     - argument count
+ *   argv_ptr - pointer to array of JSValue* pointers in WASM memory
+ *
+ * Returns a pointer to a heap-allocated JSValue (the return value).
+ */
+__attribute__((import_module("env"), import_name("host_call")))
+extern JSValue *host_call(int func_id, JSValue *this_ptr, int argc, JSValue **argv_ptr);
+
+/*
+ * Trampoline: a JSCFunctionData callback that dispatches to the host.
+ * The func_id is stored in func_data[0] as an integer.
+ */
+static JSValue host_callback_trampoline(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv,
+                                         int magic, JSValueConst *func_data)
+{
+    (void)magic;
+
+    /* Extract the func_id from func_data[0] */
+    int func_id;
+    JS_ToInt32(ctx, &func_id, func_data[0]);
+
+    /* Heap-allocate this_val for the host */
+    JSValue *this_ptr = jsvalue_to_heap(JS_DupValue(ctx, this_val));
+
+    /* Heap-allocate each argument for the host */
+    JSValue **argv_ptrs = NULL;
+    if (argc > 0) {
+        argv_ptrs = (JSValue **)malloc(sizeof(JSValue *) * argc);
+        for (int i = 0; i < argc; i++) {
+            argv_ptrs[i] = jsvalue_to_heap(JS_DupValue(ctx, argv[i]));
+        }
+    }
+
+    /* Call into the host */
+    JSValue *result_ptr = host_call(func_id, this_ptr, argc, argv_ptrs);
+
+    /* Extract and dup the result, then free the pointer */
+    JSValue result;
+    if (result_ptr) {
+        result = JS_DupValue(ctx, *result_ptr);
+        JS_FreeValue(ctx, *result_ptr);
+        free(result_ptr);
+    } else {
+        result = JS_UNDEFINED;
+    }
+
+    /* Free the this_ptr (was dup'd for host) */
+    JS_FreeValue(ctx, *this_ptr);
+    free(this_ptr);
+
+    /* Free the argv pointers (were dup'd for host) */
+    if (argv_ptrs) {
+        for (int i = 0; i < argc; i++) {
+            JS_FreeValue(ctx, *argv_ptrs[i]);
+            free(argv_ptrs[i]);
+        }
+        free(argv_ptrs);
+    }
+
+    return result;
+}
+
 /* ---- Lifecycle ---- */
 
 __attribute__((export_name("qjs_init")))
@@ -147,6 +217,56 @@ int qjs_is_undefined(JSValue *val) {
     return JS_IsUndefined(*val);
 }
 
+__attribute__((export_name("qjs_is_null")))
+int qjs_is_null(JSValue *val) {
+    return JS_IsNull(*val);
+}
+
+__attribute__((export_name("qjs_is_bool")))
+int qjs_is_bool(JSValue *val) {
+    return JS_IsBool(*val);
+}
+
+__attribute__((export_name("qjs_is_number")))
+int qjs_is_number(JSValue *val) {
+    return JS_IsNumber(*val);
+}
+
+__attribute__((export_name("qjs_is_string")))
+int qjs_is_string(JSValue *val) {
+    return JS_IsString(*val);
+}
+
+__attribute__((export_name("qjs_is_object")))
+int qjs_is_object(JSValue *val) {
+    return JS_IsObject(*val);
+}
+
+__attribute__((export_name("qjs_is_array")))
+int qjs_is_array(JSValue *val) {
+    return JS_IsArray(*val);
+}
+
+__attribute__((export_name("qjs_is_function")))
+int qjs_is_function(JSValue *val) {
+    return JS_IsFunction(ctx, *val);
+}
+
+__attribute__((export_name("qjs_is_error")))
+int qjs_is_error(JSValue *val) {
+    return JS_IsError(*val);
+}
+
+__attribute__((export_name("qjs_is_promise")))
+int qjs_is_promise(JSValue *val) {
+    return JS_IsPromise(*val);
+}
+
+__attribute__((export_name("qjs_get_bool")))
+int qjs_get_bool(JSValue *val) {
+    return JS_ToBool(ctx, *val);
+}
+
 /* ---- Value Management ---- */
 
 __attribute__((export_name("qjs_dup_value")))
@@ -180,6 +300,17 @@ int qjs_set_prop_string(JSValue *obj, const char *name, JSValue *val) {
     return JS_SetPropertyStr(ctx, *obj, name, JS_DupValue(ctx, *val));
 }
 
+__attribute__((export_name("qjs_get_prop_uint32")))
+JSValue *qjs_get_prop_uint32(JSValue *obj, unsigned int idx) {
+    JSValue val = JS_GetPropertyUint32(ctx, *obj, idx);
+    return jsvalue_to_heap(val);
+}
+
+__attribute__((export_name("qjs_set_prop_uint32")))
+int qjs_set_prop_uint32(JSValue *obj, unsigned int idx, JSValue *val) {
+    return JS_SetPropertyUint32(ctx, *obj, idx, JS_DupValue(ctx, *val));
+}
+
 /* ---- Function Calls ---- */
 
 __attribute__((export_name("qjs_call")))
@@ -195,6 +326,23 @@ JSValue *qjs_call(JSValue *func, JSValue *this_val, int argc, JSValue **argv) {
     JSValue result = JS_Call(ctx, *func, *this_val, argc, args);
     free(args);
     return jsvalue_to_heap(result);
+}
+
+/* ---- Host Function Registration ---- */
+
+/*
+ * Create a new QuickJS function that dispatches to the host callback
+ * identified by func_id. When called from QuickJS code, this function
+ * will invoke the host_call import with the given func_id.
+ */
+__attribute__((export_name("qjs_new_host_function")))
+JSValue *qjs_new_host_function(const char *name, int name_len, int func_id, int arg_count) {
+    (void)name_len;
+    JSValue func_id_val = JS_NewInt32(ctx, func_id);
+    JSValue func = JS_NewCFunctionData2(ctx, host_callback_trampoline,
+                                         name, arg_count, 0, 1, &func_id_val);
+    JS_FreeValue(ctx, func_id_val);
+    return jsvalue_to_heap(func);
 }
 
 /* ---- Promise Operations ---- */
@@ -245,6 +393,11 @@ JSValue *qjs_get_exception(void) {
 __attribute__((export_name("qjs_throw")))
 JSValue *qjs_throw(JSValue *val) {
     return jsvalue_to_heap(JS_Throw(ctx, JS_DupValue(ctx, *val)));
+}
+
+__attribute__((export_name("qjs_new_error")))
+JSValue *qjs_new_error(void) {
+    return jsvalue_to_heap(JS_NewError(ctx));
 }
 
 /* ---- Snapshot support helpers ---- */

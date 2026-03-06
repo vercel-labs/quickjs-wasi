@@ -9,6 +9,10 @@
 
 import { createWasiShim } from './wasi-shim.ts';
 
+// ---- Type for host callback functions ----
+
+export type HostFunction = (this_val: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
+
 // ---- WASM Export Types ----
 
 interface QuickJSExports {
@@ -40,6 +44,16 @@ interface QuickJSExports {
   qjs_typeof(valPtr: number): number;
   qjs_is_exception(valPtr: number): number;
   qjs_is_undefined(valPtr: number): number;
+  qjs_is_null(valPtr: number): number;
+  qjs_is_bool(valPtr: number): number;
+  qjs_is_number(valPtr: number): number;
+  qjs_is_string(valPtr: number): number;
+  qjs_is_object(valPtr: number): number;
+  qjs_is_array(valPtr: number): number;
+  qjs_is_function(valPtr: number): number;
+  qjs_is_error(valPtr: number): number;
+  qjs_is_promise(valPtr: number): number;
+  qjs_get_bool(valPtr: number): number;
 
   // Value management
   qjs_dup_value(valPtr: number): number;
@@ -49,9 +63,14 @@ interface QuickJSExports {
   qjs_get_global(): number;
   qjs_get_prop_string(objPtr: number, namePtr: number): number;
   qjs_set_prop_string(objPtr: number, namePtr: number, valPtr: number): number;
+  qjs_get_prop_uint32(objPtr: number, idx: number): number;
+  qjs_set_prop_uint32(objPtr: number, idx: number, valPtr: number): number;
 
   // Function calls
   qjs_call(funcPtr: number, thisPtr: number, argc: number, argvPtr: number): number;
+
+  // Host function registration
+  qjs_new_host_function(namePtr: number, nameLen: number, funcId: number, argCount: number): number;
 
   // Promise operations
   qjs_new_promise(resolveOutPtr: number, rejectOutPtr: number): number;
@@ -64,6 +83,7 @@ interface QuickJSExports {
 
   // Error handling
   qjs_get_exception(): number;
+  qjs_new_error(): number;
 
   // Snapshot support
   qjs_get_runtime_ptr(): number;
@@ -92,6 +112,19 @@ export interface Snapshot {
   contextPtr: number;
 }
 
+// ---- Deferred promise type ----
+
+export interface Deferred {
+  /** Handle to the QuickJS promise object */
+  promise: JSValueHandle;
+  /** Handle to the resolve function */
+  resolve: JSValueHandle;
+  /** Handle to the reject function */
+  reject: JSValueHandle;
+  /** A host-side Promise that resolves when the QuickJS promise settles */
+  settled: Promise<void>;
+}
+
 // ---- QuickJS VM ----
 
 export class QuickJS {
@@ -102,11 +135,17 @@ export class QuickJS {
   private decoder = new TextDecoder();
   private disposed = false;
 
-  private constructor(
-    module: WebAssembly.Module,
-    instance: WebAssembly.Instance,
-  ) {
+  /** Registry of host callbacks, keyed by integer ID */
+  private hostCallbacks = new Map<number, HostFunction>();
+  private nextCallbackId = 1;
+
+  private constructor(module: WebAssembly.Module) {
     this.module = module;
+    this.instance = null!;
+    this.exports = null!;
+  }
+
+  private setInstance(instance: WebAssembly.Instance) {
     this.instance = instance;
     this.exports = instance.exports as unknown as QuickJSExports;
   }
@@ -115,50 +154,61 @@ export class QuickJS {
    * Create a fresh QuickJS VM instance.
    */
   static async create(wasmInput?: BufferSource | WebAssembly.Module): Promise<QuickJS> {
-    let module: WebAssembly.Module;
-
-    if (wasmInput instanceof WebAssembly.Module) {
-      module = wasmInput;
-    } else if (wasmInput) {
-      module = await WebAssembly.compile(wasmInput);
-    } else {
-      // Default: load from adjacent file
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-      const url = await import('node:url');
-      const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-      const wasmPath = path.resolve(__dirname, '..', 'quickjs.wasm');
-      const buf = fs.readFileSync(wasmPath);
-      module = await WebAssembly.compile(buf);
-    }
-
-    const instance = await QuickJS.instantiate(module);
-    const exports = instance.exports as unknown as QuickJSExports;
+    const module = await QuickJS.resolveModule(wasmInput);
+    const vm = new QuickJS(module);
+    const instance = await QuickJS.instantiate(module, vm);
+    vm.setInstance(instance);
 
     // Initialize the WASI reactor
-    exports._initialize();
+    vm.exports._initialize();
 
     // Initialize QuickJS runtime and context
-    const result = exports.qjs_init();
+    const result = vm.exports.qjs_init();
     if (result !== 0) {
       throw new Error('Failed to initialize QuickJS runtime');
     }
 
-    return new QuickJS(module, instance);
+    return vm;
   }
 
   /**
    * Restore a QuickJS VM from a snapshot.
-   * The restored VM will have all the state from the snapshot, including
-   * pending promises that can be resolved.
    */
   static async restore(snapshot: Snapshot, wasmInput?: BufferSource | WebAssembly.Module): Promise<QuickJS> {
-    let module: WebAssembly.Module;
+    const module = await QuickJS.resolveModule(wasmInput);
+    const vm = new QuickJS(module);
+    const instance = await QuickJS.instantiate(module, vm);
+    vm.setInstance(instance);
 
+    const exportedMemory = vm.exports.memory;
+
+    // Grow the exported memory to match the snapshot if needed
+    const currentPages = exportedMemory.buffer.byteLength / 65536;
+    const neededPages = snapshot.memoryPages;
+    if (neededPages > currentPages) {
+      exportedMemory.grow(neededPages - currentPages);
+    }
+
+    // Copy snapshot data into the module's own memory
+    const dst = new Uint8Array(exportedMemory.buffer);
+    dst.set(snapshot.memory);
+
+    // Set runtime/context pointers (they already exist in the restored memory)
+    vm.exports.qjs_set_runtime_and_context(snapshot.runtimePtr, snapshot.contextPtr);
+
+    // Restore the stack pointer
+    vm.exports.__stack_pointer.value = snapshot.stackPointer;
+
+    return vm;
+  }
+
+  // ---- Internal instantiation helpers ----
+
+  private static async resolveModule(wasmInput?: BufferSource | WebAssembly.Module): Promise<WebAssembly.Module> {
     if (wasmInput instanceof WebAssembly.Module) {
-      module = wasmInput;
+      return wasmInput;
     } else if (wasmInput) {
-      module = await WebAssembly.compile(wasmInput);
+      return WebAssembly.compile(wasmInput);
     } else {
       const fs = await import('node:fs');
       const path = await import('node:path');
@@ -166,40 +216,20 @@ export class QuickJS {
       const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
       const wasmPath = path.resolve(__dirname, '..', 'quickjs.wasm');
       const buf = fs.readFileSync(wasmPath);
-      module = await WebAssembly.compile(buf);
+      return WebAssembly.compile(buf);
     }
-
-    // Create a memory pre-sized to the snapshot
-    const memory = new WebAssembly.Memory({
-      initial: snapshot.memoryPages,
-    });
-
-    // Copy the snapshotted memory in
-    const target = new Uint8Array(memory.buffer);
-    target.set(snapshot.memory);
-
-    // Instantiate with the pre-populated memory
-    const instance = await QuickJS.instantiateWithMemory(module, memory);
-    const exports = instance.exports as unknown as QuickJSExports;
-
-    // IMPORTANT: Do NOT call _initialize() or qjs_init() here!
-    // The runtime and context already exist in the restored memory.
-    // We just need to tell our interface layer where they are.
-    exports.qjs_set_runtime_and_context(snapshot.runtimePtr, snapshot.contextPtr);
-
-    // Restore the stack pointer
-    exports.__stack_pointer.value = snapshot.stackPointer;
-
-    return new QuickJS(module, instance);
   }
 
-  // ---- Internal instantiation helpers ----
-
-  private static async instantiate(module: WebAssembly.Module): Promise<WebAssembly.Instance> {
+  private static async instantiate(module: WebAssembly.Module, vm: QuickJS): Promise<WebAssembly.Instance> {
     let memory: WebAssembly.Memory | null = null;
     const wasiShim = createWasiShim(() => memory!);
 
+    const hostCall = (funcId: number, thisPtr: number, argc: number, argvPtr: number): number => {
+      return vm.handleHostCall(funcId, thisPtr, argc, argvPtr);
+    };
+
     const instance = await WebAssembly.instantiate(module, {
+      env: { host_call: hostCall },
       wasi_snapshot_preview1: wasiShim,
     });
 
@@ -207,38 +237,42 @@ export class QuickJS {
     return instance;
   }
 
-  private static async instantiateWithMemory(
-    module: WebAssembly.Module,
-    memory: WebAssembly.Memory,
-  ): Promise<WebAssembly.Instance> {
-    const wasiShim = createWasiShim(() => memory);
-
-    // We need to check if the module imports memory or exports it.
-    // WASI reactor modules typically export their own memory.
-    // But we want to inject our pre-filled memory.
-    // The trick: WASI modules export `memory`. We can't inject it directly
-    // if the module defines its own memory. Instead, we'll instantiate normally
-    // and then copy the snapshot data into the exported memory.
-
-    const instance = await WebAssembly.instantiate(module, {
-      wasi_snapshot_preview1: wasiShim,
-    });
-
-    const exportedMemory = (instance.exports as any).memory as WebAssembly.Memory;
-
-    // Grow the exported memory to match the snapshot if needed
-    const currentPages = exportedMemory.buffer.byteLength / 65536;
-    const neededPages = memory.buffer.byteLength / 65536;
-    if (neededPages > currentPages) {
-      exportedMemory.grow(neededPages - currentPages);
+  /**
+   * Called from WASM when a host function is invoked from QuickJS code.
+   */
+  private handleHostCall(funcId: number, thisPtr: number, argc: number, argvPtr: number): number {
+    const callback = this.hostCallbacks.get(funcId);
+    if (!callback) {
+      // Return undefined if callback not found (e.g. after restore without re-registration)
+      return this.exports.qjs_get_undefined();
     }
 
-    // Copy snapshot data into the module's own memory
-    const src = new Uint8Array(memory.buffer);
-    const dst = new Uint8Array(exportedMemory.buffer);
-    dst.set(src);
+    // Wrap the this pointer
+    const thisHandle = new JSValueHandle(this, thisPtr);
 
-    return instance;
+    // Read the argv pointers from WASM memory
+    const args: JSValueHandle[] = [];
+    if (argc > 0 && argvPtr !== 0) {
+      const view = new DataView(this.exports.memory.buffer);
+      for (let i = 0; i < argc; i++) {
+        const argPtr = view.getUint32(argvPtr + i * 4, true);
+        args.push(new JSValueHandle(this, argPtr));
+      }
+    }
+
+    try {
+      const result = callback.call(undefined, thisHandle, ...args);
+      // Dup the result so the C side can own it
+      return this.exports.qjs_dup_value(result.ptr);
+    } catch (err) {
+      // If the host callback throws, create an error in QuickJS
+      const errStr = err instanceof Error ? err.message : String(err);
+      const errHandle = this.newError(errStr);
+      // Return the error as an exception
+      const excPtr = this.exports.qjs_dup_value(errHandle.ptr);
+      errHandle.dispose();
+      return excPtr;
+    }
   }
 
   // ---- String helpers ----
@@ -246,11 +280,11 @@ export class QuickJS {
   /** Write a JS string into WASM memory, returning the pointer. Caller must free. */
   private writeString(str: string): { ptr: number; len: number } {
     const encoded = this.encoder.encode(str);
-    const ptr = this.exports.wasm_malloc(encoded.length + 1); // +1 for null terminator
+    const ptr = this.exports.wasm_malloc(encoded.length + 1);
     if (ptr === 0) throw new Error('wasm_malloc failed');
     const mem = new Uint8Array(this.exports.memory.buffer);
     mem.set(encoded, ptr);
-    mem[ptr + encoded.length] = 0; // null terminator
+    mem[ptr + encoded.length] = 0;
     return { ptr, len: encoded.length };
   }
 
@@ -287,7 +321,6 @@ export class QuickJS {
     while (this.exports.qjs_is_job_pending()) {
       const result = this.exports.qjs_execute_pending_job();
       if (result < 0) {
-        // Error executing job
         const exc = this.getException();
         throw new Error(`Job execution error: ${exc.toString()}`);
       }
@@ -332,6 +365,14 @@ export class QuickJS {
   }
 
   /**
+   * Create a new QuickJS array value.
+   */
+  newArray(): JSValueHandle {
+    this.assertNotDisposed();
+    return new JSValueHandle(this, this.exports.qjs_new_array());
+  }
+
+  /**
    * Get undefined.
    */
   getUndefined(): JSValueHandle {
@@ -340,17 +381,57 @@ export class QuickJS {
   }
 
   /**
-   * Create a new promise, returning the promise handle and resolve/reject functions.
+   * Get null.
    */
-  newPromise(): { promise: JSValueHandle; resolve: JSValueHandle; reject: JSValueHandle } {
+  getNull(): JSValueHandle {
     this.assertNotDisposed();
-    // Allocate space for the output pointers (2 x i32 = 8 bytes)
+    return new JSValueHandle(this, this.exports.qjs_get_null());
+  }
+
+  /**
+   * Get true.
+   */
+  getTrue(): JSValueHandle {
+    this.assertNotDisposed();
+    return new JSValueHandle(this, this.exports.qjs_get_true());
+  }
+
+  /**
+   * Get false.
+   */
+  getFalse(): JSValueHandle {
+    this.assertNotDisposed();
+    return new JSValueHandle(this, this.exports.qjs_get_false());
+  }
+
+  /**
+   * Create a new QuickJS function backed by a host callback.
+   *
+   * When the function is called inside QuickJS, the host callback is invoked
+   * with the `this` value and arguments as JSValueHandles.
+   */
+  newFunction(name: string, fn: HostFunction): JSValueHandle {
+    this.assertNotDisposed();
+    const funcId = this.nextCallbackId++;
+    this.hostCallbacks.set(funcId, fn);
+
+    const { ptr: namePtr, len: nameLen } = this.writeString(name);
+    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, funcId, 0);
+    this.exports.wasm_free(namePtr);
+    return new JSValueHandle(this, resultPtr);
+  }
+
+  /**
+   * Create a new promise, returning the promise handle, resolve/reject functions,
+   * and a host-side Promise that settles when the QuickJS promise settles.
+   */
+  newPromise(): Deferred {
+    this.assertNotDisposed();
     const resolveOutPtr = this.exports.wasm_malloc(4);
     const rejectOutPtr = this.exports.wasm_malloc(4);
 
     const promisePtr = this.exports.qjs_new_promise(resolveOutPtr, rejectOutPtr);
 
-    // Read back the pointers to resolve/reject JSValue handles
     const view = new DataView(this.exports.memory.buffer);
     const resolvePtr = view.getUint32(resolveOutPtr, true);
     const rejectPtr = view.getUint32(rejectOutPtr, true);
@@ -358,11 +439,41 @@ export class QuickJS {
     this.exports.wasm_free(resolveOutPtr);
     this.exports.wasm_free(rejectOutPtr);
 
-    return {
-      promise: new JSValueHandle(this, promisePtr),
-      resolve: new JSValueHandle(this, resolvePtr),
-      reject: new JSValueHandle(this, rejectPtr),
-    };
+    const promise = new JSValueHandle(this, promisePtr);
+    const resolve = new JSValueHandle(this, resolvePtr);
+    const reject = new JSValueHandle(this, rejectPtr);
+
+    // Create a host-side Promise that resolves when the QuickJS promise settles.
+    // We attach a .then/.catch handler on the QuickJS side that calls back to the host.
+    let settledResolve: () => void;
+    const settled = new Promise<void>((res) => {
+      settledResolve = res;
+    });
+
+    // Register a temporary host callback that resolves the settled promise
+    const settleCallbackId = this.nextCallbackId++;
+    this.hostCallbacks.set(settleCallbackId, () => {
+      settledResolve();
+      this.hostCallbacks.delete(settleCallbackId);
+      return this.getUndefined();
+    });
+
+    // Create a host function for the settle callback and attach it
+    const { ptr: onSettleName, len: onSettleNameLen } = this.writeString('__onSettle');
+    const onSettleFn = new JSValueHandle(this, this.exports.qjs_new_host_function(onSettleName, onSettleNameLen, settleCallbackId, 0));
+    this.exports.wasm_free(onSettleName);
+
+    // Attach .then(onSettle, onSettle) to the promise
+    const thenFn = promise.getProp('then');
+    const undef = this.getUndefined();
+    const onSettleDup = onSettleFn.dup();
+    this.callFunction(thenFn, promise, onSettleFn, onSettleDup).dispose();
+    thenFn.dispose();
+    undef.dispose();
+    onSettleFn.dispose();
+    onSettleDup.dispose();
+
+    return { promise, resolve, reject, settled };
   }
 
   /**
@@ -372,7 +483,6 @@ export class QuickJS {
     this.assertNotDisposed();
     const argc = args.length;
 
-    // Build the argv array in WASM memory (array of pointers)
     let argvPtr = 0;
     if (argc > 0) {
       argvPtr = this.exports.wasm_malloc(argc * 4);
@@ -397,12 +507,146 @@ export class QuickJS {
     return new JSValueHandle(this, this.exports.qjs_get_exception());
   }
 
+  /**
+   * Create a new QuickJS Error object with the given message.
+   */
+  newError(message: string): JSValueHandle {
+    this.assertNotDisposed();
+    const errPtr = this.exports.qjs_new_error();
+    const errHandle = new JSValueHandle(this, errPtr);
+    const msgHandle = this.newString(message);
+    errHandle.setProp('message', msgHandle);
+    msgHandle.dispose();
+    return errHandle;
+  }
+
+  /**
+   * Get the typeof a handle as a string.
+   */
+  typeof(handle: JSValueHandle): string {
+    this.assertNotDisposed();
+    const e = this.exports;
+    if (e.qjs_is_undefined(handle.ptr)) return 'undefined';
+    if (e.qjs_is_null(handle.ptr)) return 'object'; // typeof null === 'object'
+    if (e.qjs_is_bool(handle.ptr)) return 'boolean';
+    if (e.qjs_is_number(handle.ptr)) return 'number';
+    if (e.qjs_is_string(handle.ptr)) return 'string';
+    if (e.qjs_is_function(handle.ptr)) return 'function';
+    if (e.qjs_is_object(handle.ptr)) return 'object';
+    return 'unknown';
+  }
+
+  /**
+   * Convert a QuickJS handle to a host JavaScript value.
+   * Handles strings, numbers, booleans, null, undefined, arrays, and plain objects.
+   * Functions and other complex types are returned as-is (the handle).
+   */
+  dump(handle: JSValueHandle): unknown {
+    this.assertNotDisposed();
+    const e = this.exports;
+
+    if (e.qjs_is_undefined(handle.ptr)) return undefined;
+    if (e.qjs_is_null(handle.ptr)) return null;
+    if (e.qjs_is_bool(handle.ptr)) return e.qjs_get_bool(handle.ptr) !== 0;
+    if (e.qjs_is_number(handle.ptr)) return e.qjs_get_float64(handle.ptr);
+    if (e.qjs_is_string(handle.ptr)) return handle.toString();
+
+    if (e.qjs_is_exception(handle.ptr)) {
+      const exc = this.getException();
+      const msg = exc.toString();
+      exc.dispose();
+      return new Error(msg);
+    }
+
+    if (e.qjs_is_array(handle.ptr)) {
+      const lenHandle = handle.getProp('length');
+      const len = e.qjs_get_float64(lenHandle.ptr);
+      lenHandle.dispose();
+      const arr: unknown[] = [];
+      for (let i = 0; i < len; i++) {
+        const elemPtr = e.qjs_get_prop_uint32(handle.ptr, i);
+        const elemHandle = new JSValueHandle(this, elemPtr);
+        arr.push(this.dump(elemHandle));
+        elemHandle.dispose();
+      }
+      return arr;
+    }
+
+    if (e.qjs_is_error(handle.ptr)) {
+      const msgHandle = handle.getProp('message');
+      const msg = msgHandle.toString();
+      msgHandle.dispose();
+      return new Error(msg);
+    }
+
+    if (e.qjs_is_object(handle.ptr)) {
+      // For plain objects, we can't easily enumerate keys from C.
+      // Use JSON.stringify as a workaround for the PoC.
+      const jsonResult = this.evalCode(`(v) => JSON.stringify(v)`);
+      if (jsonResult.isException) {
+        jsonResult.dispose();
+        return '[object Object]';
+      }
+      const undef = this.getUndefined();
+      const jsonStr = this.callFunction(jsonResult, undef, handle);
+      jsonResult.dispose();
+      undef.dispose();
+      if (jsonStr.isException || this.exports.qjs_is_undefined(jsonStr.ptr)) {
+        jsonStr.dispose();
+        return '[object Object]';
+      }
+      const str = jsonStr.toString();
+      jsonStr.dispose();
+      try {
+        return JSON.parse(str);
+      } catch {
+        return str;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Convert a host JavaScript value to a QuickJS handle.
+   */
+  hostToHandle(value: unknown): JSValueHandle {
+    this.assertNotDisposed();
+    if (value === undefined) return this.getUndefined();
+    if (value === null) return this.getNull();
+    if (value === true) return this.getTrue();
+    if (value === false) return this.getFalse();
+    if (typeof value === 'number') return this.newNumber(value);
+    if (typeof value === 'string') return this.newString(value);
+
+    if (Array.isArray(value)) {
+      const arr = this.newArray();
+      for (let i = 0; i < value.length; i++) {
+        const elemHandle = this.hostToHandle(value[i]);
+        const view = new DataView(this.exports.memory.buffer);
+        this.exports.qjs_set_prop_uint32(arr.ptr, i, elemHandle.ptr);
+        elemHandle.dispose();
+      }
+      return arr;
+    }
+
+    if (typeof value === 'object' && value !== null) {
+      const obj = this.newObject();
+      for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+        const valHandle = this.hostToHandle(val);
+        obj.setProp(key, valHandle);
+        valHandle.dispose();
+      }
+      return obj;
+    }
+
+    return this.getUndefined();
+  }
+
   // ---- Snapshot / Restore ----
 
   /**
    * Snapshot the entire VM state.
-   * The returned snapshot can be used to restore the VM in a completely
-   * fresh WASM instance, preserving all JS state including pending promises.
    */
   snapshot(): Snapshot {
     this.assertNotDisposed();
@@ -412,7 +656,7 @@ export class QuickJS {
     const memoryPages = memory.buffer.byteLength / 65536;
 
     return {
-      memory: memoryBytes.slice(), // Copy the entire linear memory
+      memory: memoryBytes.slice(),
       stackPointer: this.exports.__stack_pointer.value as number,
       memoryPages,
       runtimePtr: this.exports.qjs_get_runtime_ptr(),
@@ -421,9 +665,19 @@ export class QuickJS {
   }
 
   /**
+   * Re-register a host callback after restoring from a snapshot.
+   * The func_id must match the ID that was used before the snapshot.
+   */
+  registerHostCallback(funcId: number, fn: HostFunction): void {
+    this.hostCallbacks.set(funcId, fn);
+    // Ensure the next allocated ID doesn't collide
+    if (funcId >= this.nextCallbackId) {
+      this.nextCallbackId = funcId + 1;
+    }
+  }
+
+  /**
    * Dispose the VM, freeing all resources.
-   * If leakCheck is false, the runtime is abandoned without freeing
-   * (useful when you don't need clean shutdown, e.g. after snapshotting).
    */
   dispose(leakCheck: boolean = true): void {
     if (!this.disposed) {
@@ -433,11 +687,8 @@ export class QuickJS {
           this.exports.qjs_destroy();
         } catch {
           // QuickJS may assert if there are leaked objects in debug builds.
-          // For the PoC, we swallow this - proper handle tracking will fix it.
         }
       }
-      // If leakCheck is false, we just mark as disposed without calling qjs_destroy.
-      // The WASM instance will be GC'd by the host JS engine.
     }
   }
 
@@ -474,11 +725,10 @@ export class QuickJS {
 
 /**
  * A handle to a JSValue inside the QuickJS WASM instance.
- * The handle holds a pointer to a heap-allocated JSValue in WASM memory.
  */
 export class JSValueHandle {
   private vm: QuickJS;
-  /** @internal - pointer to heap-allocated JSValue in WASM memory */
+  /** @internal */
   readonly ptr: number;
   private disposed = false;
 
@@ -487,15 +737,16 @@ export class JSValueHandle {
     this.ptr = ptr;
   }
 
-  /**
-   * Get the JS typeof tag.
-   */
   get isException(): boolean {
     return this.vm._getExports().qjs_is_exception(this.ptr) !== 0;
   }
 
   get isUndefined(): boolean {
     return this.vm._getExports().qjs_is_undefined(this.ptr) !== 0;
+  }
+
+  get isNull(): boolean {
+    return this.vm._getExports().qjs_is_null(this.ptr) !== 0;
   }
 
   /**
@@ -532,7 +783,7 @@ export class JSValueHandle {
   }
 
   /**
-   * Extract the value as a string.
+   * Extract the value as a string (calls JS_ToCString - works on any value).
    */
   toString(): string {
     const cstrPtr = this.vm._getExports().qjs_get_string(this.ptr);
@@ -540,6 +791,17 @@ export class JSValueHandle {
     const str = this.vm._readCString(cstrPtr);
     this.vm._getExports().qjs_free_cstring(cstrPtr);
     return str;
+  }
+
+  /**
+   * Use this handle, then dispose it. Returns the callback's return value.
+   */
+  consume<T>(fn: (handle: JSValueHandle) => T): T {
+    try {
+      return fn(this);
+    } finally {
+      this.dispose();
+    }
   }
 
   /**
