@@ -25,56 +25,43 @@ pnpm test     # runs all 44 tests
 
 ### Basic Evaluation
 
+Both `QuickJS` and `JSValueHandle` implement `Symbol.dispose`, so you can use `using` declarations for automatic cleanup:
+
 ```typescript
 import { QuickJS } from 'quickjs-wasm';
 
-const vm = await QuickJS.create(wasmBytes);
+{
+  using vm = await QuickJS.create(wasmBytes);
 
-// Evaluate code — returns a JSValueHandle
-const result = vm.unwrapResult(vm.evalCode('1 + 2'));
-console.log(result.toNumber()); // 3
-result.dispose();
-
-// Use cached properties for common values
-console.log(vm.dump(vm.true));      // true
-console.log(vm.dump(vm.null));      // null
-console.log(vm.dump(vm.undefined)); // undefined
-
-vm.dispose();
+  // Evaluate code — handles are auto-disposed with `using`
+  using result = vm.unwrapResult(vm.evalCode('1 + 2'));
+  console.log(result.toNumber()); // 3
+} // vm and result are automatically disposed here
 ```
 
 ### Working with Values
 
 ```typescript
-const vm = await QuickJS.create(wasmBytes);
+using vm = await QuickJS.create(wasmBytes);
 
-// Create values
-const str = vm.newString('hello');
-const num = vm.newNumber(42);
-const big = vm.newBigInt(9007199254740993n);
-const obj = vm.newObject();
-const arr = vm.newArray();
+// Create values — `using` ensures they're disposed at end of scope
+{
+  using str = vm.newString('hello');
+  using num = vm.newNumber(42);
+  using big = vm.newBigInt(9007199254740993n);
+  vm.setProp(vm.global, 'message', str);
+}
 
-// Set properties on the global object
-vm.setProp(vm.global, 'message', str);
-vm.unwrapResult(vm.evalCode('message')).consume(h => {
-  console.log(h.toString()); // "hello"
-});
+// Read back the value
+using msg = vm.unwrapResult(vm.evalCode('message'));
+console.log(msg.toString()); // "hello"
 
 // Convert host values to QuickJS handles (and back)
-const handle = vm.hostToHandle({ x: 1, y: [2, 3] });
+using handle = vm.hostToHandle({ x: 1, y: [2, 3] });
 const dumped = vm.dump(handle); // { x: 1, y: [2, 3] }
 
-// Use consume() for automatic disposal
+// consume() is still useful for inline one-liners
 const value = vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
-
-str.dispose();
-num.dispose();
-big.dispose();
-obj.dispose();
-arr.dispose();
-handle.dispose();
-vm.dispose();
 ```
 
 ### Host Functions
@@ -82,18 +69,18 @@ vm.dispose();
 Register JavaScript functions backed by host (Node.js) callbacks:
 
 ```typescript
-const vm = await QuickJS.create(wasmBytes);
+using vm = await QuickJS.create(wasmBytes);
 
 // The first argument to the callback is always `this`
-const add = vm.newFunction('add', (_this, ...args) => {
-  return vm.newNumber(args[0].toNumber() + args[1].toNumber());
-});
-vm.setProp(vm.global, 'add', add);
-add.dispose();
+{
+  using add = vm.newFunction('add', (_this, ...args) => {
+    return vm.newNumber(args[0].toNumber() + args[1].toNumber());
+  });
+  vm.setProp(vm.global, 'add', add);
+}
 
-const result = vm.unwrapResult(vm.evalCode('add(3, 4)'));
+using result = vm.unwrapResult(vm.evalCode('add(3, 4)'));
 console.log(result.toNumber()); // 7
-result.dispose();
 ```
 
 ### Promises and Async Host Functions
@@ -101,35 +88,36 @@ result.dispose();
 Bridge async host operations into the QuickJS sandbox:
 
 ```typescript
-const vm = await QuickJS.create(wasmBytes);
+using vm = await QuickJS.create(wasmBytes);
 
 // Create an async host function that returns a promise to QuickJS
-const dnsResolve = vm.newFunction('dnsResolve', (_this, ...args) => {
-  const hostname = args[0].toString();
-  const deferred = vm.newPromise();
+{
+  using dnsResolve = vm.newFunction('dnsResolve', (_this, ...args) => {
+    const hostname = args[0].toString();
+    const deferred = vm.newPromise();
 
-  // Do real async work on the host side
-  dns.resolve4(hostname).then(
-    (addresses) => {
-      deferred.resolve(vm.newString(addresses[0]));
-      vm.executePendingJobs(); // drain the QuickJS job queue
-    },
-    (err) => {
-      deferred.reject(vm.newError(err));
-      vm.executePendingJobs();
-    }
-  );
+    // Do real async work on the host side
+    dns.resolve4(hostname).then(
+      (addresses) => {
+        deferred.resolve(vm.newString(addresses[0]));
+        vm.executePendingJobs(); // drain the QuickJS job queue
+      },
+      (err) => {
+        deferred.reject(vm.newError(err));
+        vm.executePendingJobs();
+      }
+    );
 
-  return deferred.handle; // return the QuickJS promise
-});
-vm.setProp(vm.global, 'dnsResolve', dnsResolve);
-dnsResolve.dispose();
+    return deferred.handle; // return the QuickJS promise
+  });
+  vm.setProp(vm.global, 'dnsResolve', dnsResolve);
+}
 ```
 
 ### Error Handling
 
 ```typescript
-const vm = await QuickJS.create(wasmBytes);
+using vm = await QuickJS.create(wasmBytes);
 
 // unwrapResult() throws a host Error if the eval/call produced an exception
 try {
@@ -141,9 +129,10 @@ try {
 }
 
 // Create errors from host Error objects (preserves name, message, stack)
-const errHandle = vm.newError(new RangeError('out of bounds'));
-vm.setProp(vm.global, 'hostError', errHandle);
-errHandle.dispose();
+{
+  using errHandle = vm.newError(new RangeError('out of bounds'));
+  vm.setProp(vm.global, 'hostError', errHandle);
+}
 ```
 
 ### Snapshot and Restore
@@ -151,47 +140,46 @@ errHandle.dispose();
 The key differentiator — snapshot the entire VM state and restore it later:
 
 ```typescript
-const vm = await QuickJS.create(wasmBytes);
+let snapshot: Snapshot;
 
-// Build up some state, including a pending promise
-vm.unwrapResult(vm.evalCode(`
-  globalThis.counter = 0;
+{
+  using vm = await QuickJS.create(wasmBytes);
 
-  // Create a promise that will be resolved later
-  let __resolve;
-  globalThis.pendingWork = new Promise(r => { __resolve = r; });
-  globalThis.__resolve = __resolve;
+  // Build up some state, including a pending promise
+  vm.unwrapResult(vm.evalCode(`
+    globalThis.counter = 0;
 
-  globalThis.pendingWork.then(value => {
-    globalThis.counter = value;
-  });
-`)).dispose();
-vm.executePendingJobs();
+    let __resolve;
+    globalThis.pendingWork = new Promise(r => { __resolve = r; });
+    globalThis.__resolve = __resolve;
 
-// Take a snapshot — this is a plain object with a Uint8Array
-const snapshot = vm.snapshot();
-// snapshot.memory can be persisted to S3, Redis, a database, etc.
-vm.dispose(false);
+    globalThis.pendingWork.then(value => {
+      globalThis.counter = value;
+    });
+  `)).dispose();
+  vm.executePendingJobs();
+
+  // Take a snapshot — this is a plain object with a Uint8Array
+  snapshot = vm.snapshot();
+  // snapshot.memory can be persisted to S3, Redis, a database, etc.
+}
 
 // ... time passes, maybe a different process entirely ...
 
-// Restore the VM from the snapshot
-const vm2 = await QuickJS.restore(snapshot, wasmBytes);
+{
+  // Restore the VM from the snapshot
+  using vm = await QuickJS.restore(snapshot, wasmBytes);
 
-// The pending promise still exists — resolve it
-const resolve = vm2.global.getProp('__resolve');
-const arg = vm2.newNumber(42);
-vm2.callFunction(resolve, vm2.undefined, arg).dispose();
-vm2.executePendingJobs();
-arg.dispose();
-resolve.dispose();
+  // The pending promise still exists — resolve it
+  using resolve = vm.global.getProp('__resolve');
+  using arg = vm.newNumber(42);
+  vm.callFunction(resolve, vm.undefined, arg).dispose();
+  vm.executePendingJobs();
 
-// The .then handler ran in the restored VM
-const counter = vm2.global.getProp('counter');
-console.log(counter.toNumber()); // 42
-counter.dispose();
-
-vm2.dispose(false);
+  // The .then handler ran in the restored VM
+  using counter = vm.global.getProp('counter');
+  console.log(counter.toNumber()); // 42
+}
 ```
 
 ### Host Callbacks After Restore
@@ -199,45 +187,46 @@ vm2.dispose(false);
 Host functions registered with `newFunction()` are assigned integer IDs that get baked into the snapshot. After restoring, re-register the callbacks:
 
 ```typescript
-// Before snapshot
-const vm1 = await QuickJS.create(wasmBytes);
-const fn = vm1.newFunction('hostAdd', (_this, ...args) => {
-  return vm1.newNumber(args[0].toNumber() + args[1].toNumber());
-});
-// fn was assigned callback ID 1 (first registered callback)
-vm1.setProp(vm1.global, 'hostAdd', fn);
-fn.dispose();
+let snapshot: Snapshot;
 
-const snapshot = vm1.snapshot();
-vm1.dispose(false);
+{
+  using vm = await QuickJS.create(wasmBytes);
+  // fn is assigned callback ID 1 (first registered callback)
+  using fn = vm.newFunction('hostAdd', (_this, ...args) => {
+    return vm.newNumber(args[0].toNumber() + args[1].toNumber());
+  });
+  vm.setProp(vm.global, 'hostAdd', fn);
+  snapshot = vm.snapshot();
+}
 
-// After restore — re-register with the same ID
-const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-vm2.registerHostCallback(1, (_this, ...args) => {
-  return vm2.newNumber(args[0].toNumber() + args[1].toNumber());
-});
+{
+  // After restore — re-register with the same ID
+  using vm = await QuickJS.restore(snapshot, wasmBytes);
+  vm.registerHostCallback(1, (_this, ...args) => {
+    return vm.newNumber(args[0].toNumber() + args[1].toNumber());
+  });
 
-// hostAdd() works again
-const result = vm2.unwrapResult(vm2.evalCode('hostAdd(100, 200)'));
-console.log(result.toNumber()); // 300
-result.dispose();
-vm2.dispose(false);
+  // hostAdd() works again
+  using result = vm.unwrapResult(vm.evalCode('hostAdd(100, 200)'));
+  console.log(result.toNumber()); // 300
+}
 ```
 
 ### Sandboxed Execution (PAC Files)
 
-quickjs-wasm can be used as a drop-in sandbox for running untrusted code, similar to how [pac-resolver](https://github.com/nicolo-ribaudo/nicolo-ribaudo) uses quickjs-emscripten:
+quickjs-wasm can be used as a drop-in sandbox for running untrusted code, similar to how [pac-resolver](https://github.com/TooTallNate/proxy-agents/tree/main/packages/pac-resolver) uses quickjs-emscripten:
 
 ```typescript
-const vm = await QuickJS.create(wasmBytes);
+using vm = await QuickJS.create(wasmBytes);
 
 // Inject sandbox functions
-const isPlainHostName = vm.newFunction('isPlainHostName', (_this, ...args) => {
-  const host = args[0].toString();
-  return host.includes('.') ? vm.false : vm.true;
-});
-vm.setProp(vm.global, 'isPlainHostName', isPlainHostName);
-isPlainHostName.dispose();
+{
+  using isPlainHostName = vm.newFunction('isPlainHostName', (_this, ...args) => {
+    const host = args[0].toString();
+    return host.includes('.') ? vm.false : vm.true;
+  });
+  vm.setProp(vm.global, 'isPlainHostName', isPlainHostName);
+}
 
 // Evaluate untrusted PAC code
 vm.unwrapResult(vm.evalCode(`
@@ -248,17 +237,13 @@ vm.unwrapResult(vm.evalCode(`
 `)).dispose();
 
 // Call it
-const fn = vm.global.getProp('FindProxyForURL');
-const url = vm.newString('http://intranet/');
-const host = vm.newString('intranet');
-const result = vm.unwrapResult(vm.callFunction(fn, vm.undefined, url, host));
-console.log(result.toString()); // "DIRECT"
-
-result.dispose();
-fn.dispose();
-url.dispose();
-host.dispose();
-vm.dispose(false);
+{
+  using fn = vm.global.getProp('FindProxyForURL');
+  using url = vm.newString('http://intranet/');
+  using host = vm.newString('intranet');
+  using result = vm.unwrapResult(vm.callFunction(fn, vm.undefined, url, host));
+  console.log(result.toString()); // "DIRECT"
+}
 ```
 
 ## API Reference
@@ -289,6 +274,7 @@ vm.dispose(false);
 | `vm.snapshot()` | Capture the entire VM state |
 | `vm.registerHostCallback(id, fn)` | Re-register a host callback after restore |
 | `vm.dispose(leakCheck?)` | Free the VM |
+| `vm[Symbol.dispose]()` | Same as `dispose()` — enables `using vm = ...` |
 
 ### Cached Properties
 
@@ -318,6 +304,7 @@ These are singleton handles — do **not** dispose them:
 | `handle.consume(fn)` | Call `fn(handle)`, then dispose, return result |
 | `handle.dup()` | Duplicate the handle (increment refcount) |
 | `handle.dispose()` | Free the handle |
+| `handle[Symbol.dispose]()` | Same as `dispose()` — enables `using handle = ...` |
 
 ### `Deferred` (from `vm.newPromise()`)
 

@@ -19,42 +19,35 @@ beforeAll(() => {
 
 describe('Basic Eval', () => {
   it('should evaluate arithmetic', async () => {
-    const vm = await QuickJS.create(wasmBytes);
-    const result = vm.evalCode('1 + 2');
+    using vm = await QuickJS.create(wasmBytes);
+    using result = vm.evalCode('1 + 2');
     expect(result.isException).toBe(false);
     expect(result.toNumber()).toBe(3);
-    result.dispose();
-    vm.dispose();
   });
 
   it('should evaluate string concatenation', async () => {
-    const vm = await QuickJS.create(wasmBytes);
-    const result = vm.evalCode('"hello" + " " + "world"');
+    using vm = await QuickJS.create(wasmBytes);
+    using result = vm.evalCode('"hello" + " " + "world"');
     expect(result.toString()).toBe('hello world');
-    result.dispose();
-    vm.dispose();
   });
 });
 
 describe('unwrapResult', () => {
   it('should return the handle on success', async () => {
-    const vm = await QuickJS.create(wasmBytes);
-    const result = vm.unwrapResult(vm.evalCode('42'));
+    using vm = await QuickJS.create(wasmBytes);
+    using result = vm.unwrapResult(vm.evalCode('42'));
     expect(result.toNumber()).toBe(42);
-    result.dispose();
-    vm.dispose(false);
   });
 
   it('should throw on exception', async () => {
-    const vm = await QuickJS.create(wasmBytes);
+    using vm = await QuickJS.create(wasmBytes);
     expect(() => {
       vm.unwrapResult(vm.evalCode('throw new Error("boom")'));
     }).toThrow('boom');
-    vm.dispose(false);
   });
 
   it('should throw with error name and message preserved', async () => {
-    const vm = await QuickJS.create(wasmBytes);
+    using vm = await QuickJS.create(wasmBytes);
     try {
       vm.unwrapResult(vm.evalCode('throw new TypeError("bad type")'));
       expect.unreachable();
@@ -63,31 +56,25 @@ describe('unwrapResult', () => {
       expect(err.name).toBe('TypeError');
       expect(err.message).toBe('bad type');
     }
-    vm.dispose(false);
   });
 });
 
 describe('Cached Properties', () => {
   it('should provide cached vm.global', async () => {
-    const vm = await QuickJS.create(wasmBytes);
-    const g1 = vm.global;
-    const g2 = vm.global;
-    expect(g1).toBe(g2); // same object reference
-    vm.dispose(false);
+    using vm = await QuickJS.create(wasmBytes);
+    expect(vm.global).toBe(vm.global);
   });
 
   it('should provide cached vm.undefined, vm.null, vm.true, vm.false', async () => {
-    const vm = await QuickJS.create(wasmBytes);
+    using vm = await QuickJS.create(wasmBytes);
     expect(vm.undefined.isUndefined).toBe(true);
     expect(vm.null.isNull).toBe(true);
     expect(vm.dump(vm.true)).toBe(true);
     expect(vm.dump(vm.false)).toBe(false);
-    // Should be same reference on repeated access
     expect(vm.undefined).toBe(vm.undefined);
     expect(vm.null).toBe(vm.null);
     expect(vm.true).toBe(vm.true);
     expect(vm.false).toBe(vm.false);
-    vm.dispose(false);
   });
 });
 
@@ -346,9 +333,43 @@ describe('typeof', () => {
 
 describe('handle.consume()', () => {
   it('should use-then-dispose a handle', async () => {
-    const vm = await QuickJS.create(wasmBytes);
+    using vm = await QuickJS.create(wasmBytes);
     expect(vm.evalCode('1 + 2').consume(h => h.toNumber())).toBe(3);
-    vm.dispose(false);
+  });
+});
+
+describe('Symbol.dispose', () => {
+  it('should auto-dispose JSValueHandle with using', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    {
+      using result = vm.unwrapResult(vm.evalCode('1 + 2'));
+      expect(result.toNumber()).toBe(3);
+    }
+    // result is now disposed — vm should still be usable
+    using result2 = vm.unwrapResult(vm.evalCode('3 + 4'));
+    expect(result2.toNumber()).toBe(7);
+  });
+
+  it('should auto-dispose QuickJS VM with using', async () => {
+    let leaked: QuickJS;
+    {
+      using vm = await QuickJS.create(wasmBytes);
+      leaked = vm;
+      using result = vm.unwrapResult(vm.evalCode('"alive"'));
+      expect(result.toString()).toBe('alive');
+    }
+    // vm is now disposed
+    expect(() => leaked.evalCode('1')).toThrow('disposed');
+  });
+
+  it('should work with multiple handles in sequence', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const results: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      using handle = vm.unwrapResult(vm.evalCode(`${i} * ${i}`));
+      results.push(handle.toNumber());
+    }
+    expect(results).toEqual([0, 1, 4, 9, 16]);
   });
 });
 

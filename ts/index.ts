@@ -887,6 +887,20 @@ export class QuickJS {
     }
   }
 
+  /**
+   * Support for `using` declarations (Explicit Resource Management).
+   * Automatically disposes the VM when it goes out of scope.
+   *
+   * ```typescript
+   * using vm = await QuickJS.create(wasmBytes);
+   * vm.evalCode('1 + 2');
+   * // vm is automatically disposed here
+   * ```
+   */
+  [Symbol.dispose](): void {
+    this.dispose();
+  }
+
   private assertNotDisposed(): void {
     if (this.disposed) {
       throw new Error('QuickJS instance has been disposed');
@@ -1035,5 +1049,19 @@ export class JSValueHandle {
       this.vm._getExports().qjs_free_value(this.ptr);
       this.disposed = true;
     }
+  }
+
+  /**
+   * Support for `using` declarations (Explicit Resource Management).
+   * Automatically disposes the handle when it goes out of scope.
+   *
+   * ```typescript
+   * using result = vm.evalCode('1 + 2');
+   * console.log(result.toNumber()); // 3
+   * // result is automatically disposed here
+   * ```
+   */
+  [Symbol.dispose](): void {
+    this.dispose();
   }
 }
