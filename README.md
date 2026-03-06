@@ -11,34 +11,332 @@ The [Workflow DevKit](https://github.com/vercel/workflow) project implements dur
 - There is an effective upper bound on how much work a workflow can do
 - Running "forever" workflows is impractical
 
-This project explores a fundamentally different approach: **VM snapshotting**. Instead of replaying from the beginning, we snapshot the JavaScript execution environment at each suspension point and restore it on resumption. The restored VM already has the correct state - only events since the last snapshot need to be fetched and applied.
+This project explores a fundamentally different approach: **VM snapshotting**. Instead of replaying from the beginning, we snapshot the JavaScript execution environment at each suspension point and restore it on resumption. The restored VM already has the correct state — only events since the last snapshot need to be fetched and applied.
+
+## Quick Start
+
+```sh
+pnpm install
+make          # builds quickjs.wasm via wasi-sdk
+pnpm test     # runs all 44 tests
+```
+
+## Usage
+
+### Basic Evaluation
+
+```typescript
+import { QuickJS } from 'quickjs-wasm';
+
+const vm = await QuickJS.create(wasmBytes);
+
+// Evaluate code — returns a JSValueHandle
+const result = vm.unwrapResult(vm.evalCode('1 + 2'));
+console.log(result.toNumber()); // 3
+result.dispose();
+
+// Use cached properties for common values
+console.log(vm.dump(vm.true));      // true
+console.log(vm.dump(vm.null));      // null
+console.log(vm.dump(vm.undefined)); // undefined
+
+vm.dispose();
+```
+
+### Working with Values
+
+```typescript
+const vm = await QuickJS.create(wasmBytes);
+
+// Create values
+const str = vm.newString('hello');
+const num = vm.newNumber(42);
+const big = vm.newBigInt(9007199254740993n);
+const obj = vm.newObject();
+const arr = vm.newArray();
+
+// Set properties on the global object
+vm.setProp(vm.global, 'message', str);
+vm.unwrapResult(vm.evalCode('message')).consume(h => {
+  console.log(h.toString()); // "hello"
+});
+
+// Convert host values to QuickJS handles (and back)
+const handle = vm.hostToHandle({ x: 1, y: [2, 3] });
+const dumped = vm.dump(handle); // { x: 1, y: [2, 3] }
+
+// Use consume() for automatic disposal
+const value = vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
+
+str.dispose();
+num.dispose();
+big.dispose();
+obj.dispose();
+arr.dispose();
+handle.dispose();
+vm.dispose();
+```
+
+### Host Functions
+
+Register JavaScript functions backed by host (Node.js) callbacks:
+
+```typescript
+const vm = await QuickJS.create(wasmBytes);
+
+// The first argument to the callback is always `this`
+const add = vm.newFunction('add', (_this, ...args) => {
+  return vm.newNumber(args[0].toNumber() + args[1].toNumber());
+});
+vm.setProp(vm.global, 'add', add);
+add.dispose();
+
+const result = vm.unwrapResult(vm.evalCode('add(3, 4)'));
+console.log(result.toNumber()); // 7
+result.dispose();
+```
+
+### Promises and Async Host Functions
+
+Bridge async host operations into the QuickJS sandbox:
+
+```typescript
+const vm = await QuickJS.create(wasmBytes);
+
+// Create an async host function that returns a promise to QuickJS
+const dnsResolve = vm.newFunction('dnsResolve', (_this, ...args) => {
+  const hostname = args[0].toString();
+  const deferred = vm.newPromise();
+
+  // Do real async work on the host side
+  dns.resolve4(hostname).then(
+    (addresses) => {
+      deferred.resolve(vm.newString(addresses[0]));
+      vm.executePendingJobs(); // drain the QuickJS job queue
+    },
+    (err) => {
+      deferred.reject(vm.newError(err));
+      vm.executePendingJobs();
+    }
+  );
+
+  return deferred.handle; // return the QuickJS promise
+});
+vm.setProp(vm.global, 'dnsResolve', dnsResolve);
+dnsResolve.dispose();
+```
+
+### Error Handling
+
+```typescript
+const vm = await QuickJS.create(wasmBytes);
+
+// unwrapResult() throws a host Error if the eval/call produced an exception
+try {
+  vm.unwrapResult(vm.evalCode('throw new TypeError("bad")'));
+} catch (err) {
+  console.log(err.name);    // "TypeError"
+  console.log(err.message); // "bad"
+  console.log(err.stack);   // QuickJS stack trace
+}
+
+// Create errors from host Error objects (preserves name, message, stack)
+const errHandle = vm.newError(new RangeError('out of bounds'));
+vm.setProp(vm.global, 'hostError', errHandle);
+errHandle.dispose();
+```
+
+### Snapshot and Restore
+
+The key differentiator — snapshot the entire VM state and restore it later:
+
+```typescript
+const vm = await QuickJS.create(wasmBytes);
+
+// Build up some state, including a pending promise
+vm.unwrapResult(vm.evalCode(`
+  globalThis.counter = 0;
+
+  // Create a promise that will be resolved later
+  let __resolve;
+  globalThis.pendingWork = new Promise(r => { __resolve = r; });
+  globalThis.__resolve = __resolve;
+
+  globalThis.pendingWork.then(value => {
+    globalThis.counter = value;
+  });
+`)).dispose();
+vm.executePendingJobs();
+
+// Take a snapshot — this is a plain object with a Uint8Array
+const snapshot = vm.snapshot();
+// snapshot.memory can be persisted to S3, Redis, a database, etc.
+vm.dispose(false);
+
+// ... time passes, maybe a different process entirely ...
+
+// Restore the VM from the snapshot
+const vm2 = await QuickJS.restore(snapshot, wasmBytes);
+
+// The pending promise still exists — resolve it
+const resolve = vm2.global.getProp('__resolve');
+const arg = vm2.newNumber(42);
+vm2.callFunction(resolve, vm2.undefined, arg).dispose();
+vm2.executePendingJobs();
+arg.dispose();
+resolve.dispose();
+
+// The .then handler ran in the restored VM
+const counter = vm2.global.getProp('counter');
+console.log(counter.toNumber()); // 42
+counter.dispose();
+
+vm2.dispose(false);
+```
+
+### Host Callbacks After Restore
+
+Host functions registered with `newFunction()` are assigned integer IDs that get baked into the snapshot. After restoring, re-register the callbacks:
+
+```typescript
+// Before snapshot
+const vm1 = await QuickJS.create(wasmBytes);
+const fn = vm1.newFunction('hostAdd', (_this, ...args) => {
+  return vm1.newNumber(args[0].toNumber() + args[1].toNumber());
+});
+// fn was assigned callback ID 1 (first registered callback)
+vm1.setProp(vm1.global, 'hostAdd', fn);
+fn.dispose();
+
+const snapshot = vm1.snapshot();
+vm1.dispose(false);
+
+// After restore — re-register with the same ID
+const vm2 = await QuickJS.restore(snapshot, wasmBytes);
+vm2.registerHostCallback(1, (_this, ...args) => {
+  return vm2.newNumber(args[0].toNumber() + args[1].toNumber());
+});
+
+// hostAdd() works again
+const result = vm2.unwrapResult(vm2.evalCode('hostAdd(100, 200)'));
+console.log(result.toNumber()); // 300
+result.dispose();
+vm2.dispose(false);
+```
+
+### Sandboxed Execution (PAC Files)
+
+quickjs-wasm can be used as a drop-in sandbox for running untrusted code, similar to how [pac-resolver](https://github.com/nicolo-ribaudo/nicolo-ribaudo) uses quickjs-emscripten:
+
+```typescript
+const vm = await QuickJS.create(wasmBytes);
+
+// Inject sandbox functions
+const isPlainHostName = vm.newFunction('isPlainHostName', (_this, ...args) => {
+  const host = args[0].toString();
+  return host.includes('.') ? vm.false : vm.true;
+});
+vm.setProp(vm.global, 'isPlainHostName', isPlainHostName);
+isPlainHostName.dispose();
+
+// Evaluate untrusted PAC code
+vm.unwrapResult(vm.evalCode(`
+  function FindProxyForURL(url, host) {
+    if (isPlainHostName(host)) return "DIRECT";
+    return "PROXY proxy:8080";
+  }
+`)).dispose();
+
+// Call it
+const fn = vm.global.getProp('FindProxyForURL');
+const url = vm.newString('http://intranet/');
+const host = vm.newString('intranet');
+const result = vm.unwrapResult(vm.callFunction(fn, vm.undefined, url, host));
+console.log(result.toString()); // "DIRECT"
+
+result.dispose();
+fn.dispose();
+url.dispose();
+host.dispose();
+vm.dispose(false);
+```
+
+## API Reference
+
+### `QuickJS` (VM Instance)
+
+| Method | Description |
+|--------|-------------|
+| `QuickJS.create(wasmInput?)` | Create a fresh VM instance |
+| `QuickJS.restore(snapshot, wasmInput?)` | Restore a VM from a snapshot |
+| `vm.evalCode(code, filename?)` | Evaluate JS code, returns `JSValueHandle` |
+| `vm.unwrapResult(handle)` | Returns the handle if not an exception, otherwise throws |
+| `vm.callFunction(fn, this, ...args)` | Call a QuickJS function |
+| `vm.executePendingJobs()` | Drain the promise microtask queue |
+| `vm.newString(str)` | Create a string value |
+| `vm.newNumber(num)` | Create a number value |
+| `vm.newBigInt(val)` | Create a BigInt value |
+| `vm.newObject()` | Create an empty object |
+| `vm.newArray()` | Create an empty array |
+| `vm.newFunction(name, callback)` | Create a function backed by a host callback |
+| `vm.newPromise()` | Create a `Deferred` (promise + resolve/reject) |
+| `vm.newError(messageOrError)` | Create an Error from a string or native `Error` |
+| `vm.resolvePromise(handle)` | Await a QuickJS promise from the host side |
+| `vm.setProp(obj, key, value)` | Set a property on a QuickJS object |
+| `vm.typeof(handle)` | Get the `typeof` as a string |
+| `vm.dump(handle)` | Convert a QuickJS value to a host value |
+| `vm.hostToHandle(value)` | Convert a host value to a QuickJS handle |
+| `vm.snapshot()` | Capture the entire VM state |
+| `vm.registerHostCallback(id, fn)` | Re-register a host callback after restore |
+| `vm.dispose(leakCheck?)` | Free the VM |
+
+### Cached Properties
+
+These are singleton handles — do **not** dispose them:
+
+| Property | Value |
+|----------|-------|
+| `vm.global` | The global object |
+| `vm.undefined` | `undefined` |
+| `vm.null` | `null` |
+| `vm.true` | `true` |
+| `vm.false` | `false` |
+
+### `JSValueHandle`
+
+| Method / Property | Description |
+|-------------------|-------------|
+| `handle.isException` | `true` if this is an exception result |
+| `handle.isUndefined` | `true` if this is `undefined` |
+| `handle.isNull` | `true` if this is `null` |
+| `handle.promiseState` | `0` pending, `1` fulfilled, `2` rejected |
+| `handle.toNumber()` | Extract as a `number` |
+| `handle.toBigInt()` | Extract as a `bigint` |
+| `handle.toString()` | Extract as a `string` |
+| `handle.getProp(name)` | Get a property by name |
+| `handle.setProp(name, value)` | Set a property by name |
+| `handle.consume(fn)` | Call `fn(handle)`, then dispose, return result |
+| `handle.dup()` | Duplicate the handle (increment refcount) |
+| `handle.dispose()` | Free the handle |
+
+### `Deferred` (from `vm.newPromise()`)
+
+| Property / Method | Description |
+|--------------------|-------------|
+| `deferred.handle` | The QuickJS promise object |
+| `deferred.settled` | Host `Promise<void>` that resolves on settlement |
+| `deferred.resolve(handle)` | Resolve the promise with a QuickJS value |
+| `deferred.reject(handle)` | Reject the promise with a QuickJS value |
 
 ## How It Works
 
 ### The Core Insight
 
-WebAssembly linear memory is a flat byte array. Everything QuickJS allocates - the runtime struct, all contexts, all JS objects, the GC heap, the atom table, the promise job queue, pending promises - lives in this linear memory. There are no external pointers, file handles, or OS resources. When you copy the memory wholesale to a new WASM instance, all internal pointer relationships are preserved because they reference the same linear address space.
+WebAssembly linear memory is a flat byte array. Everything QuickJS allocates — the runtime struct, all contexts, all JS objects, the GC heap, the atom table, the promise job queue, pending promises — lives in this linear memory. There are no external pointers, file handles, or OS resources. When you copy the memory wholesale to a new WASM instance, all internal pointer relationships are preserved because they reference the same linear address space.
 
-### Snapshot
+### One VM = One WASM Instance
 
-When `snapshot()` is called on an idle VM (no C stack frames in flight):
-
-1. The entire WASM linear memory is copied (`WebAssembly.Memory.buffer`)
-2. The `__stack_pointer` WASM global is captured
-3. The `JSRuntime*` and `JSContext*` pointer values are recorded
-4. These are bundled into a serializable `Snapshot` object
-
-### Restore
-
-When `QuickJS.restore(snapshot)` is called:
-
-1. A fresh WASM module is instantiated
-2. The snapshot bytes are copied over the module's linear memory
-3. The `__stack_pointer` global is restored
-4. `qjs_set_runtime_and_context()` tells the C interface where the runtime/context live
-5. **`_initialize()` and `qjs_init()` are NOT called** - the runtime already exists in memory
-
-The restored VM has all previous JS state intact, including pending promises that can be resolved with new data.
+Unlike quickjs-emscripten which has a two-level model (`QuickJSWASMModule` → `QuickJSContext`), quickjs-wasm uses a simpler one-level model: each `QuickJS.create()` call instantiates its own WASM module with its own linear memory, runtime, and context. This gives stronger isolation (no shared memory between VMs) and makes snapshotting clean — one instance, one context, one snapshot.
 
 ### Architecture
 
@@ -46,24 +344,38 @@ The restored VM has all previous JS state intact, including pending promises tha
 Host (Node.js / Deno / Bun / Browser)
  |
  +-- QuickJS class (ts/index.ts)
- |    |-- evalCode(), newPromise(), callFunction(), executePendingJobs()
+ |    |-- evalCode(), callFunction(), newFunction(), ...
  |    |-- snapshot() -> Snapshot { memory, stackPointer, runtimePtr, contextPtr }
  |    +-- restore(snapshot) -> QuickJS
  |
  +-- WASI Shim (ts/wasi-shim.ts)
- |    |-- clock_time_get (for Date.now())
- |    |-- fd_write (for console output)
- |    |-- random_get (for Math.random)
+ |    |-- clock_time_get, fd_write, random_get
  |    +-- fd_close, fd_fdstat_get, fd_seek (stubs)
  |
  +-- quickjs.wasm (1.4 MB)
-      |-- QuickJS-NG engine (quickjs.c, dtoa.c, libregexp.c, libunicode.c)
-      +-- Interface layer (c/interface.c)
-           |-- qjs_init(), qjs_destroy()
-           |-- qjs_eval(), qjs_new_promise(), qjs_call(), ...
-           |-- qjs_get_runtime_ptr(), qjs_get_context_ptr()
-           +-- qjs_set_runtime_and_context() (for restore)
+      |-- QuickJS-NG engine
+      +-- C interface layer (c/interface.c)
+           |-- Lifecycle, eval, value creation/extraction
+           |-- Host callback trampoline (imported host_call)
+           +-- Snapshot support (get/set runtime and context pointers)
 ```
+
+### Host Callback Mechanism
+
+When `vm.newFunction()` is called, an integer ID is allocated and a QuickJS C function is created via `JS_NewCFunctionData2` with that ID stored as function data. When QuickJS code calls the function, the C trampoline extracts the ID and calls the imported `host_call(func_id, this_ptr, argc, argv_ptr)` function, which dispatches to the registered host callback by ID.
+
+This design survives snapshot/restore: the ID is stored in QuickJS's heap (part of the snapshot), and after restore, `registerHostCallback(id, fn)` re-maps the ID to a new host function.
+
+## Implications for Durable Workflows
+
+| | Event Replay (current) | VM Snapshot (this project) |
+|---|---|---|
+| **Resumption cost** | O(n) — replay full event log | O(1) — restore snapshot + fetch delta |
+| **Event log growth** | Unbounded, all events needed | Can be trimmed after snapshot |
+| **Long-running workflows** | Impractical at scale | No degradation over time |
+| **State representation** | Implicit (derived from log) | Explicit (WASM memory snapshot) |
+| **Snapshot size** | N/A | ~256 KB baseline, grows with JS heap |
+| **Determinism requirement** | Yes (seeded PRNG, frozen time) | No (state is captured, not re-derived) |
 
 ## Project Structure
 
@@ -71,142 +383,33 @@ Host (Node.js / Deno / Bun / Browser)
 quickjs-wasm/
  |-- quickjs-ng/            # Git submodule: github.com/quickjs-ng/quickjs
  |-- c/
- |   +-- interface.c        # C wrapper exporting WASM-friendly functions
+ |   +-- interface.c        # C wrapper (~470 lines) exporting WASM functions
  |-- ts/
- |   |-- index.ts           # QuickJS + JSValueHandle classes with snapshot/restore
- |   +-- wasi-shim.ts       # Minimal WASI polyfill for universal WebAssembly compat
+ |   |-- index.ts           # QuickJS + JSValueHandle + Deferred
+ |   +-- wasi-shim.ts       # Minimal WASI polyfill (6 functions)
  |-- test/
- |   +-- snapshot.test.ts   # PoC tests including the snapshot/restore/promise test
- |-- Makefile               # Compiles quickjs-ng + interface.c -> quickjs.wasm
+ |   |-- snapshot.test.ts   # 30 core tests
+ |   +-- pac-resolver/      # 14 integration tests (PAC file sandbox)
+ |-- Makefile
  |-- package.json
  +-- tsconfig.json
 ```
 
 ## Prerequisites
 
-- [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) (tested with v30) - set `WASI_SDK` env var or it defaults to `/tmp/wasi-sdk`
-- Node.js >= 22 (for `--experimental-strip-types`)
+- [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) (tested with v30) — set `WASI_SDK` env var or defaults to `/tmp/wasi-sdk`
+- Node.js >= 22
 - pnpm
-
-## Building
-
-```sh
-# Install wasi-sdk (if not already installed)
-curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-arm64-macos.tar.gz" \
-  | tar xz -C /tmp --strip-components=0
-export WASI_SDK=/tmp/wasi-sdk-30.0-arm64-macos
-
-# Clone with submodules
-git clone --recursive <repo-url>
-cd quickjs-wasm
-
-# Install dependencies
-pnpm install
-
-# Build the WASM binary
-make
-
-# Run the tests
-pnpm test
-```
-
-## Test Output
-
-```
-=== QuickJS WASM Snapshot/Restore PoC ===
-
---- Test: Basic Eval ---
-  PASS: eval should not throw
-  PASS: 1 + 2 should equal 3
-  PASS: string concatenation works
-
---- Test: Promise Creation ---
-  PASS: new promise should be pending (state 0)
-  PASS: promiseResult should be undefined before resolve
-  PASS: promise should be resolved with correct value
-
---- Test: Snapshot and Restore (Simple State) ---
-  Snapshot size: 256 KB
-  Memory pages: 4
-  PASS: counter should be 42 after restore
-  PASS: message should be preserved after restore
-  PASS: can evaluate new code in restored VM
-
---- Test: Snapshot with Pending Promise (THE KEY TEST) ---
-  PASS: stepResult should be "not yet" before snapshot
-  Snapshot taken with pending promise
-  Snapshot size: 256 KB
-  Original VM disposed. Simulating resumption in a new process...
-  PASS: stepResult should still be "not yet" after restore
-  PASS: resolve function should be available after restore
-  Executed 1 pending jobs after resolving promise
-  Final stepResult: "completed: step-42-result"
-  PASS: Promise .then handler should have executed in the restored VM!
-
-=== Results: 13 passed, 0 failed ===
-```
-
-## Usage Example
-
-```typescript
-import { QuickJS } from './ts/index.ts';
-
-// Create a VM and set up a pending promise
-const vm = await QuickJS.create(wasmBytes);
-const { promise, resolve } = vm.newPromise();
-const global = vm.getGlobal();
-global.setProp('waitForStep', promise);
-
-vm.evalCode(`
-  globalThis.result = null;
-  waitForStep.then(value => {
-    globalThis.result = "got: " + value;
-  });
-`);
-vm.executePendingJobs();
-
-// Snapshot the VM (promise is still pending)
-const snapshot = vm.snapshot();
-// snapshot.memory is a Uint8Array that can be persisted to S3, Redis, etc.
-
-// ... time passes, process restarts ...
-
-// Restore the VM and resolve the promise
-const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-const global2 = vm2.getGlobal();
-const restoredResolve = global2.getProp('__resolveFunc');
-const arg = vm2.newString('step completed');
-vm2.callFunction(restoredResolve, vm2.getUndefined(), arg);
-vm2.executePendingJobs();
-
-const result = global2.getProp('result');
-console.log(result.toString()); // "got: step completed"
-```
-
-## Implications for Durable Workflows
-
-This approach changes the fundamental execution model:
-
-| | Event Replay (current) | VM Snapshot (this project) |
-|---|---|---|
-| **Resumption cost** | O(n) - replay full event log | O(1) - restore snapshot + fetch delta |
-| **Event log growth** | Unbounded, all events needed | Can be trimmed after snapshot |
-| **Long-running workflows** | Impractical at scale | No degradation over time |
-| **State representation** | Implicit (derived from log) | Explicit (WASM memory snapshot) |
-| **Snapshot size** | N/A | ~256 KB baseline, grows with JS heap |
-| **Determinism requirement** | Yes (seeded PRNG, frozen time) | No (state is captured, not re-derived) |
-
-The snapshot approach eliminates the need for deterministic replay entirely. The JS VM's state is the source of truth, not the event log. Events from before the snapshot are no longer needed at runtime - they're "baked in" to the snapshot.
 
 ## Technical Details
 
 ### WASM Binary
 
 - Built from [quickjs-ng](https://github.com/quickjs-ng/quickjs) (MIT license)
-- Compiled with wasi-sdk targeting `wasm32-wasip1` in reactor mode (`-mexec-model=reactor`)
-- 1.4 MB uncompressed (~400 KB gzipped)
+- Compiled with wasi-sdk targeting `wasm32-wasip1` in reactor mode
+- 1.4 MB uncompressed
+- 7 WASM imports: 6 WASI functions + 1 `env.host_call` for host callbacks
 - Exports `memory` and `__stack_pointer` for snapshot support
-- Only 6 WASI imports needed (shimmed in TypeScript)
 
 ### What Gets Snapshotted
 
@@ -219,20 +422,15 @@ The snapshot captures the entire WASM linear memory, which contains:
 - The string intern table (atoms)
 - The `dlmalloc` heap metadata
 - The C interface's `static JSRuntime *rt` and `static JSContext *ctx` globals
+- Host callback IDs stored in function data
 
 Plus the `__stack_pointer` WASM global (a single i32).
 
-### What Does NOT Need Snapshotting
-
-- The WASM module's code section (immutable, same `.wasm` file on restore)
-- The function table (part of the module, reconstructed on instantiation)
-- WASI state (trivially re-created by the shim)
-
 ### Limitations and Future Work
 
-- **Host callbacks**: The current PoC stores resolve/reject functions as JS globals. A production system would need a proper host function registry that can be re-mapped after restore.
-- **Snapshot size**: Currently captures the entire linear memory. Could be optimized with sparse/delta encoding (only non-zero pages, like Wizer does).
-- **Memory growth**: If the original VM grew its memory, the restored instance needs to match. Handled in the current implementation.
-- **Compression**: Snapshots are raw bytes. gzip/brotli/zstd compression would significantly reduce storage and transfer costs.
-- **Multiple contexts**: Currently supports a single JSRuntime + JSContext. Could be extended.
-- **Browser compatibility**: The TypeScript wrapper uses only the standard `WebAssembly` API. The WASI shim is environment-agnostic. The only Node.js-specific code is the default WASM loading path (easily overridden by passing `wasmBytes` directly).
+- **Snapshot size**: Currently captures the entire linear memory (~256 KB baseline). Could be optimized with sparse/delta encoding (only non-zero pages).
+- **Compression**: Snapshots are raw bytes. gzip/brotli/zstd compression would reduce storage costs.
+- **Memory limits**: No `JS_SetMemoryLimit` or `JS_SetInterruptHandler` exposed yet. Needed for untrusted code sandboxing.
+- **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
+- **Object key enumeration**: `dump()` uses a JSON.stringify fallback for plain objects. Should expose `JS_GetOwnPropertyNames` for proper enumeration.
+- **Browser compatibility**: The WASI shim and WebAssembly API usage should work in browsers, but the default WASM loading path uses `node:fs`. Pass `wasmBytes` directly for browser use.
