@@ -53,6 +53,8 @@ interface QuickJSExports {
   qjs_is_function(valPtr: number): number;
   qjs_is_error(valPtr: number): number;
   qjs_is_promise(valPtr: number): number;
+  qjs_is_symbol(valPtr: number): number;
+  qjs_is_big_int(valPtr: number): number;
   qjs_get_bool(valPtr: number): number;
 
   // Value management
@@ -530,7 +532,9 @@ export class QuickJS {
     if (e.qjs_is_null(handle.ptr)) return 'object'; // typeof null === 'object'
     if (e.qjs_is_bool(handle.ptr)) return 'boolean';
     if (e.qjs_is_number(handle.ptr)) return 'number';
+    if (e.qjs_is_big_int(handle.ptr)) return 'bigint';
     if (e.qjs_is_string(handle.ptr)) return 'string';
+    if (e.qjs_is_symbol(handle.ptr)) return 'symbol';
     if (e.qjs_is_function(handle.ptr)) return 'function';
     if (e.qjs_is_object(handle.ptr)) return 'object';
     return 'unknown';

@@ -231,6 +231,8 @@ describe('typeof', () => {
       ['null', 'object'],
       ['({})', 'object'],
       ['(() => {})', 'function'],
+      ['Symbol("test")', 'symbol'],
+      ['BigInt(42)', 'bigint'],
     ];
 
     for (const [code, expected] of cases) {

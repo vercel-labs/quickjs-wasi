@@ -262,6 +262,16 @@ int qjs_is_promise(JSValue *val) {
     return JS_IsPromise(*val);
 }
 
+__attribute__((export_name("qjs_is_symbol")))
+int qjs_is_symbol(JSValue *val) {
+    return JS_IsSymbol(*val);
+}
+
+__attribute__((export_name("qjs_is_big_int")))
+int qjs_is_big_int(JSValue *val) {
+    return JS_IsBigInt(*val);
+}
+
 __attribute__((export_name("qjs_get_bool")))
 int qjs_get_bool(JSValue *val) {
     return JS_ToBool(ctx, *val);
