@@ -306,6 +306,66 @@ describe('dump()', () => {
     expect(vm.evalCode('BigInt(42)').consume(h => vm.dump(h))).toBe(42n);
     vm.dispose(false);
   });
+
+  it('should dump plain objects via native key enumeration', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode('({ a: 1, b: "two", c: true })').consume(h => vm.dump(h));
+    expect(dumped).toEqual({ a: 1, b: 'two', c: true });
+  });
+
+  it('should dump nested objects', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode('({ x: { y: { z: 42 } } })').consume(h => vm.dump(h));
+    expect(dumped).toEqual({ x: { y: { z: 42 } } });
+  });
+
+  it('should dump objects with array values', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode('({ items: [1, 2, 3], name: "test" })').consume(h => vm.dump(h));
+    expect(dumped).toEqual({ items: [1, 2, 3], name: 'test' });
+  });
+
+  it('should dump objects with null and undefined values', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode('({ a: null, b: undefined })').consume(h => vm.dump(h));
+    expect(dumped).toEqual({ a: null, b: undefined });
+  });
+
+  it('should dump objects with function values as undefined', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    // Functions can't be meaningfully serialized — dump returns undefined for them
+    const dumped = vm.evalCode('({ fn: () => {} })').consume(h => vm.dump(h)) as any;
+    expect(dumped).toHaveProperty('fn');
+    expect(dumped.fn).toBeUndefined();
+  });
+
+  it('should handle circular references gracefully', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode(`
+      var obj = { a: 1 };
+      obj.self = obj;
+      obj;
+    `).consume(h => vm.dump(h)) as any;
+    expect(dumped.a).toBe(1);
+    // Circular reference is returned as undefined
+    expect(dumped.self).toBeUndefined();
+  });
+
+  it('should dump empty objects', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    expect(vm.evalCode('({})').consume(h => vm.dump(h))).toEqual({});
+  });
+
+  it('should only dump own enumerable properties', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode(`
+      var obj = { visible: true };
+      Object.defineProperty(obj, 'hidden', { value: 'secret', enumerable: false });
+      obj;
+    `).consume(h => vm.dump(h)) as any;
+    expect(dumped).toEqual({ visible: true });
+    expect(dumped).not.toHaveProperty('hidden');
+  });
 });
 
 describe('typeof', () => {

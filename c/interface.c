@@ -437,6 +437,43 @@ int qjs_get_big_int64(JSValue *val, int *lo_out, int *hi_out) {
     return ret;
 }
 
+/*
+ * Get the underlying object pointer from a JSValue.
+ * Returns 0 for non-object/non-string values.
+ * This is used for identity comparison (cycle detection in dump()).
+ */
+__attribute__((export_name("qjs_get_value_ptr")))
+void *qjs_get_value_ptr(JSValue *val) {
+    if (JS_VALUE_GET_TAG(*val) >= 0) return NULL; /* not a pointer type */
+    return JS_VALUE_GET_PTR(*val);
+}
+
+/* ---- Property Enumeration ---- */
+
+/*
+ * Get the own enumerable string property names of an object as a QuickJS Array.
+ * Returns a heap-allocated JSValue* pointing to the array, or NULL on failure.
+ */
+__attribute__((export_name("qjs_get_own_property_names")))
+JSValue *qjs_get_own_property_names(JSValue *obj) {
+    JSPropertyEnum *tab;
+    uint32_t len;
+    int flags = JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY;
+
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, *obj, flags) < 0) {
+        return jsvalue_to_heap(JS_EXCEPTION);
+    }
+
+    JSValue arr = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue key = JS_AtomToString(ctx, tab[i].atom);
+        JS_SetPropertyUint32(ctx, arr, i, key);
+    }
+
+    JS_FreePropertyEnum(ctx, tab, len);
+    return jsvalue_to_heap(arr);
+}
+
 /* ---- Snapshot support helpers ---- */
 
 /* Returns the pointer to the JSRuntime (for introspection only) */

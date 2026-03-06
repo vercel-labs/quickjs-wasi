@@ -71,6 +71,8 @@ interface QuickJSExports {
   qjs_set_prop_string(objPtr: number, namePtr: number, valPtr: number): number;
   qjs_get_prop_uint32(objPtr: number, idx: number): number;
   qjs_set_prop_uint32(objPtr: number, idx: number, valPtr: number): number;
+  qjs_get_own_property_names(objPtr: number): number;
+  qjs_get_value_ptr(valPtr: number): number;
 
   // Function calls
   qjs_call(funcPtr: number, thisPtr: number, argc: number, argvPtr: number): number;
@@ -722,10 +724,15 @@ export class QuickJS {
   /**
    * Convert a QuickJS handle to a host JavaScript value.
    * Handles strings, numbers, booleans, null, undefined, bigint, arrays,
-   * errors, and plain objects.
+   * errors, functions, and plain objects. Circular references in objects
+   * are returned as `undefined`.
    */
   dump(handle: JSValueHandle): unknown {
     this.assertNotDisposed();
+    return this._dump(handle, new Set());
+  }
+
+  private _dump(handle: JSValueHandle, visited: Set<number>): unknown {
     const e = this.exports;
 
     if (e.qjs_is_undefined(handle.ptr)) return undefined;
@@ -742,6 +749,17 @@ export class QuickJS {
       return new Error(msg);
     }
 
+    // Functions cannot be meaningfully serialized
+    if (e.qjs_is_function(handle.ptr)) return undefined;
+
+    // Detect circular references for objects/arrays using the underlying
+    // JS object pointer (not the heap-allocated JSValue wrapper pointer)
+    if (e.qjs_is_object(handle.ptr)) {
+      const objPtr = e.qjs_get_value_ptr(handle.ptr);
+      if (objPtr && visited.has(objPtr)) return undefined;
+      if (objPtr) visited.add(objPtr);
+    }
+
     if (e.qjs_is_array(handle.ptr)) {
       const lenHandle = handle.getProp('length');
       const len = e.qjs_get_float64(lenHandle.ptr);
@@ -750,7 +768,7 @@ export class QuickJS {
       for (let i = 0; i < len; i++) {
         const elemPtr = e.qjs_get_prop_uint32(handle.ptr, i);
         const elemHandle = new JSValueHandle(this, elemPtr);
-        arr.push(this.dump(elemHandle));
+        arr.push(this._dump(elemHandle, visited));
         elemHandle.dispose();
       }
       return arr;
@@ -775,25 +793,30 @@ export class QuickJS {
     }
 
     if (e.qjs_is_object(handle.ptr)) {
-      // Use JSON.stringify as a workaround for plain objects.
-      const jsonResult = this.evalCode(`(v) => JSON.stringify(v)`);
-      if (jsonResult.isException) {
-        jsonResult.dispose();
-        return '[object Object]';
+      // Enumerate own property names and recursively dump each value
+      const keysPtr = e.qjs_get_own_property_names(handle.ptr);
+      const keysHandle = new JSValueHandle(this, keysPtr);
+      if (keysHandle.isException) {
+        keysHandle.dispose();
+        return {};
       }
-      const jsonStr = this.callFunction(jsonResult, this.undefined, handle);
-      jsonResult.dispose();
-      if (jsonStr.isException || e.qjs_is_undefined(jsonStr.ptr)) {
-        jsonStr.dispose();
-        return '[object Object]';
+      const lenHandle = keysHandle.getProp('length');
+      const len = e.qjs_get_float64(lenHandle.ptr);
+      lenHandle.dispose();
+
+      const obj: Record<string, unknown> = {};
+      for (let i = 0; i < len; i++) {
+        const keyPtr = e.qjs_get_prop_uint32(keysHandle.ptr, i);
+        const keyHandle = new JSValueHandle(this, keyPtr);
+        const key = keyHandle.toString();
+        keyHandle.dispose();
+
+        const valHandle = handle.getProp(key);
+        obj[key] = this._dump(valHandle, visited);
+        valHandle.dispose();
       }
-      const str = jsonStr.toString();
-      jsonStr.dispose();
-      try {
-        return JSON.parse(str);
-      } catch {
-        return str;
-      }
+      keysHandle.dispose();
+      return obj;
     }
 
     return undefined;
