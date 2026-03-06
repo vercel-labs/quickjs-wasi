@@ -573,11 +573,18 @@ export class QuickJS {
    * Resolve a promise handle. Returns a host-side Promise that resolves
    * with the settled value/error of the QuickJS promise.
    *
+   * If the handle is not a promise, it is treated as an already-fulfilled value.
+   *
    * The returned host Promise resolves to `{ value: JSValueHandle }` on
    * fulfillment or `{ error: JSValueHandle }` on rejection.
    */
   resolvePromise(promiseHandle: JSValueHandle): Promise<{ value: JSValueHandle } | { error: JSValueHandle }> {
     this.assertNotDisposed();
+
+    // If the handle is not a promise, treat it as a fulfilled value
+    if (!this.exports.qjs_is_promise(promiseHandle.ptr)) {
+      return Promise.resolve({ value: promiseHandle.dup() });
+    }
 
     // Check if already settled
     const state = this.exports.qjs_promise_state(promiseHandle.ptr);
