@@ -21,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vercel-labs/quickjs-wasm.git"
+    "url": "git://github.com/vercel-labs/quickjs-wasm.git"
   },
   "scripts": {
     "build:wasm": "make",
