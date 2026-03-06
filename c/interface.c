@@ -118,6 +118,8 @@ int qjs_init(void) {
 __attribute__((export_name("qjs_destroy")))
 void qjs_destroy(void) {
     if (ctx) {
+        /* Run GC to collect any cycles before freeing the context */
+        if (rt) JS_RunGC(rt);
         JS_FreeContext(ctx);
         ctx = NULL;
     }

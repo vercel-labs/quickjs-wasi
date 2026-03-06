@@ -154,6 +154,9 @@ export class QuickJS {
   private _true: JSValueHandle | null = null;
   private _false: JSValueHandle | null = null;
 
+  // Handles that must be freed on dispose (e.g. unresolved promise resolve/reject functions)
+  private _ownedHandles = new Set<JSValueHandle>();
+
   private constructor(module: WebAssembly.Module) {
     this.module = module;
     this.instance = null!;
@@ -529,43 +532,53 @@ export class QuickJS {
     const resolveHandle = new JSValueHandle(this, resolvePtr);
     const rejectHandle = new JSValueHandle(this, rejectPtr);
 
-    // Create a host-side Promise that resolves when the QuickJS promise settles
-    let settledResolve: () => void;
-    const settled = new Promise<void>((res) => {
-      settledResolve = res;
-    });
-
-    // Register a temporary host callback for settlement notification
-    const settleCallbackId = this.nextCallbackId++;
-    this.hostCallbacks.set(settleCallbackId, () => {
-      settledResolve();
-      this.hostCallbacks.delete(settleCallbackId);
-      return this.undefined;
-    });
-
-    // Create a host function and attach .then(onSettle, onSettle) to the promise
-    const { ptr: onSettleName, len: onSettleNameLen } = this.writeString('__onSettle');
-    const onSettleFn = new JSValueHandle(this, this.exports.qjs_new_host_function(onSettleName, onSettleNameLen, settleCallbackId, 0));
-    this.exports.wasm_free(onSettleName);
-
-    const thenFn = promiseHandle.getProp('then');
-    const onSettleDup = onSettleFn.dup();
-    this.callFunction(thenFn, promiseHandle, onSettleFn, onSettleDup).dispose();
-    thenFn.dispose();
-    onSettleFn.dispose();
-    onSettleDup.dispose();
-
     const vm = this;
+
+    // Track resolve/reject handles so they can be freed on VM dispose
+    // if the promise is never resolved/rejected
+    vm._ownedHandles.add(resolveHandle);
+    vm._ownedHandles.add(rejectHandle);
+
+    // Lazily-created settled promise — only attaches .then() handler when accessed
+    let _settled: Promise<void> | null = null;
 
     return {
       handle: promiseHandle,
-      settled,
+      get settled(): Promise<void> {
+        if (!_settled) {
+          let settledResolve: () => void;
+          _settled = new Promise<void>((res) => {
+            settledResolve = res;
+          });
+
+          const settleCallbackId = vm.nextCallbackId++;
+          vm.hostCallbacks.set(settleCallbackId, () => {
+            settledResolve!();
+            vm.hostCallbacks.delete(settleCallbackId);
+            return vm.undefined;
+          });
+
+          const { ptr: onSettleName, len: onSettleNameLen } = vm.writeString('__onSettle');
+          const onSettleFn = new JSValueHandle(vm, vm.exports.qjs_new_host_function(onSettleName, onSettleNameLen, settleCallbackId, 0));
+          vm.exports.wasm_free(onSettleName);
+
+          const thenFn = promiseHandle.getProp('then');
+          const onSettleDup = onSettleFn.dup();
+          vm.callFunction(thenFn, promiseHandle, onSettleFn, onSettleDup).dispose();
+          thenFn.dispose();
+          onSettleFn.dispose();
+          onSettleDup.dispose();
+        }
+        return _settled;
+      },
       resolve(value: JSValueHandle) {
         vm.callFunction(resolveHandle, vm.undefined, value).dispose();
+        vm._ownedHandles.delete(resolveHandle);
         resolveHandle.dispose();
       },
       reject(value: JSValueHandle) {
         vm.callFunction(rejectHandle, vm.undefined, value).dispose();
+        vm._ownedHandles.delete(rejectHandle);
         rejectHandle.dispose();
       },
     };
@@ -900,6 +913,20 @@ export class QuickJS {
   dispose(leakCheck: boolean = true): void {
     if (!this.disposed) {
       this.disposed = true;
+
+      // Free any internally-owned handles (e.g. unresolved promise resolve/reject)
+      for (const handle of this._ownedHandles) {
+        handle.dispose();
+      }
+      this._ownedHandles.clear();
+
+      // Free cached singleton handles before destroying the runtime
+      if (this._global) { this._global.dispose(); this._global = null; }
+      if (this._undefined) { this._undefined.dispose(); this._undefined = null; }
+      if (this._null) { this._null.dispose(); this._null = null; }
+      if (this._true) { this._true.dispose(); this._true = null; }
+      if (this._false) { this._false.dispose(); this._false = null; }
+
       if (leakCheck) {
         try {
           this.exports.qjs_destroy();
