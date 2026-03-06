@@ -1,0 +1,16 @@
+{
+  "name": "quickjs-wasm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "make",
+    "build:ts": "tsc",
+    "build": "pnpm run build:wasm && pnpm run build:ts",
+    "test": "node --experimental-strip-types test/snapshot.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}
