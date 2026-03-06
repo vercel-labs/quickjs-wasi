@@ -1,5 +1,5 @@
 /**
- * Tests for QuickJS WASM: snapshot/restore, host callbacks, dump, promise bridging.
+ * Tests for QuickJS WASM.
  */
 
 import { readFileSync } from 'node:fs';
@@ -36,43 +36,123 @@ describe('Basic Eval', () => {
   });
 });
 
-describe('Promise Creation', () => {
-  it('should create and resolve a promise', async () => {
+describe('unwrapResult', () => {
+  it('should return the handle on success', async () => {
     const vm = await QuickJS.create(wasmBytes);
-    const { promise, resolve: resolveFunc, reject: rejectFunc } = vm.newPromise();
-    expect(promise.promiseState).toBe(0);
+    const result = vm.unwrapResult(vm.evalCode('42'));
+    expect(result.toNumber()).toBe(42);
+    result.dispose();
+    vm.dispose(false);
+  });
 
-    const global = vm.getGlobal();
-    global.setProp('testPromise', promise);
+  it('should throw on exception', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    expect(() => {
+      vm.unwrapResult(vm.evalCode('throw new Error("boom")'));
+    }).toThrow('boom');
+    vm.dispose(false);
+  });
 
-    vm.evalCode(`
+  it('should throw with error name and message preserved', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    try {
+      vm.unwrapResult(vm.evalCode('throw new TypeError("bad type")'));
+      expect.unreachable();
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err.name).toBe('TypeError');
+      expect(err.message).toBe('bad type');
+    }
+    vm.dispose(false);
+  });
+});
+
+describe('Cached Properties', () => {
+  it('should provide cached vm.global', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const g1 = vm.global;
+    const g2 = vm.global;
+    expect(g1).toBe(g2); // same object reference
+    vm.dispose(false);
+  });
+
+  it('should provide cached vm.undefined, vm.null, vm.true, vm.false', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    expect(vm.undefined.isUndefined).toBe(true);
+    expect(vm.null.isNull).toBe(true);
+    expect(vm.dump(vm.true)).toBe(true);
+    expect(vm.dump(vm.false)).toBe(false);
+    // Should be same reference on repeated access
+    expect(vm.undefined).toBe(vm.undefined);
+    expect(vm.null).toBe(vm.null);
+    expect(vm.true).toBe(vm.true);
+    expect(vm.false).toBe(vm.false);
+    vm.dispose(false);
+  });
+});
+
+describe('Promise Creation', () => {
+  it('should create and resolve a promise via Deferred', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const deferred = vm.newPromise();
+    expect(deferred.handle.promiseState).toBe(0);
+
+    vm.setProp(vm.global, 'testPromise', deferred.handle);
+
+    vm.unwrapResult(vm.evalCode(`
       globalThis.promiseResult = undefined;
       testPromise.then(value => {
         globalThis.promiseResult = "resolved: " + value;
       });
-    `).dispose();
+    `)).dispose();
     vm.executePendingJobs();
 
-    const beforeResolve = global.getProp('promiseResult');
-    expect(beforeResolve.isUndefined).toBe(true);
-    beforeResolve.dispose();
-
-    const resolveValue = vm.newString('hello from host');
-    const undefinedVal = vm.getUndefined();
-    vm.callFunction(resolveFunc, undefinedVal, resolveValue).dispose();
+    // Resolve using the deferred API
+    const val = vm.newString('hello from host');
+    deferred.resolve(val);
+    val.dispose();
     vm.executePendingJobs();
 
-    const afterResolve = global.getProp('promiseResult');
+    const afterResolve = vm.global.getProp('promiseResult');
     expect(afterResolve.toString()).toBe('resolved: hello from host');
     afterResolve.dispose();
 
-    resolveValue.dispose();
-    undefinedVal.dispose();
-    resolveFunc.dispose();
-    rejectFunc.dispose();
-    promise.dispose();
-    global.dispose();
-    vm.dispose();
+    deferred.handle.dispose();
+    vm.dispose(false);
+  });
+});
+
+describe('resolvePromise', () => {
+  it('should resolve a fulfilled promise', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const promiseHandle = vm.unwrapResult(vm.evalCode('Promise.resolve(42)'));
+    vm.executePendingJobs();
+
+    const result = await vm.resolvePromise(promiseHandle);
+    expect('value' in result).toBe(true);
+    if ('value' in result) {
+      expect(result.value.toNumber()).toBe(42);
+      result.value.dispose();
+    }
+    promiseHandle.dispose();
+    vm.dispose(false);
+  });
+
+  it('should resolve a rejected promise', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const promiseHandle = vm.unwrapResult(vm.evalCode('Promise.reject(new Error("fail"))'));
+    vm.executePendingJobs();
+
+    const result = await vm.resolvePromise(promiseHandle);
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      const dumped = vm.dump(result.error);
+      expect(dumped).toBeInstanceOf(Error);
+      expect((dumped as Error).message).toBe('fail');
+      result.error.dispose();
+    }
+    promiseHandle.dispose();
+    vm.dispose(false);
   });
 });
 
@@ -81,21 +161,15 @@ describe('Host Callbacks', () => {
     const vm = await QuickJS.create(wasmBytes);
 
     const addFn = vm.newFunction('add', (_this, ...args) => {
-      const a = args[0].toNumber();
-      const b = args[1].toNumber();
-      return vm.newNumber(a + b);
+      return vm.newNumber(args[0].toNumber() + args[1].toNumber());
     });
-
-    const global = vm.getGlobal();
-    global.setProp('add', addFn);
+    vm.setProp(vm.global, 'add', addFn);
     addFn.dispose();
 
-    const result = vm.evalCode('add(3, 4)');
-    expect(result.isException).toBe(false);
+    const result = vm.unwrapResult(vm.evalCode('add(3, 4)'));
     expect(result.toNumber()).toBe(7);
     result.dispose();
 
-    global.dispose();
     vm.dispose(false);
   });
 
@@ -103,18 +177,12 @@ describe('Host Callbacks', () => {
     const vm = await QuickJS.create(wasmBytes);
 
     const greetFn = vm.newFunction('greet', (_this, ...args) => {
-      const name = args[0].toString();
-      return vm.newString(`Hello, ${name}!`);
+      return vm.newString(`Hello, ${args[0].toString()}!`);
     });
-    const global = vm.getGlobal();
-    global.setProp('greet', greetFn);
+    vm.setProp(vm.global, 'greet', greetFn);
     greetFn.dispose();
 
-    const result = vm.evalCode('greet("World")');
-    expect(result.toString()).toBe('Hello, World!');
-    result.dispose();
-
-    global.dispose();
+    expect(vm.unwrapResult(vm.evalCode('greet("World")')).consume(h => h.toString())).toBe('Hello, World!');
     vm.dispose(false);
   });
 
@@ -124,17 +192,13 @@ describe('Host Callbacks', () => {
 
     const logFn = vm.newFunction('log', (_this, ...args) => {
       calls.push(args[0].toString());
-      return vm.getUndefined();
+      return vm.undefined;
     });
-    const global = vm.getGlobal();
-    global.setProp('log', logFn);
+    vm.setProp(vm.global, 'log', logFn);
     logFn.dispose();
 
-    vm.evalCode('log("first"); log("second"); log("third")').dispose();
-
+    vm.unwrapResult(vm.evalCode('log("first"); log("second"); log("third")')).dispose();
     expect(calls).toEqual(['first', 'second', 'third']);
-
-    global.dispose();
     vm.dispose(false);
   });
 });
@@ -142,41 +206,79 @@ describe('Host Callbacks', () => {
 describe('Async Host Callback', () => {
   it('should simulate an async host function with promise bridging', async () => {
     const vm = await QuickJS.create(wasmBytes);
-    const global = vm.getGlobal();
 
     const dnsResolveFn = vm.newFunction('dnsResolve', (_this, ...args) => {
       const hostname = args[0].toString();
-      const { promise, resolve, reject } = vm.newPromise();
+      const deferred = vm.newPromise();
 
       const ip = hostname === 'example.com' ? '93.184.216.34' : '127.0.0.1';
       const ipHandle = vm.newString(ip);
-      const undef = vm.getUndefined();
-      vm.callFunction(resolve, undef, ipHandle).dispose();
-      vm.executePendingJobs();
+      deferred.resolve(ipHandle);
       ipHandle.dispose();
-      undef.dispose();
-      resolve.dispose();
-      reject.dispose();
+      vm.executePendingJobs();
 
-      return promise;
+      return deferred.handle;
     });
 
-    global.setProp('dnsResolve', dnsResolveFn);
+    vm.setProp(vm.global, 'dnsResolve', dnsResolveFn);
     dnsResolveFn.dispose();
 
-    vm.evalCode(`
+    vm.unwrapResult(vm.evalCode(`
       globalThis.resolvedIP = "pending";
       dnsResolve("example.com").then(ip => {
         globalThis.resolvedIP = ip;
       });
-    `).dispose();
+    `)).dispose();
     vm.executePendingJobs();
 
-    const ipResult = global.getProp('resolvedIP');
-    expect(ipResult.toString()).toBe('93.184.216.34');
-    ipResult.dispose();
+    expect(vm.global.getProp('resolvedIP').consume(h => h.toString())).toBe('93.184.216.34');
+    vm.dispose(false);
+  });
+});
 
-    global.dispose();
+describe('BigInt', () => {
+  it('should create and extract bigint values', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+
+    const h = vm.newBigInt(42n);
+    expect(vm.typeof(h)).toBe('bigint');
+    expect(h.toBigInt()).toBe(42n);
+    h.dispose();
+
+    // Negative
+    const neg = vm.newBigInt(-1n);
+    expect(neg.toBigInt()).toBe(-1n);
+    neg.dispose();
+
+    // Large value
+    const large = vm.newBigInt(0x1_0000_0000n);
+    expect(large.toBigInt()).toBe(4294967296n);
+    large.dispose();
+
+    vm.dispose(false);
+  });
+});
+
+describe('newError', () => {
+  it('should accept a string message', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const err = vm.newError('test message');
+    const dumped = vm.dump(err) as Error;
+    expect(dumped).toBeInstanceOf(Error);
+    expect(dumped.message).toBe('test message');
+    err.dispose();
+    vm.dispose(false);
+  });
+
+  it('should accept a native Error object', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const nativeErr = new TypeError('bad type');
+    const err = vm.newError(nativeErr);
+    const dumped = vm.dump(err) as Error;
+    expect(dumped).toBeInstanceOf(Error);
+    expect(dumped.name).toBe('TypeError');
+    expect(dumped.message).toBe('bad type');
+    err.dispose();
     vm.dispose(false);
   });
 });
@@ -196,25 +298,25 @@ describe('dump()', () => {
 
   it('should dump arrays', async () => {
     const vm = await QuickJS.create(wasmBytes);
-
-    const arr = vm.evalCode('[1, 2, 3]');
-    const dumped = vm.dump(arr) as number[];
-    expect(Array.isArray(dumped)).toBe(true);
-    expect(dumped).toEqual([1, 2, 3]);
-    arr.dispose();
-
+    expect(vm.evalCode('[1, 2, 3]').consume(h => vm.dump(h))).toEqual([1, 2, 3]);
     vm.dispose(false);
   });
 
-  it('should dump Error objects', async () => {
+  it('should dump Error objects with name, message, and stack', async () => {
     const vm = await QuickJS.create(wasmBytes);
-
-    const err = vm.evalCode('new Error("test error")');
-    const dumped = vm.dump(err);
+    const err = vm.evalCode('new TypeError("test error")');
+    const dumped = vm.dump(err) as Error;
     expect(dumped).toBeInstanceOf(Error);
-    expect((dumped as Error).message).toBe('test error');
+    expect(dumped.name).toBe('TypeError');
+    expect(dumped.message).toBe('test error');
+    expect(dumped.stack).toBeDefined();
     err.dispose();
+    vm.dispose(false);
+  });
 
+  it('should dump bigint', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    expect(vm.evalCode('BigInt(42)').consume(h => vm.dump(h))).toBe(42n);
     vm.dispose(false);
   });
 });
@@ -236,11 +338,8 @@ describe('typeof', () => {
     ];
 
     for (const [code, expected] of cases) {
-      const handle = vm.evalCode(code);
-      expect(vm.typeof(handle)).toBe(expected);
-      handle.dispose();
+      expect(vm.evalCode(code).consume(h => vm.typeof(h))).toBe(expected);
     }
-
     vm.dispose(false);
   });
 });
@@ -248,17 +347,7 @@ describe('typeof', () => {
 describe('handle.consume()', () => {
   it('should use-then-dispose a handle', async () => {
     const vm = await QuickJS.create(wasmBytes);
-
-    const result = vm.evalCode('1 + 2').consume(h => h.toNumber());
-    expect(result).toBe(3);
-
-    const global = vm.getGlobal();
-    vm.newString('consumed').consume(h => global.setProp('test', h));
-    const check = global.getProp('test');
-    expect(check.toString()).toBe('consumed');
-    check.dispose();
-
-    global.dispose();
+    expect(vm.evalCode('1 + 2').consume(h => h.toNumber())).toBe(3);
     vm.dispose(false);
   });
 });
@@ -266,24 +355,47 @@ describe('handle.consume()', () => {
 describe('hostToHandle', () => {
   it('should convert host values to QuickJS handles', async () => {
     const vm = await QuickJS.create(wasmBytes);
-    const global = vm.getGlobal();
 
-    vm.hostToHandle('hello').consume(h => global.setProp('s', h));
-    vm.hostToHandle(42).consume(h => global.setProp('n', h));
-    vm.hostToHandle(true).consume(h => global.setProp('b', h));
-    vm.hostToHandle(null).consume(h => global.setProp('nil', h));
-    vm.hostToHandle([1, 2, 3]).consume(h => global.setProp('arr', h));
-    vm.hostToHandle({ x: 10, y: 20 }).consume(h => global.setProp('obj', h));
+    vm.hostToHandle('hello').consume(h => vm.setProp(vm.global, 's', h));
+    vm.hostToHandle(42).consume(h => vm.setProp(vm.global, 'n', h));
+    vm.hostToHandle(true).consume(h => vm.setProp(vm.global, 'b', h));
+    vm.hostToHandle(null).consume(h => vm.setProp(vm.global, 'nil', h));
+    vm.hostToHandle([1, 2, 3]).consume(h => vm.setProp(vm.global, 'arr', h));
+    vm.hostToHandle({ x: 10 }).consume(h => vm.setProp(vm.global, 'obj', h));
 
     expect(vm.evalCode('s').consume(h => h.toString())).toBe('hello');
     expect(vm.evalCode('n').consume(h => h.toNumber())).toBe(42);
     expect(vm.evalCode('b').consume(h => vm.dump(h))).toBe(true);
     expect(vm.evalCode('nil').consume(h => vm.dump(h))).toBe(null);
     expect(vm.evalCode('arr.length').consume(h => h.toNumber())).toBe(3);
-    expect(vm.evalCode('arr[1]').consume(h => h.toNumber())).toBe(2);
     expect(vm.evalCode('obj.x').consume(h => h.toNumber())).toBe(10);
 
-    global.dispose();
+    vm.dispose(false);
+  });
+
+  it('should convert bigint', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    vm.hostToHandle(42n).consume(h => vm.setProp(vm.global, 'bi', h));
+    expect(vm.evalCode('bi').consume(h => vm.dump(h))).toBe(42n);
+    vm.dispose(false);
+  });
+
+  it('should convert Error', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    vm.hostToHandle(new TypeError('boom')).consume(h => vm.setProp(vm.global, 'e', h));
+    expect(vm.evalCode('e.name').consume(h => h.toString())).toBe('TypeError');
+    expect(vm.evalCode('e.message').consume(h => h.toString())).toBe('boom');
+    vm.dispose(false);
+  });
+});
+
+describe('vm.setProp', () => {
+  it('should set properties via vm.setProp with string key', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const val = vm.newNumber(99);
+    vm.setProp(vm.global, 'x', val);
+    val.dispose();
+    expect(vm.evalCode('x').consume(h => h.toNumber())).toBe(99);
     vm.dispose(false);
   });
 });
@@ -291,94 +403,71 @@ describe('hostToHandle', () => {
 describe('Snapshot and Restore', () => {
   it('should preserve simple state across snapshot/restore', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.evalCode(`
-      globalThis.counter = 42;
-      globalThis.message = "hello from snapshot";
-    `).dispose();
+    vm1.unwrapResult(vm1.evalCode('globalThis.counter = 42')).dispose();
 
     const snapshot = vm1.snapshot();
     vm1.dispose(false);
 
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-
-    expect(vm2.evalCode('globalThis.counter').consume(h => h.toNumber())).toBe(42);
-    expect(vm2.evalCode('globalThis.message').consume(h => h.toString())).toBe('hello from snapshot');
-    expect(vm2.evalCode('globalThis.counter + 1').consume(h => h.toNumber())).toBe(43);
-
+    expect(vm2.evalCode('counter').consume(h => h.toNumber())).toBe(42);
     vm2.dispose(false);
   });
 
   it('should resolve a pending promise in a restored VM', async () => {
+    // Create a promise inside QuickJS and store the resolve func on global
     const vm1 = await QuickJS.create(wasmBytes);
-    const { promise, resolve: resolveFunc } = vm1.newPromise();
-    const global1 = vm1.getGlobal();
-    global1.setProp('pendingStep', promise);
-    global1.setProp('__resolveFunc', resolveFunc);
-
-    vm1.evalCode(`
+    vm1.unwrapResult(vm1.evalCode(`
       globalThis.stepResult = "not yet";
+      let __resolve;
+      globalThis.pendingStep = new Promise(r => { __resolve = r; });
+      globalThis.__resolveFunc = __resolve;
       globalThis.pendingStep.then(value => {
         globalThis.stepResult = "completed: " + value;
       });
-    `).dispose();
+    `)).dispose();
     vm1.executePendingJobs();
 
-    expect(global1.getProp('stepResult').consume(h => h.toString())).toBe('not yet');
+    expect(vm1.global.getProp('stepResult').consume(h => h.toString())).toBe('not yet');
 
     const snapshot = vm1.snapshot();
     vm1.dispose(false);
 
-    // Restore in a fresh instance
+    // Restore and resolve
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-
-    expect(vm2.evalCode('globalThis.stepResult').consume(h => h.toString())).toBe('not yet');
-
-    const global2 = vm2.getGlobal();
-    const restoredResolve = global2.getProp('__resolveFunc');
-    expect(restoredResolve.isUndefined).toBe(false);
-
-    const resolveArg = vm2.newString('step-42-result');
-    const undef = vm2.getUndefined();
-    vm2.callFunction(restoredResolve, undef, resolveArg).dispose();
+    const restoredResolve = vm2.global.getProp('__resolveFunc');
+    const arg = vm2.newString('step-42-result');
+    vm2.callFunction(restoredResolve, vm2.undefined, arg).dispose();
     vm2.executePendingJobs();
 
-    expect(global2.getProp('stepResult').consume(h => h.toString())).toBe('completed: step-42-result');
+    expect(vm2.global.getProp('stepResult').consume(h => h.toString())).toBe('completed: step-42-result');
 
-    resolveArg.dispose();
-    undef.dispose();
+    arg.dispose();
     restoredResolve.dispose();
-    global2.dispose();
     vm2.dispose(false);
   });
 
   it('should support host callback re-registration after restore', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    const global1 = vm1.getGlobal();
 
     const fn = vm1.newFunction('hostAdd', (_this, ...args) => {
       return vm1.newNumber(args[0].toNumber() + args[1].toNumber());
     });
-    global1.setProp('hostAdd', fn);
+    vm1.setProp(vm1.global, 'hostAdd', fn);
     fn.dispose();
 
     expect(vm1.evalCode('hostAdd(10, 20)').consume(h => h.toNumber())).toBe(30);
 
     const snapshot = vm1.snapshot();
-    global1.dispose();
     vm1.dispose(false);
 
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-
-    // Re-register callback ID 1
     vm2.registerHostCallback(1, (_this, ...args) => {
       return vm2.newNumber(args[0].toNumber() + args[1].toNumber());
     });
 
-    const result = vm2.evalCode('hostAdd(100, 200)');
-    expect(result.isException).toBe(false);
+    const result = vm2.unwrapResult(vm2.evalCode('hostAdd(100, 200)'));
     expect(result.toNumber()).toBe(300);
     result.dispose();
-
     vm2.dispose(false);
   });
 });

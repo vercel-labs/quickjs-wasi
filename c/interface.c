@@ -410,6 +410,33 @@ JSValue *qjs_new_error(void) {
     return jsvalue_to_heap(JS_NewError(ctx));
 }
 
+/* ---- BigInt ---- */
+
+/*
+ * Create a BigInt from two 32-bit halves (lo, hi) representing a signed 64-bit integer.
+ * This avoids the need to pass 64-bit values across the WASM boundary.
+ */
+__attribute__((export_name("qjs_new_big_int64")))
+JSValue *qjs_new_big_int64(int lo, int hi) {
+    int64_t val = ((int64_t)(unsigned int)hi << 32) | (int64_t)(unsigned int)lo;
+    return jsvalue_to_heap(JS_NewBigInt64(ctx, val));
+}
+
+/*
+ * Extract a BigInt as two 32-bit halves written to output pointers.
+ * Returns 0 on success, -1 on failure.
+ */
+__attribute__((export_name("qjs_get_big_int64")))
+int qjs_get_big_int64(JSValue *val, int *lo_out, int *hi_out) {
+    int64_t result;
+    int ret = JS_ToBigInt64(ctx, &result, *val);
+    if (ret == 0) {
+        *lo_out = (int)(unsigned int)(result & 0xFFFFFFFF);
+        *hi_out = (int)(unsigned int)((result >> 32) & 0xFFFFFFFF);
+    }
+    return ret;
+}
+
 /* ---- Snapshot support helpers ---- */
 
 /* Returns the pointer to the JSRuntime (for introspection only) */
