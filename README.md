@@ -339,7 +339,7 @@ These are singleton handles — do **not** dispose them:
 **Notes:**
 
 - Functions dump as `undefined` (cannot be meaningfully serialized)
-- Circular references in objects dump as `undefined` (detected via object pointer identity)
+- Circular and shared references are preserved — `dump()` returns the same host object for the same QuickJS object pointer
 - Only own enumerable string properties are included when dumping objects
 - Binary data is always **copied** between host and WASM memory — there is no zero-copy view API
 - `dump()` for typed arrays determines the host constructor from bytes-per-element (1 → `Uint8Array`, 2 → `Uint16Array`, 4 → `Uint32Array`, 8 → `Float64Array`)

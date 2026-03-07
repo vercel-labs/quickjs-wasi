@@ -141,7 +141,7 @@ describe('dump', () => {
     expect(dumped.fn).toBeUndefined();
   });
 
-  it('should handle circular references gracefully', async () => {
+  it('should preserve circular references', async () => {
     using vm = await QuickJS.create(wasmBytes);
     const dumped = vm.evalCode(`
       var obj = { a: 1 };
@@ -149,7 +149,29 @@ describe('dump', () => {
       obj;
     `).consume(h => vm.dump(h)) as any;
     expect(dumped.a).toBe(1);
-    expect(dumped.self).toBeUndefined();
+    expect(dumped.self).toBe(dumped); // same object reference
+  });
+
+  it('should preserve shared references', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode(`
+      var shared = { x: 42 };
+      ({ a: shared, b: shared });
+    `).consume(h => vm.dump(h)) as any;
+    expect(dumped.a.x).toBe(42);
+    expect(dumped.a).toBe(dumped.b); // same object reference
+  });
+
+  it('should preserve circular references in arrays', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const dumped = vm.evalCode(`
+      var arr = [1, 2];
+      arr.push(arr);
+      arr;
+    `).consume(h => vm.dump(h)) as any;
+    expect(dumped[0]).toBe(1);
+    expect(dumped[1]).toBe(2);
+    expect(dumped[2]).toBe(dumped); // same array reference
   });
 
   it('should dump empty objects', async () => {

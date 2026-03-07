@@ -776,10 +776,10 @@ export class QuickJS {
    */
   dump(handle: JSValueHandle): unknown {
     this.assertNotDisposed();
-    return this._dump(handle, new Set());
+    return this._dump(handle, new Map());
   }
 
-  private _dump(handle: JSValueHandle, visited: Set<number>): unknown {
+  private _dump(handle: JSValueHandle, visited: Map<number, unknown>): unknown {
     const e = this.exports;
 
     if (e.qjs_is_undefined(handle.ptr)) return undefined;
@@ -800,12 +800,15 @@ export class QuickJS {
     // Functions cannot be meaningfully serialized
     if (e.qjs_is_function(handle.ptr)) return undefined;
 
-    // Detect circular references for objects/arrays using the underlying
-    // JS object pointer (not the heap-allocated JSValue wrapper pointer)
+    // Detect circular references using the underlying JS object pointer.
+    // If we've already visited this object, return the same host object
+    // (preserving the circular structure on the host side).
     if (e.qjs_is_object(handle.ptr)) {
       const objPtr = e.qjs_get_value_ptr(handle.ptr);
-      if (objPtr && visited.has(objPtr)) return undefined;
-      if (objPtr) visited.add(objPtr);
+      if (objPtr) {
+        const existing = visited.get(objPtr);
+        if (existing !== undefined) return existing;
+      }
     }
 
     // Check for typed arrays (before regular array check — typed arrays are not Array.isArray)
@@ -817,7 +820,6 @@ export class QuickJS {
       const abHandle = new JSValueHandle(this, abPtr);
 
       if (!abHandle.isException) {
-        // It IS a typed array — extract the data
         const view = new DataView(e.memory.buffer);
         const byteOffset = view.getUint32(byteOffsetPtr, true);
         const byteLength = view.getUint32(byteLengthPtr, true);
@@ -834,7 +836,6 @@ export class QuickJS {
         if (abDataPtr !== 0) {
           const rawBytes = new Uint8Array(e.memory.buffer, abDataPtr + byteOffset, byteLength).slice();
 
-          // Determine the typed array constructor from bytes_per_element
           switch (bytesPerElement) {
             case 1: return rawBytes;
             case 2: return new Uint16Array(rawBytes.buffer);
@@ -856,6 +857,10 @@ export class QuickJS {
       const len = e.qjs_get_float64(lenHandle.ptr);
       lenHandle.dispose();
       const arr: unknown[] = [];
+      // Register the array in the visited map BEFORE populating it,
+      // so circular references within the array resolve to this same array.
+      const objPtr = e.qjs_get_value_ptr(handle.ptr);
+      if (objPtr) visited.set(objPtr, arr);
       for (let i = 0; i < len; i++) {
         const elemPtr = e.qjs_get_prop_uint32(handle.ptr, i);
         const elemHandle = new JSValueHandle(this, elemPtr);
@@ -884,7 +889,6 @@ export class QuickJS {
     }
 
     if (e.qjs_is_object(handle.ptr)) {
-      // Enumerate own property names and recursively dump each value
       const keysPtr = e.qjs_get_own_property_names(handle.ptr);
       const keysHandle = new JSValueHandle(this, keysPtr);
       if (keysHandle.isException) {
@@ -896,6 +900,10 @@ export class QuickJS {
       lenHandle.dispose();
 
       const obj: Record<string, unknown> = {};
+      // Register the object in the visited map BEFORE populating it,
+      // so circular references resolve to this same object.
+      const objPtr = e.qjs_get_value_ptr(handle.ptr);
+      if (objPtr) visited.set(objPtr, obj);
       for (let i = 0; i < len; i++) {
         const keyPtr = e.qjs_get_prop_uint32(keysHandle.ptr, i);
         const keyHandle = new JSValueHandle(this, keyPtr);
