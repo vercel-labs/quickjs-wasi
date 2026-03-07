@@ -476,6 +476,57 @@ JSValue *qjs_get_own_property_names(JSValue *obj) {
     return jsvalue_to_heap(arr);
 }
 
+/* ---- ArrayBuffer / TypedArray ---- */
+
+/*
+ * Create a new ArrayBuffer by copying data from the given pointer.
+ */
+__attribute__((export_name("qjs_new_array_buffer")))
+JSValue *qjs_new_array_buffer(const uint8_t *data, size_t len) {
+    return jsvalue_to_heap(JS_NewArrayBufferCopy(ctx, data, len));
+}
+
+/*
+ * Get a pointer to the ArrayBuffer's data and its length.
+ * Returns the data pointer (into WASM memory), writes length to *len_out.
+ * Returns NULL if the value is not an ArrayBuffer.
+ */
+__attribute__((export_name("qjs_get_array_buffer")))
+uint8_t *qjs_get_array_buffer(JSValue *val, size_t *len_out) {
+    return JS_GetArrayBuffer(ctx, len_out, *val);
+}
+
+/*
+ * Check if a value is an ArrayBuffer.
+ */
+__attribute__((export_name("qjs_is_array_buffer")))
+int qjs_is_array_buffer(JSValue *val) {
+    return JS_IsArrayBuffer(*val);
+}
+
+/*
+ * Create a new Uint8Array by copying data from the given pointer.
+ */
+__attribute__((export_name("qjs_new_uint8_array")))
+JSValue *qjs_new_uint8_array(const uint8_t *data, size_t len) {
+    return jsvalue_to_heap(JS_NewUint8ArrayCopy(ctx, data, len));
+}
+
+/*
+ * Get the underlying ArrayBuffer from a typed array, along with byte offset,
+ * byte length, and bytes per element.
+ * Returns a heap-allocated JSValue* for the ArrayBuffer.
+ */
+__attribute__((export_name("qjs_get_typed_array_buffer")))
+JSValue *qjs_get_typed_array_buffer(JSValue *val, size_t *byte_offset_out,
+                                     size_t *byte_length_out,
+                                     size_t *bytes_per_element_out) {
+    return jsvalue_to_heap(JS_GetTypedArrayBuffer(ctx, *val,
+                                                   byte_offset_out,
+                                                   byte_length_out,
+                                                   bytes_per_element_out));
+}
+
 /* ---- Snapshot support helpers ---- */
 
 /* Returns the pointer to the JSRuntime (for introspection only) */

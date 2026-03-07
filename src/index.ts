@@ -59,7 +59,14 @@ interface QuickJSExports {
   qjs_is_promise(valPtr: number): number;
   qjs_is_symbol(valPtr: number): number;
   qjs_is_big_int(valPtr: number): number;
+  qjs_is_array_buffer(valPtr: number): number;
   qjs_get_bool(valPtr: number): number;
+
+  // ArrayBuffer / TypedArray
+  qjs_new_array_buffer(dataPtr: number, len: number): number;
+  qjs_get_array_buffer(valPtr: number, lenOutPtr: number): number;
+  qjs_new_uint8_array(dataPtr: number, len: number): number;
+  qjs_get_typed_array_buffer(valPtr: number, byteOffsetOutPtr: number, byteLengthOutPtr: number, bytesPerElementOutPtr: number): number;
 
   // Value management
   qjs_dup_value(valPtr: number): number;
@@ -457,6 +464,33 @@ export class QuickJS {
   }
 
   /**
+   * Create a new QuickJS ArrayBuffer by copying data from a host buffer.
+   */
+  newArrayBuffer(data: ArrayBuffer | Uint8Array): JSValueHandle {
+    this.assertNotDisposed();
+    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+    const ptr = this.exports.wasm_malloc(bytes.length);
+    if (ptr === 0) throw new Error('wasm_malloc failed');
+    new Uint8Array(this.exports.memory.buffer).set(bytes, ptr);
+    const result = new JSValueHandle(this, this.exports.qjs_new_array_buffer(ptr, bytes.length));
+    this.exports.wasm_free(ptr);
+    return result;
+  }
+
+  /**
+   * Create a new QuickJS Uint8Array by copying data from a host buffer.
+   */
+  newUint8Array(data: Uint8Array): JSValueHandle {
+    this.assertNotDisposed();
+    const ptr = this.exports.wasm_malloc(data.length);
+    if (ptr === 0) throw new Error('wasm_malloc failed');
+    new Uint8Array(this.exports.memory.buffer).set(data, ptr);
+    const result = new JSValueHandle(this, this.exports.qjs_new_uint8_array(ptr, data.length));
+    this.exports.wasm_free(ptr);
+    return result;
+  }
+
+  /**
    * Get undefined. Prefer the cached `vm.undefined` property.
    */
   getUndefined(): JSValueHandle {
@@ -754,6 +788,7 @@ export class QuickJS {
     if (e.qjs_is_number(handle.ptr)) return e.qjs_get_float64(handle.ptr);
     if (e.qjs_is_string(handle.ptr)) return handle.toString();
     if (e.qjs_is_big_int(handle.ptr)) return handle.toBigInt();
+    if (e.qjs_is_array_buffer(handle.ptr)) return handle.toArrayBuffer();
 
     if (e.qjs_is_exception(handle.ptr)) {
       const exc = this.getException();
@@ -771,6 +806,49 @@ export class QuickJS {
       const objPtr = e.qjs_get_value_ptr(handle.ptr);
       if (objPtr && visited.has(objPtr)) return undefined;
       if (objPtr) visited.add(objPtr);
+    }
+
+    // Check for typed arrays (before regular array check — typed arrays are not Array.isArray)
+    if (e.qjs_is_object(handle.ptr)) {
+      const byteOffsetPtr = e.wasm_malloc(4);
+      const byteLengthPtr = e.wasm_malloc(4);
+      const bytesPerElemPtr = e.wasm_malloc(4);
+      const abPtr = e.qjs_get_typed_array_buffer(handle.ptr, byteOffsetPtr, byteLengthPtr, bytesPerElemPtr);
+      const abHandle = new JSValueHandle(this, abPtr);
+
+      if (!abHandle.isException) {
+        // It IS a typed array — extract the data
+        const view = new DataView(e.memory.buffer);
+        const byteOffset = view.getUint32(byteOffsetPtr, true);
+        const byteLength = view.getUint32(byteLengthPtr, true);
+        const bytesPerElement = view.getUint32(bytesPerElemPtr, true);
+        e.wasm_free(byteOffsetPtr);
+        e.wasm_free(byteLengthPtr);
+        e.wasm_free(bytesPerElemPtr);
+
+        const abLenPtr = e.wasm_malloc(4);
+        const abDataPtr = e.qjs_get_array_buffer(abHandle.ptr, abLenPtr);
+        e.wasm_free(abLenPtr);
+        abHandle.dispose();
+
+        if (abDataPtr !== 0) {
+          const rawBytes = new Uint8Array(e.memory.buffer, abDataPtr + byteOffset, byteLength).slice();
+
+          // Determine the typed array constructor from bytes_per_element
+          switch (bytesPerElement) {
+            case 1: return rawBytes;
+            case 2: return new Uint16Array(rawBytes.buffer);
+            case 4: return new Uint32Array(rawBytes.buffer);
+            case 8: return new Float64Array(rawBytes.buffer);
+            default: return rawBytes;
+          }
+        }
+      } else {
+        abHandle.dispose();
+        e.wasm_free(byteOffsetPtr);
+        e.wasm_free(byteLengthPtr);
+        e.wasm_free(bytesPerElemPtr);
+      }
     }
 
     if (e.qjs_is_array(handle.ptr)) {
@@ -850,6 +928,19 @@ export class QuickJS {
 
     if (value instanceof Error) {
       return this.newError(value);
+    }
+
+    if (value instanceof ArrayBuffer) {
+      return this.newArrayBuffer(value);
+    }
+
+    if (value instanceof Uint8Array) {
+      return this.newUint8Array(value);
+    }
+
+    if (ArrayBuffer.isView(value)) {
+      // Other typed arrays — convert via Uint8Array of the underlying buffer
+      return this.newArrayBuffer(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
     }
 
     if (Array.isArray(value)) {
@@ -1060,6 +1151,72 @@ export class JSValueHandle {
     e.wasm_free(loPtr);
     e.wasm_free(hiPtr);
     return (BigInt(hi) << 32n) | BigInt(lo);
+  }
+
+  /**
+   * Extract the value as an ArrayBuffer (copies from WASM memory).
+   * Works on ArrayBuffer values. For typed arrays, gets the underlying buffer.
+   */
+  toArrayBuffer(): ArrayBuffer {
+    const e = this.vm._getExports();
+    const lenOutPtr = e.wasm_malloc(4);
+
+    if (e.qjs_is_array_buffer(this.ptr)) {
+      const dataPtr = e.qjs_get_array_buffer(this.ptr, lenOutPtr);
+      if (dataPtr === 0) {
+        e.wasm_free(lenOutPtr);
+        throw new Error('Failed to get ArrayBuffer data');
+      }
+      const view = new DataView(e.memory.buffer);
+      const len = view.getUint32(lenOutPtr, true);
+      e.wasm_free(lenOutPtr);
+      // Copy out of WASM memory
+      return new Uint8Array(e.memory.buffer, dataPtr, len).slice().buffer;
+    }
+
+    // Try typed array → underlying ArrayBuffer
+    e.wasm_free(lenOutPtr);
+    const byteOffsetPtr = e.wasm_malloc(4);
+    const byteLengthPtr = e.wasm_malloc(4);
+    const bytesPerElemPtr = e.wasm_malloc(4);
+    const abPtr = e.qjs_get_typed_array_buffer(this.ptr, byteOffsetPtr, byteLengthPtr, bytesPerElemPtr);
+    const abHandle = new JSValueHandle(this.vm, abPtr);
+
+    if (abHandle.isException) {
+      abHandle.dispose();
+      e.wasm_free(byteOffsetPtr);
+      e.wasm_free(byteLengthPtr);
+      e.wasm_free(bytesPerElemPtr);
+      throw new Error('Value is not an ArrayBuffer or typed array');
+    }
+
+    const view = new DataView(e.memory.buffer);
+    const byteOffset = view.getUint32(byteOffsetPtr, true);
+    const byteLength = view.getUint32(byteLengthPtr, true);
+    e.wasm_free(byteOffsetPtr);
+    e.wasm_free(byteLengthPtr);
+    e.wasm_free(bytesPerElemPtr);
+
+    // Get the raw data from the underlying ArrayBuffer
+    const abLenPtr = e.wasm_malloc(4);
+    const abDataPtr = e.qjs_get_array_buffer(abHandle.ptr, abLenPtr);
+    e.wasm_free(abLenPtr);
+    abHandle.dispose();
+
+    if (abDataPtr === 0) {
+      throw new Error('Failed to get ArrayBuffer data from typed array');
+    }
+
+    // Copy the relevant slice out of WASM memory
+    return new Uint8Array(e.memory.buffer, abDataPtr + byteOffset, byteLength).slice().buffer;
+  }
+
+  /**
+   * Extract the value as a Uint8Array (copies from WASM memory).
+   * Works on Uint8Array, ArrayBuffer, and other typed array values.
+   */
+  toUint8Array(): Uint8Array {
+    return new Uint8Array(this.toArrayBuffer());
   }
 
   /**
