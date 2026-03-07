@@ -3,7 +3,7 @@
   "changelog": [
     "@changesets/changelog-github",
     {
-      "repo": "vercel-labs/quickjs-wasm"
+      "repo": "vercel-labs/quickjs-wasi"
     }
   ],
   "commit": false,
