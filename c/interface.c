@@ -115,6 +115,18 @@ int qjs_init(void) {
     return 0;
 }
 
+/* ---- Runtime Limits ---- */
+
+__attribute__((export_name("qjs_set_memory_limit")))
+void qjs_set_memory_limit(size_t limit) {
+    if (rt) JS_SetMemoryLimit(rt, limit);
+}
+
+__attribute__((export_name("qjs_set_max_stack_size")))
+void qjs_set_max_stack_size(size_t size) {
+    if (rt) JS_SetMaxStackSize(rt, size);
+}
+
 __attribute__((export_name("qjs_destroy")))
 void qjs_destroy(void) {
     if (ctx) {

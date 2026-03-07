@@ -168,6 +168,27 @@ currentTime += 1000n; // advance 1 second
 vm.evalCode('Date.now()').consume(h => h.toNumber()); // 1700000001000
 ```
 
+### Memory Limits
+
+Restrict how much memory the QuickJS runtime can allocate. When exceeded, allocations fail and surface as JS exceptions:
+
+```typescript
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  memoryLimit: 4 * 1024 * 1024, // 4 MB
+});
+
+vm.evalCode(`
+  try {
+    const huge = new Array(10000000).fill("x".repeat(1000));
+  } catch (e) {
+    console.log(e.message); // allocation failure
+  }
+`);
+```
+
+The limit is re-applied after `QuickJS.restore()`, so you can use a different limit for restored VMs than the original.
+
 ### Snapshot and Restore
 
 The key differentiator — snapshot the entire VM state and restore it later:
@@ -507,6 +528,7 @@ Plus the `__stack_pointer` WASM global (a single i32).
 
 - **Snapshot size**: Currently captures the entire linear memory (~256 KB baseline). Could be optimized with sparse/delta encoding (only non-zero pages).
 - **Compression**: Snapshots are raw bytes. gzip/brotli/zstd compression would reduce storage costs.
-- **Memory limits**: No `JS_SetMemoryLimit` or `JS_SetInterruptHandler` exposed yet. Needed for untrusted code sandboxing.
+- **Interrupt handler**: No `JS_SetInterruptHandler` exposed yet. Needed to prevent infinite loops in untrusted code.
+- **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
 - **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
 - **Browser compatibility**: The WASI shim and WebAssembly API usage should work in browsers, but the default WASM loading path uses `node:fs`. Pass `wasmBytes` directly for browser use.

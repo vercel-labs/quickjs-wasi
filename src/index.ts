@@ -20,6 +20,13 @@ export interface QuickJSOptions {
   wasm?: BufferSource | WebAssembly.Module;
   /** Custom WASI function implementations. */
   wasi?: WasiOptions;
+  /**
+   * Maximum memory the QuickJS runtime can allocate, in bytes.
+   * When exceeded, allocations fail and surface as JS exceptions
+   * (e.g. `InternalError: out of memory`).
+   */
+  memoryLimit?: number;
+
 }
 
 // ---- WASM Export Types ----
@@ -108,6 +115,10 @@ interface QuickJSExports {
   // Error handling
   qjs_get_exception(): number;
   qjs_new_error(): number;
+
+  // Runtime limits
+  qjs_set_memory_limit(limit: number): void;
+  qjs_set_max_stack_size(size: number): void;
 
   // Snapshot support
   qjs_get_runtime_ptr(): number;
@@ -248,6 +259,9 @@ export class QuickJS {
       throw new Error('Failed to initialize QuickJS runtime');
     }
 
+    // Apply runtime limits
+    QuickJS.applyLimits(vm, opts);
+
     return vm;
   }
 
@@ -284,6 +298,9 @@ export class QuickJS {
     // Restore the stack pointer
     vm.exports.__stack_pointer.value = snapshot.stackPointer;
 
+    // Apply runtime limits
+    QuickJS.applyLimits(vm, opts);
+
     return vm;
   }
 
@@ -292,9 +309,15 @@ export class QuickJS {
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
     if (!options) return {};
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
+  }
+
+  private static applyLimits(vm: QuickJS, opts: QuickJSOptions): void {
+    if (opts.memoryLimit !== undefined) {
+      vm.exports.qjs_set_memory_limit(opts.memoryLimit);
+    }
   }
 
   private static async resolveModule(wasmInput?: BufferSource | WebAssembly.Module): Promise<WebAssembly.Module> {
