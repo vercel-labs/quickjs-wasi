@@ -46,7 +46,7 @@ describe('snapshot and restore', () => {
   it('should support host callback re-registration after restore', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
     {
-      using fn = vm1.newFunction('hostAdd', (_this, ...args) => {
+      using fn = vm1.newFunction('hostAdd', (...args) => {
         return vm1.newNumber(args[0].toNumber() + args[1].toNumber());
       });
       vm1.setProp(vm1.global, 'hostAdd', fn);
@@ -58,7 +58,7 @@ describe('snapshot and restore', () => {
     vm1.dispose();
 
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-    vm2.registerHostCallback(1, (_this, ...args) => {
+    vm2.registerHostCallback(1, (...args) => {
       return vm2.newNumber(args[0].toNumber() + args[1].toNumber());
     });
 

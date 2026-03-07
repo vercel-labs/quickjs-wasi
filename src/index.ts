@@ -11,7 +11,7 @@ import { createWasiShim, type WasiOptions } from './wasi-shim.js';
 
 // ---- Public types ----
 
-export type HostFunction = (this_val: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
+export type HostFunction = (this: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
 
 export type { WasiOptions };
 
@@ -498,7 +498,7 @@ export class QuickJS {
     }
 
     try {
-      const result = callback.call(undefined, thisHandle, ...args);
+      const result = callback.call(thisHandle, ...args);
       return this.exports.qjs_dup_value(result.ptr);
     } catch (err) {
       const errStr = err instanceof Error ? err.message : String(err);
@@ -833,12 +833,12 @@ export class QuickJS {
 
     // Pending — attach a .then/.catch to get notified
     return new Promise((hostResolve) => {
-      const onFulfilled = this.newFunction('__onFulfilled', (_this, ...args) => {
+      const onFulfilled = this.newFunction('__onFulfilled', (...args) => {
         const val = args[0]?.dup() ?? this.undefined;
         hostResolve({ value: val });
         return this.undefined;
       });
-      const onRejected = this.newFunction('__onRejected', (_this, ...args) => {
+      const onRejected = this.newFunction('__onRejected', (...args) => {
         const val = args[0]?.dup() ?? this.undefined;
         hostResolve({ error: val });
         return this.undefined;

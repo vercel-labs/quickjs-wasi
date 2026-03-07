@@ -55,7 +55,7 @@ describe('Symbol.for() (global symbols)', () => {
     using vm = await QuickJS.create(wasmBytes);
     // This is the pattern used by WDK: globalThis[Symbol.for("WORKFLOW_USE_STEP")]
     using sym = vm.newSymbolFor('WORKFLOW_USE_STEP');
-    using fn = vm.newFunction('useStep', (_this, ...args) => {
+    using fn = vm.newFunction('useStep', (...args) => {
       const stepId = args[0].toString();
       return vm.newString(`step:${stepId}`);
     });

@@ -29,7 +29,7 @@ export function compile<R = unknown, A extends unknown[] = []>(
           `Expected a "function" for sandbox property \`${name}\`, but got "${typeof value}"`
         );
       }
-      const fnHandle = vm.newFunction(name, (_this, ...args) => {
+      const fnHandle = vm.newFunction(name, (...args) => {
         const result = value(
           ...args.map((arg) => vm.dump(arg))
         );

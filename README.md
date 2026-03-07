@@ -71,7 +71,7 @@ using vm = await QuickJS.create(wasmBytes);
 
 // The first argument to the callback is always `this`
 {
-  using add = vm.newFunction('add', (_this, ...args) => {
+  using add = vm.newFunction('add', (...args) => {
     return vm.newNumber(args[0].toNumber() + args[1].toNumber());
   });
   vm.setProp(vm.global, 'add', add);
@@ -90,7 +90,7 @@ using vm = await QuickJS.create(wasmBytes);
 
 // Create an async host function that returns a promise to QuickJS
 {
-  using dnsResolve = vm.newFunction('dnsResolve', (_this, ...args) => {
+  using dnsResolve = vm.newFunction('dnsResolve', (...args) => {
     const hostname = args[0].toString();
     const deferred = vm.newPromise();
 
@@ -276,7 +276,7 @@ let snapshot: Snapshot;
 {
   using vm = await QuickJS.create(wasmBytes);
   // fn is assigned callback ID 1 (first registered callback)
-  using fn = vm.newFunction('hostAdd', (_this, ...args) => {
+  using fn = vm.newFunction('hostAdd', (...args) => {
     return vm.newNumber(args[0].toNumber() + args[1].toNumber());
   });
   vm.setProp(vm.global, 'hostAdd', fn);
@@ -286,7 +286,7 @@ let snapshot: Snapshot;
 {
   // After restore — re-register with the same ID
   using vm = await QuickJS.restore(snapshot, wasmBytes);
-  vm.registerHostCallback(1, (_this, ...args) => {
+  vm.registerHostCallback(1, (...args) => {
     return vm.newNumber(args[0].toNumber() + args[1].toNumber());
   });
 
@@ -305,7 +305,7 @@ using vm = await QuickJS.create(wasmBytes);
 
 // Inject sandbox functions
 {
-  using isPlainHostName = vm.newFunction('isPlainHostName', (_this, ...args) => {
+  using isPlainHostName = vm.newFunction('isPlainHostName', (...args) => {
     const host = args[0].toString();
     return host.includes('.') ? vm.false : vm.true;
   });

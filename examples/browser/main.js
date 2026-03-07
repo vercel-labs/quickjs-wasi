@@ -48,11 +48,11 @@ async function run() {
 
     // Provide console.log / console.error via host functions
     {
-      const log = vm.newFunction('log', (_this, ...args) => {
+      const log = vm.newFunction('log', (...args) => {
         appendOutput(args.map(a => vm.dump(a)).map(String).join(' '), 'log');
         return vm.undefined;
       });
-      const error = vm.newFunction('error', (_this, ...args) => {
+      const error = vm.newFunction('error', (...args) => {
         appendOutput(args.map(a => vm.dump(a)).map(String).join(' '), 'error');
         return vm.undefined;
       });
