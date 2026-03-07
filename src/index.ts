@@ -148,13 +148,30 @@ export interface Snapshot {
   memory: Uint8Array;
   /** The stack pointer value at snapshot time */
   stackPointer: number;
-  /** Size of memory in WASM pages (64KB each) */
-  memoryPages: number;
   /** Pointer to JSRuntime in the WASM memory */
   runtimePtr: number;
   /** Pointer to JSContext in the WASM memory */
   contextPtr: number;
 }
+
+// ---- Snapshot serialization ----
+
+/** Magic bytes: "QJSS" (QuickJS Snapshot) */
+const SNAPSHOT_MAGIC = 0x514A5353;
+/** Current serialization format version */
+const SNAPSHOT_VERSION = 1;
+/**
+ * Header layout (version 1):
+ *   0-3:   Magic "QJSS" (u32 big-endian)
+ *   4:     Version (u8)
+ *   5-7:   Reserved (zero)
+ *   8-11:  Memory size in bytes (u32 little-endian)
+ *   12-15: Stack pointer (u32 little-endian)
+ *   16-19: Runtime pointer (u32 little-endian)
+ *   20-23: Context pointer (u32 little-endian)
+ *   24+:   Memory data (memorySize bytes)
+ */
+const SNAPSHOT_HEADER_SIZE = 24;
 
 // ---- Deferred promise type ----
 
@@ -293,7 +310,7 @@ export class QuickJS {
 
     // Grow the exported memory to match the snapshot if needed
     const currentPages = exportedMemory.buffer.byteLength / 65536;
-    const neededPages = snapshot.memoryPages;
+    const neededPages = Math.ceil(snapshot.memory.byteLength / 65536);
     if (neededPages > currentPages) {
       exportedMemory.grow(neededPages - currentPages);
     }
@@ -312,6 +329,87 @@ export class QuickJS {
     QuickJS.applyLimits(vm, opts);
 
     return vm;
+  }
+
+  // ---- Snapshot serialization ----
+
+  /**
+   * Serialize a snapshot to a binary buffer for persistent storage.
+   *
+   * The format includes a versioned header followed by the raw memory.
+   * Apply your own compression (gzip, zstd, etc.) on top for smaller
+   * storage — the memory compresses very well due to large zero regions.
+   *
+   * Format (version 1):
+   * ```
+   * Offset  Size  Field
+   * 0       4     Magic: "QJSS" (0x514A5353, big-endian)
+   * 4       1     Version: 1
+   * 5       3     Reserved (zero)
+   * 8       4     Memory size in bytes (u32 little-endian)
+   * 12      4     Stack pointer (u32 little-endian)
+   * 16      4     Runtime pointer (u32 little-endian)
+   * 20      4     Context pointer (u32 little-endian)
+   * 24      N     Memory data (N = memory size from offset 8)
+   * ```
+   */
+  static serializeSnapshot(snapshot: Snapshot): Uint8Array {
+    const totalSize = SNAPSHOT_HEADER_SIZE + snapshot.memory.byteLength;
+
+    const buffer = new ArrayBuffer(totalSize);
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+
+    // Header
+    view.setUint32(0, SNAPSHOT_MAGIC, false); // big-endian for readability in hex
+    view.setUint8(4, SNAPSHOT_VERSION);
+    // bytes 5-7 are reserved (already zero)
+    view.setUint32(8, snapshot.memory.byteLength, true);
+    view.setUint32(12, snapshot.stackPointer, true);
+    view.setUint32(16, snapshot.runtimePtr, true);
+    view.setUint32(20, snapshot.contextPtr, true);
+
+    // Memory data
+    bytes.set(snapshot.memory, SNAPSHOT_HEADER_SIZE);
+
+    return bytes;
+  }
+
+  /**
+   * Deserialize a snapshot from a binary buffer produced by `serializeSnapshot()`.
+   */
+  static deserializeSnapshot(data: Uint8Array): Snapshot {
+    if (data.length < SNAPSHOT_HEADER_SIZE) {
+      throw new Error('Invalid snapshot: too small');
+    }
+
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+    // Validate magic
+    const magic = view.getUint32(0, false);
+    if (magic !== SNAPSHOT_MAGIC) {
+      throw new Error(`Invalid snapshot: bad magic (expected 0x${SNAPSHOT_MAGIC.toString(16)}, got 0x${magic.toString(16)})`);
+    }
+
+    // Validate version
+    const version = view.getUint8(4);
+    if (version !== SNAPSHOT_VERSION) {
+      throw new Error(`Unsupported snapshot version: ${version} (expected ${SNAPSHOT_VERSION})`);
+    }
+
+    const memorySize = view.getUint32(8, true);
+    const stackPointer = view.getUint32(12, true);
+    const runtimePtr = view.getUint32(16, true);
+    const contextPtr = view.getUint32(20, true);
+
+    const expectedSize = SNAPSHOT_HEADER_SIZE + memorySize;
+    if (data.length < expectedSize) {
+      throw new Error(`Invalid snapshot: expected ${expectedSize} bytes, got ${data.length}`);
+    }
+
+    const memory = data.slice(SNAPSHOT_HEADER_SIZE, SNAPSHOT_HEADER_SIZE + memorySize);
+
+    return { memory, stackPointer, runtimePtr, contextPtr };
   }
 
   // ---- Internal instantiation helpers ----
@@ -1060,18 +1158,17 @@ export class QuickJS {
 
   /**
    * Snapshot the entire VM state.
+   *
+   * Returns a snapshot containing the full WASM linear memory. Use
+   * `QuickJS.serializeSnapshot()` to convert to a versioned binary
+   * buffer for persistent storage.
    */
   snapshot(): Snapshot {
     this.assertNotDisposed();
 
-    const memory = this.exports.memory;
-    const memoryBytes = new Uint8Array(memory.buffer);
-    const memoryPages = memory.buffer.byteLength / 65536;
-
     return {
-      memory: memoryBytes.slice(),
+      memory: new Uint8Array(this.exports.memory.buffer).slice(),
       stackPointer: this.exports.__stack_pointer.value as number,
-      memoryPages,
       runtimePtr: this.exports.qjs_get_runtime_ptr(),
       contextPtr: this.exports.qjs_get_context_ptr(),
     };

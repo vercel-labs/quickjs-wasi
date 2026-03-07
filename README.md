@@ -237,16 +237,22 @@ let snapshot: Snapshot;
   `)).dispose();
   vm.executePendingJobs();
 
-  // Take a snapshot — this is a plain object with a Uint8Array
+  // Take a snapshot
   snapshot = vm.snapshot();
-  // snapshot.memory can be persisted to S3, Redis, a database, etc.
 }
+
+// Serialize to a binary buffer for storage (apply gzip on top for best compression)
+const bytes = QuickJS.serializeSnapshot(snapshot);
+await storage.put('snapshots/run-123', bytes);
 
 // ... time passes, maybe a different process entirely ...
 
+// Deserialize and restore
+const loaded = await storage.get('snapshots/run-123');
+const restored = QuickJS.deserializeSnapshot(loaded);
+
 {
-  // Restore the VM from the snapshot
-  using vm = await QuickJS.restore(snapshot, wasmBytes);
+  using vm = await QuickJS.restore(restored, wasmBytes);
 
   // The pending promise still exists — resolve it
   using resolve = vm.global.getProp('__resolve');
@@ -330,8 +336,10 @@ vm.unwrapResult(vm.evalCode(`
 
 | Method | Description |
 |--------|-------------|
-| `QuickJS.create(wasmInput?)` | Create a fresh VM instance |
-| `QuickJS.restore(snapshot, wasmInput?)` | Restore a VM from a snapshot |
+| `QuickJS.create(options?)` | Create a fresh VM instance |
+| `QuickJS.restore(snapshot, options?)` | Restore a VM from a snapshot |
+| `QuickJS.serializeSnapshot(snapshot)` | Serialize a snapshot to a versioned binary `Uint8Array` |
+| `QuickJS.deserializeSnapshot(data)` | Deserialize a snapshot from a binary `Uint8Array` |
 | `vm.evalCode(code, filename?)` | Evaluate JS code, returns `JSValueHandle` |
 | `vm.unwrapResult(handle)` | Returns the handle if not an exception, otherwise throws |
 | `vm.callFunction(fn, this, ...args)` | Call a QuickJS function |
@@ -550,9 +558,7 @@ Plus the `__stack_pointer` WASM global (a single i32).
 
 ### Limitations and Future Work
 
-- **Snapshot size**: Currently captures the entire linear memory (~256 KB baseline). Could be optimized with sparse/delta encoding (only non-zero pages).
-- **Compression**: Snapshots are raw bytes. gzip/brotli/zstd compression would reduce storage costs.
-
+- **Snapshot size**: Snapshots capture the entire WASM linear memory (~256 KB baseline, grows with heap). Use `serializeSnapshot()` to get a binary buffer, then apply your own compression (gzip/zstd) — the memory compresses very well due to large zero regions.
 - **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
 - **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
 
