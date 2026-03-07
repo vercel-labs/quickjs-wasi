@@ -1022,16 +1022,25 @@ export class QuickJS {
   }
 
   /**
-   * Dispose the VM, marking it as no longer usable.
-   *
-   * The WASM instance and its entire linear memory will be garbage
-   * collected by the host JS engine — there is no need to explicitly
-   * free the QuickJS runtime/context since each VM is an isolated
-   * WASM instance.
+   * Dispose the VM, releasing all references to the WASM instance
+   * so it can be garbage collected by the host JS engine.
    */
   dispose(): void {
     if (!this.disposed) {
       this.disposed = true;
+
+      // Release references so the WASM instance and its linear memory
+      // can be garbage collected even if someone holds onto this QuickJS object.
+      this._global = null;
+      this._undefined = null;
+      this._null = null;
+      this._true = null;
+      this._false = null;
+      this._ownedHandles.clear();
+      this.hostCallbacks.clear();
+      this.exports = null!;
+      this.instance = null!;
+      this.module = null!;
     }
   }
 
@@ -1257,11 +1266,17 @@ export class JSValueHandle {
 
   /**
    * Dispose this handle, freeing the heap-allocated JSValue.
+   * Safe to call after the VM has been disposed (becomes a no-op).
    */
   dispose(): void {
     if (!this.disposed) {
-      this.vm._getExports().qjs_free_value(this.ptr);
       this.disposed = true;
+      // If the VM is already disposed, the WASM instance is gone —
+      // no need to (and we can't) call qjs_free_value.
+      const exports = this.vm._getExports();
+      if (exports) {
+        exports.qjs_free_value(this.ptr);
+      }
     }
   }
 
