@@ -1,15 +1,7 @@
 /**
- * Adapted compile.ts from degenerator, using quickjs-wasm instead of quickjs-emscripten.
- *
- * Changes from the original:
- * - Takes a QuickJS instance directly instead of QuickJSWASMModule
- * - No qjs.newContext() call (the QuickJS instance IS the context)
- * - vm.runtime.executePendingJobs() → vm.executePendingJobs()
- * - vm.resolvePromise() returns { value } | { error } instead of VmCallResult
- * - promise.settled.then(vm.runtime.executePendingJobs) → promise.settled.then(() => vm.executePendingJobs())
+ * Adapted compile.ts from degenerator, using quickjs-wasi instead of quickjs-emscripten.
  */
 
-import { types } from 'node:util';
 import { degenerator } from 'degenerator';
 import type { DegeneratorNames } from 'degenerator';
 import type { Context } from 'node:vm';
@@ -42,7 +34,7 @@ export function compile<R = unknown, A extends unknown[] = []>(
           ...args.map((arg) => vm.dump(arg))
         );
         vm.executePendingJobs();
-        return hostToQuickJSHandle(vm, result);
+        return vm.hostToHandle(result);
       });
       fnHandle.consume((handle) => vm.setProp(vm.global, name, handle));
     }
@@ -65,7 +57,7 @@ export function compile<R = unknown, A extends unknown[] = []>(
       const result = vm.callFunction(
         fn,
         vm.undefined,
-        ...args.map((arg) => hostToQuickJSHandle(vm, arg))
+        ...args.map((arg) => vm.hostToHandle(arg))
       );
       promiseHandle = vm.unwrapResult(result);
       const resolvedResultP = vm.resolvePromise(promiseHandle);
@@ -75,7 +67,6 @@ export function compile<R = unknown, A extends unknown[] = []>(
         const dumped = vm.dump(resolvedResult.error);
         resolvedResult.error.dispose();
         if (dumped instanceof Error) {
-          // Patch stack to include name + message like V8
           if (dumped.stack && !dumped.stack.startsWith(dumped.name)) {
             dumped.stack = `${dumped.name}: ${dumped.message}\n${dumped.stack}`;
           }
@@ -111,36 +102,4 @@ export function compile<R = unknown, A extends unknown[] = []>(
     enumerable: false,
   });
   return r;
-}
-
-function hostToQuickJSHandle(vm: QuickJS, val: unknown): JSValueHandle {
-  if (typeof val === 'undefined') {
-    return vm.undefined;
-  } else if (val === null) {
-    return vm.null;
-  } else if (typeof val === 'string') {
-    return vm.newString(val);
-  } else if (typeof val === 'number') {
-    return vm.newNumber(val);
-  } else if (typeof val === 'bigint') {
-    return vm.newBigInt(val);
-  } else if (typeof val === 'boolean') {
-    return val ? vm.true : vm.false;
-  } else if (types.isPromise(val)) {
-    const promise = vm.newPromise();
-    (val as Promise<unknown>).then(
-      (r: unknown) => {
-        promise.resolve(hostToQuickJSHandle(vm, r));
-        vm.executePendingJobs();
-      },
-      (err: unknown) => {
-        promise.reject(hostToQuickJSHandle(vm, err));
-        vm.executePendingJobs();
-      }
-    );
-    return promise.handle;
-  } else if (types.isNativeError(val)) {
-    return vm.newError(val as Error);
-  }
-  throw new Error(`Unsupported value: ${val}`);
 }

@@ -334,6 +334,7 @@ These are singleton handles — do **not** dispose them:
 | `ArrayBuffer` | ArrayBuffer | `ArrayBuffer` (copy) | `ArrayBuffer` |
 | `Uint8Array` | Uint8Array | `Uint8Array` (copy) | `Uint8Array` |
 | Other typed arrays | typed array | Corresponding typed array (copy) | `ArrayBuffer` (via view) |
+| `Promise` | Promise | — | QuickJS Promise (bridged via `Deferred`) |
 | Plain object | Object | `Record<string, unknown>` (recursive, own enumerable keys) | Object (recursive) |
 
 **Notes:**

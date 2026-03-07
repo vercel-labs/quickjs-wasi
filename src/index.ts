@@ -934,6 +934,21 @@ export class QuickJS {
     if (typeof value === 'string') return this.newString(value);
     if (typeof value === 'bigint') return this.newBigInt(value);
 
+    if (value instanceof Promise) {
+      const deferred = this.newPromise();
+      value.then(
+        (r: unknown) => {
+          deferred.resolve(this.hostToHandle(r));
+          this.executePendingJobs();
+        },
+        (err: unknown) => {
+          deferred.reject(this.hostToHandle(err));
+          this.executePendingJobs();
+        }
+      );
+      return deferred.handle;
+    }
+
     if (value instanceof Error) {
       return this.newError(value);
     }
