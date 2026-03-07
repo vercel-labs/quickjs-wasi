@@ -939,8 +939,8 @@ export class QuickJS {
     }
 
     if (ArrayBuffer.isView(value)) {
-      // Other typed arrays — convert via Uint8Array of the underlying buffer
-      return this.newArrayBuffer(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+      // Other typed arrays — convert via Uint8Array view of the underlying buffer
+      return this.newArrayBuffer(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
     }
 
     if (Array.isArray(value)) {
