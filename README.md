@@ -189,6 +189,30 @@ vm.evalCode(`
 
 The limit is re-applied after `QuickJS.restore()`, so you can use a different limit for restored VMs than the original.
 
+### Interrupt Handler
+
+Prevent infinite loops and enforce execution timeouts:
+
+```typescript
+const start = Date.now();
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  interruptHandler: () => {
+    // Return true to interrupt — called periodically during JS execution
+    return Date.now() - start > 5000; // 5 second timeout
+  },
+});
+
+const result = vm.evalCode('while (true) {}');
+result.isException; // true — interrupted
+result.dispose();
+
+// VM is still usable after an interrupt
+vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
+```
+
+The handler is called approximately once per JS bytecode instruction, so it should be fast. When it returns `true`, the current execution is interrupted and returns an exception result. The VM remains usable after an interrupt.
+
 ### Snapshot and Restore
 
 The key differentiator — snapshot the entire VM state and restore it later:
@@ -528,7 +552,7 @@ Plus the `__stack_pointer` WASM global (a single i32).
 
 - **Snapshot size**: Currently captures the entire linear memory (~256 KB baseline). Could be optimized with sparse/delta encoding (only non-zero pages).
 - **Compression**: Snapshots are raw bytes. gzip/brotli/zstd compression would reduce storage costs.
-- **Interrupt handler**: No `JS_SetInterruptHandler` exposed yet. Needed to prevent infinite loops in untrusted code.
+
 - **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
 - **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
 - **Browser compatibility**: The WASI shim and WebAssembly API usage should work in browsers, but the default WASM loading path uses `node:fs`. Pass `wasmBytes` directly for browser use.

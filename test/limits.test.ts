@@ -74,3 +74,76 @@ describe('memoryLimit', () => {
     expect(msg).not.toBe('ok');
   });
 });
+
+describe('interruptHandler', () => {
+  it('should interrupt an infinite loop', async () => {
+    let calls = 0;
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      interruptHandler: () => {
+        calls++;
+        return calls > 100;
+      },
+    });
+
+    const result = vm.evalCode('while (true) {}');
+    expect(result.isException).toBe(true);
+    result.dispose();
+    expect(calls).toBeGreaterThan(100);
+
+    // VM is still usable after interrupt
+    expect(vm.evalCode('1 + 2').consume(h => h.toNumber())).toBe(3);
+  });
+
+  it('should not interrupt normal execution', async () => {
+    let calls = 0;
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      interruptHandler: () => {
+        calls++;
+        return false;
+      },
+    });
+
+    const result = vm.evalCode('1 + 2').consume(h => h.toNumber());
+    expect(result).toBe(3);
+    expect(calls).toBeGreaterThan(0);
+  });
+
+  it('should support time-based interrupts', async () => {
+    const start = Date.now();
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      interruptHandler: () => {
+        return Date.now() - start > 100; // 100ms timeout
+      },
+    });
+
+    const result = vm.evalCode('while (true) {}');
+    expect(result.isException).toBe(true);
+    result.dispose();
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  it('should work after snapshot restore', async () => {
+    const vm1 = await QuickJS.create(wasmBytes);
+    vm1.unwrapResult(vm1.evalCode('globalThis.x = 1')).dispose();
+    const snapshot = vm1.snapshot();
+    vm1.dispose();
+
+    let calls = 0;
+    using vm2 = await QuickJS.restore(snapshot, {
+      wasm: wasmBytes,
+      interruptHandler: () => {
+        calls++;
+        return calls > 100;
+      },
+    });
+
+    expect(vm2.evalCode('x').consume(h => h.toNumber())).toBe(1);
+
+    const result = vm2.evalCode('while (true) {}');
+    expect(result.isException).toBe(true);
+    result.dispose();
+  });
+});

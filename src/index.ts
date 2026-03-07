@@ -26,7 +26,15 @@ export interface QuickJSOptions {
    * (e.g. `InternalError: out of memory`).
    */
   memoryLimit?: number;
-
+  /**
+   * Called periodically during JS execution. Return `true` to interrupt
+   * the current execution with an `InternalError: interrupted` exception.
+   * Useful for implementing execution timeouts or step limits.
+   *
+   * The handler is called approximately once per JS bytecode instruction,
+   * so it should be fast.
+   */
+  interruptHandler?: () => boolean;
 }
 
 // ---- WASM Export Types ----
@@ -119,6 +127,7 @@ interface QuickJSExports {
   // Runtime limits
   qjs_set_memory_limit(limit: number): void;
   qjs_set_max_stack_size(size: number): void;
+  qjs_set_interrupt_handler(enable: number): void;
 
   // Snapshot support
   qjs_get_runtime_ptr(): number;
@@ -173,6 +182,7 @@ export class QuickJS {
   /** Registry of host callbacks, keyed by integer ID */
   private hostCallbacks = new Map<number, HostFunction>();
   private nextCallbackId = 1;
+  private interruptHandler: (() => boolean) | null = null;
 
   // Cached singleton handles
   private _global: JSValueHandle | null = null;
@@ -309,7 +319,7 @@ export class QuickJS {
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
     if (!options) return {};
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
   }
@@ -317,6 +327,10 @@ export class QuickJS {
   private static applyLimits(vm: QuickJS, opts: QuickJSOptions): void {
     if (opts.memoryLimit !== undefined) {
       vm.exports.qjs_set_memory_limit(opts.memoryLimit);
+    }
+    if (opts.interruptHandler) {
+      vm.interruptHandler = opts.interruptHandler;
+      vm.exports.qjs_set_interrupt_handler(1);
     }
   }
 
@@ -344,8 +358,12 @@ export class QuickJS {
       return vm.handleHostCall(funcId, thisPtr, argc, argvPtr);
     };
 
+    const hostInterrupt = (): number => {
+      return vm.interruptHandler ? (vm.interruptHandler() ? 1 : 0) : 0;
+    };
+
     const instance = await WebAssembly.instantiate(module, {
-      env: { host_call: hostCall },
+      env: { host_call: hostCall, host_interrupt: hostInterrupt },
       wasi_snapshot_preview1: wasiShim,
     });
 

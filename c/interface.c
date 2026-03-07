@@ -42,6 +42,23 @@ __attribute__((import_module("env"), import_name("host_call")))
 extern JSValue *host_call(int func_id, JSValue *this_ptr, int argc, JSValue **argv_ptr);
 
 /*
+ * Imported from the host environment. Called periodically during JS execution
+ * when an interrupt handler is enabled. Returns non-zero to interrupt execution.
+ */
+__attribute__((import_module("env"), import_name("host_interrupt")))
+extern int host_interrupt(void);
+
+/*
+ * Interrupt handler trampoline: dispatches to the host_interrupt import.
+ */
+static int interrupt_handler_trampoline(JSRuntime *rt, void *opaque)
+{
+    (void)rt;
+    (void)opaque;
+    return host_interrupt();
+}
+
+/*
  * Trampoline: a JSCFunctionData callback that dispatches to the host.
  * The func_id is stored in func_data[0] as an integer.
  */
@@ -116,6 +133,17 @@ int qjs_init(void) {
 }
 
 /* ---- Runtime Limits ---- */
+
+__attribute__((export_name("qjs_set_interrupt_handler")))
+void qjs_set_interrupt_handler(int enable) {
+    if (rt) {
+        if (enable) {
+            JS_SetInterruptHandler(rt, interrupt_handler_trampoline, NULL);
+        } else {
+            JS_SetInterruptHandler(rt, NULL, NULL);
+        }
+    }
+}
 
 __attribute__((export_name("qjs_set_memory_limit")))
 void qjs_set_memory_limit(size_t limit) {
