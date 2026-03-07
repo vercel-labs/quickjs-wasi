@@ -1,0 +1,27 @@
+# quickjs-wasi
+
+## 0.1.0
+
+### Minor Changes
+
+- [`ab32b36`](https://github.com/vercel-labs/quickjs-wasi/commit/ab32b3602131eab06b898fa0147afdf50e07cde4) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add ArrayBuffer and typed array marshalling: `vm.newArrayBuffer()`, `vm.newUint8Array()`, `handle.toArrayBuffer()`, `handle.toUint8Array()`. `dump()` returns proper `ArrayBuffer` / `Uint8Array` / typed array types. `hostToHandle()` converts `ArrayBuffer`, `Uint8Array`, and other typed arrays.
+
+- [`e1b0a2f`](https://github.com/vercel-labs/quickjs-wasi/commit/e1b0a2fcdf9e505b195982fccbe81d0e30ef7fd3) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `Promise` support to `hostToHandle()`. Host Promises are automatically bridged to QuickJS promises via `Deferred`, with `executePendingJobs()` called on resolution/rejection.
+
+- [`b5acb7b`](https://github.com/vercel-labs/quickjs-wasi/commit/b5acb7ba85403148a979529cfcadb648302f8f51) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `interruptHandler` option to `QuickJSOptions`. Called periodically during JS execution — return `true` to interrupt with an exception. Useful for implementing execution timeouts or step limits to prevent infinite loops. The VM remains usable after an interrupt.
+
+- [`98c78be`](https://github.com/vercel-labs/quickjs-wasi/commit/98c78be76bdbf7c498938a84a285c03282b4f794) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `memoryLimit` option to `QuickJSOptions`. Restricts how much memory the QuickJS runtime can allocate — when exceeded, allocations fail and surface as JS exceptions. The limit is re-applied after `QuickJS.restore()`.
+
+- [`d36fd2a`](https://github.com/vercel-labs/quickjs-wasi/commit/d36fd2abb749778ca1369e77bd8d74d0a69997c8) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add configurable WASI clock via `QuickJSOptions.wasi`. The `wasi.now(clockId)` option controls both `Date.now()` / `new Date()` and the `Math.random()` PRNG seed at the engine level — no need to patch JS globals. QuickJS seeds its internal xorshift64\* PRNG from the clock value during context creation, so two VMs created with the same `now()` value produce identical `Math.random()` sequences.
+
+### Patch Changes
+
+- [`bd73bb6`](https://github.com/vercel-labs/quickjs-wasi/commit/bd73bb6af84f08622830167789cb34ba1b2a8c67) Thanks [@TooTallNate](https://github.com/TooTallNate)! - `dispose()` now releases all references to the WASM module, instance, and internal state so the WASM linear memory can be garbage collected. `JSValueHandle.dispose()` is safe to call after the VM has been disposed (becomes a no-op).
+
+- [`3656ff6`](https://github.com/vercel-labs/quickjs-wasi/commit/3656ff6bb983e80da556d970c9f25bccbecc15c9) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Fix handle leaks on VM dispose: free cached singleton handles and internally-owned handles (unresolved promise resolve/reject functions). Make `Deferred.settled` lazy to avoid unnecessary QuickJS object allocation.
+
+- [`4b4b81e`](https://github.com/vercel-labs/quickjs-wasi/commit/4b4b81ebb0ea8f8b527d53079245b5817eb1e18e) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Replace JSON.stringify hack in `dump()` with native property enumeration via `JS_GetOwnPropertyNames`. Handles circular references gracefully (returns `undefined`). Functions now dump as `undefined` instead of empty objects.
+
+- [`ee7dd65`](https://github.com/vercel-labs/quickjs-wasi/commit/ee7dd65e230a9abf3eacd9fd7390d61b4a0f6ad5) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Preserve circular and shared references in `dump()`. Instead of returning `undefined` for circular references, `dump()` now returns the same host object — preserving the reference structure on the host side.
+
+- [`972f0a4`](https://github.com/vercel-labs/quickjs-wasi/commit/972f0a4ce0783dd7753906952c4a9938288dec02) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Simplify `dispose()` to just mark the VM as unusable. The WASM instance and its linear memory are garbage collected by the host JS engine — no need to explicitly call `JS_FreeRuntime`. Removes `leakCheck` parameter from `dispose()`.
