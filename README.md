@@ -261,6 +261,8 @@ vm.unwrapResult(vm.evalCode(`
 | `vm.newBigInt(val)` | Create a BigInt value |
 | `vm.newObject()` | Create an empty object |
 | `vm.newArray()` | Create an empty array |
+| `vm.newArrayBuffer(data)` | Create an ArrayBuffer from host `ArrayBuffer` or `Uint8Array` |
+| `vm.newUint8Array(data)` | Create a Uint8Array from host `Uint8Array` |
 | `vm.newFunction(name, callback)` | Create a function backed by a host callback |
 | `vm.newPromise()` | Create a `Deferred` (promise + resolve/reject) |
 | `vm.newError(messageOrError)` | Create an Error from a string or native `Error` |
@@ -271,7 +273,7 @@ vm.unwrapResult(vm.evalCode(`
 | `vm.hostToHandle(value)` | Convert a host value to a QuickJS handle |
 | `vm.snapshot()` | Capture the entire VM state |
 | `vm.registerHostCallback(id, fn)` | Re-register a host callback after restore |
-| `vm.dispose(leakCheck?)` | Free the VM |
+| `vm.dispose()` | Free the VM |
 | `vm[Symbol.dispose]()` | Same as `dispose()` — enables `using vm = ...` |
 
 ### Cached Properties
@@ -297,6 +299,8 @@ These are singleton handles — do **not** dispose them:
 | `handle.toNumber()` | Extract as a `number` |
 | `handle.toBigInt()` | Extract as a `bigint` |
 | `handle.toString()` | Extract as a `string` |
+| `handle.toArrayBuffer()` | Extract as an `ArrayBuffer` (copy from WASM memory) |
+| `handle.toUint8Array()` | Extract as a `Uint8Array` (copy from WASM memory) |
 | `handle.getProp(name)` | Get a property by name |
 | `handle.setProp(name, value)` | Set a property by name |
 | `handle.consume(fn)` | Call `fn(handle)`, then dispose, return result |
@@ -312,6 +316,33 @@ These are singleton handles — do **not** dispose them:
 | `deferred.settled` | Host `Promise<void>` that resolves on settlement |
 | `deferred.resolve(handle)` | Resolve the promise with a QuickJS value |
 | `deferred.reject(handle)` | Reject the promise with a QuickJS value |
+
+### Data Marshalling
+
+`dump()` and `hostToHandle()` automatically convert values between the host and the QuickJS VM. The following types are supported:
+
+| Host Type | QuickJS Type | `dump()` returns | `hostToHandle()` accepts |
+|-----------|-------------|-----------------|------------------------|
+| `undefined` | undefined | `undefined` | `undefined` |
+| `null` | null | `null` | `null` |
+| `boolean` | boolean | `boolean` | `boolean` |
+| `number` | number | `number` | `number` |
+| `string` | string | `string` | `string` |
+| `bigint` | BigInt | `bigint` | `bigint` |
+| `Error` | Error | `Error` (with name, message, stack) | `Error` |
+| `Array` | Array | `Array` (recursive) | `Array` (recursive) |
+| `ArrayBuffer` | ArrayBuffer | `ArrayBuffer` (copy) | `ArrayBuffer` |
+| `Uint8Array` | Uint8Array | `Uint8Array` (copy) | `Uint8Array` |
+| Other typed arrays | typed array | Corresponding typed array (copy) | `ArrayBuffer` (via view) |
+| Plain object | Object | `Record<string, unknown>` (recursive, own enumerable keys) | Object (recursive) |
+
+**Notes:**
+
+- Functions dump as `undefined` (cannot be meaningfully serialized)
+- Circular references in objects dump as `undefined` (detected via object pointer identity)
+- Only own enumerable string properties are included when dumping objects
+- Binary data is always **copied** between host and WASM memory — there is no zero-copy view API
+- `dump()` for typed arrays determines the host constructor from bytes-per-element (1 → `Uint8Array`, 2 → `Uint16Array`, 4 → `Uint32Array`, 8 → `Float64Array`)
 
 ## How It Works
 
@@ -442,5 +473,4 @@ Plus the `__stack_pointer` WASM global (a single i32).
 - **Compression**: Snapshots are raw bytes. gzip/brotli/zstd compression would reduce storage costs.
 - **Memory limits**: No `JS_SetMemoryLimit` or `JS_SetInterruptHandler` exposed yet. Needed for untrusted code sandboxing.
 - **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
-- **Object key enumeration**: `dump()` uses a JSON.stringify fallback for plain objects. Should expose `JS_GetOwnPropertyNames` for proper enumeration.
 - **Browser compatibility**: The WASI shim and WebAssembly API usage should work in browsers, but the default WASM loading path uses `node:fs`. Pass `wasmBytes` directly for browser use.
