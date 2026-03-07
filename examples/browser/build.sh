@@ -36,6 +36,6 @@ WASI_SDK="$WASI_SDK" make -C "$REPO_ROOT"
 
 echo "Building TypeScript..."
 cd "$REPO_ROOT"
-npx tsc
+pnpm run build:ts
 
 echo "Done"
