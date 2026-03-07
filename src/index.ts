@@ -7,11 +7,20 @@
  * WASM instance.
  */
 
-import { createWasiShim } from './wasi-shim.js';
+import { createWasiShim, type WasiOptions } from './wasi-shim.js';
 
-// ---- Type for host callback functions ----
+// ---- Public types ----
 
 export type HostFunction = (this_val: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
+
+export type { WasiOptions };
+
+export interface QuickJSOptions {
+  /** WASM module bytes or pre-compiled module. If omitted, loads from the package. */
+  wasm?: BufferSource | WebAssembly.Module;
+  /** Custom WASI function implementations. */
+  wasi?: WasiOptions;
+}
 
 // ---- WASM Export Types ----
 
@@ -219,11 +228,15 @@ export class QuickJS {
 
   /**
    * Create a fresh QuickJS VM instance.
+   *
+   * @param options - Optional configuration. Can also pass raw WASM bytes
+   *                  directly for backwards compatibility.
    */
-  static async create(wasmInput?: BufferSource | WebAssembly.Module): Promise<QuickJS> {
-    const module = await QuickJS.resolveModule(wasmInput);
+  static async create(options?: QuickJSOptions | BufferSource | WebAssembly.Module): Promise<QuickJS> {
+    const opts = QuickJS.normalizeOptions(options);
+    const module = await QuickJS.resolveModule(opts.wasm);
     const vm = new QuickJS(module);
-    const instance = await QuickJS.instantiate(module, vm);
+    const instance = await QuickJS.instantiate(module, vm, opts.wasi);
     vm.setInstance(instance);
 
     // Initialize the WASI reactor
@@ -240,11 +253,16 @@ export class QuickJS {
 
   /**
    * Restore a QuickJS VM from a snapshot.
+   *
+   * @param snapshot - The snapshot to restore from.
+   * @param options - Optional configuration. Can also pass raw WASM bytes
+   *                  directly for backwards compatibility.
    */
-  static async restore(snapshot: Snapshot, wasmInput?: BufferSource | WebAssembly.Module): Promise<QuickJS> {
-    const module = await QuickJS.resolveModule(wasmInput);
+  static async restore(snapshot: Snapshot, options?: QuickJSOptions | BufferSource | WebAssembly.Module): Promise<QuickJS> {
+    const opts = QuickJS.normalizeOptions(options);
+    const module = await QuickJS.resolveModule(opts.wasm);
     const vm = new QuickJS(module);
-    const instance = await QuickJS.instantiate(module, vm);
+    const instance = await QuickJS.instantiate(module, vm, opts.wasi);
     vm.setInstance(instance);
 
     const exportedMemory = vm.exports.memory;
@@ -271,6 +289,14 @@ export class QuickJS {
 
   // ---- Internal instantiation helpers ----
 
+  private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
+    if (!options) return {};
+    if (options instanceof WebAssembly.Module) return { wasm: options };
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options)) return options as QuickJSOptions;
+    // BufferSource (ArrayBuffer or ArrayBufferView)
+    return { wasm: options as BufferSource };
+  }
+
   private static async resolveModule(wasmInput?: BufferSource | WebAssembly.Module): Promise<WebAssembly.Module> {
     if (wasmInput instanceof WebAssembly.Module) {
       return wasmInput;
@@ -287,9 +313,9 @@ export class QuickJS {
     }
   }
 
-  private static async instantiate(module: WebAssembly.Module, vm: QuickJS): Promise<WebAssembly.Instance> {
+  private static async instantiate(module: WebAssembly.Module, vm: QuickJS, wasiOptions?: WasiOptions): Promise<WebAssembly.Instance> {
     let memory: WebAssembly.Memory | null = null;
-    const wasiShim = createWasiShim(() => memory!);
+    const wasiShim = createWasiShim(() => memory!, wasiOptions);
 
     const hostCall = (funcId: number, thisPtr: number, argc: number, argvPtr: number): number => {
       return vm.handleHostCall(funcId, thisPtr, argc, argvPtr);

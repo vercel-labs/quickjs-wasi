@@ -133,6 +133,41 @@ try {
 }
 ```
 
+### Deterministic Execution
+
+The `wasi.now` option controls `Date.now()`, `new Date()`, and — crucially — the `Math.random()` PRNG seed. QuickJS uses a [xorshift64*](https://en.wikipedia.org/wiki/Xorshift) PRNG that is seeded once from the clock value during context creation. The `now()` callback is **not** called on every `Math.random()` invocation — it seeds the PRNG at startup, and subsequent calls are purely deterministic from that seed.
+
+This means two VMs created with the same `now()` value will produce identical `Math.random()` sequences:
+
+```typescript
+const fixedTime = () => BigInt(1700000000000) * 1_000_000n; // nanoseconds
+
+using vm1 = await QuickJS.create({ wasm: wasmBytes, wasi: { now: fixedTime } });
+using vm2 = await QuickJS.create({ wasm: wasmBytes, wasi: { now: fixedTime } });
+
+vm1.evalCode('Math.random()').consume(h => h.toNumber());
+// => 0.8130834347906803
+
+vm2.evalCode('Math.random()').consume(h => h.toNumber());
+// => 0.8130834347906803 (identical)
+```
+
+The time can also be advanced between calls for realistic behavior:
+
+```typescript
+let currentTime = 1700000000000n;
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  wasi: {
+    now: () => currentTime * 1_000_000n,
+  },
+});
+
+vm.evalCode('Date.now()').consume(h => h.toNumber()); // 1700000000000
+currentTime += 1000n; // advance 1 second
+vm.evalCode('Date.now()').consume(h => h.toNumber()); // 1700000001000
+```
+
 ### Snapshot and Restore
 
 The key differentiator — snapshot the entire VM state and restore it later:

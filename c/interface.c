@@ -561,3 +561,5 @@ __attribute__((export_name("wasm_free")))
 void wasm_free(void *ptr) {
     free(ptr);
 }
+
+
