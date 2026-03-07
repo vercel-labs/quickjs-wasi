@@ -999,32 +999,16 @@ export class QuickJS {
   }
 
   /**
-   * Dispose the VM, freeing all resources.
+   * Dispose the VM, marking it as no longer usable.
+   *
+   * The WASM instance and its entire linear memory will be garbage
+   * collected by the host JS engine — there is no need to explicitly
+   * free the QuickJS runtime/context since each VM is an isolated
+   * WASM instance.
    */
-  dispose(leakCheck: boolean = true): void {
+  dispose(): void {
     if (!this.disposed) {
       this.disposed = true;
-
-      // Free any internally-owned handles (e.g. unresolved promise resolve/reject)
-      for (const handle of this._ownedHandles) {
-        handle.dispose();
-      }
-      this._ownedHandles.clear();
-
-      // Free cached singleton handles before destroying the runtime
-      if (this._global) { this._global.dispose(); this._global = null; }
-      if (this._undefined) { this._undefined.dispose(); this._undefined = null; }
-      if (this._null) { this._null.dispose(); this._null = null; }
-      if (this._true) { this._true.dispose(); this._true = null; }
-      if (this._false) { this._false.dispose(); this._false = null; }
-
-      if (leakCheck) {
-        try {
-          this.exports.qjs_destroy();
-        } catch {
-          // QuickJS may assert if there are leaked objects in debug builds.
-        }
-      }
     }
   }
 

@@ -8,11 +8,11 @@ describe('snapshot and restore', () => {
     vm1.unwrapResult(vm1.evalCode('globalThis.counter = 42')).dispose();
 
     const snapshot = vm1.snapshot();
-    vm1.dispose(false);
+    vm1.dispose();
 
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
     expect(vm2.evalCode('counter').consume(h => h.toNumber())).toBe(42);
-    vm2.dispose(false);
+    vm2.dispose();
   });
 
   it('should resolve a pending promise in a restored VM', async () => {
@@ -31,7 +31,7 @@ describe('snapshot and restore', () => {
     expect(vm1.global.getProp('stepResult').consume(h => h.toString())).toBe('not yet');
 
     const snapshot = vm1.snapshot();
-    vm1.dispose(false);
+    vm1.dispose();
 
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
     using restoredResolve = vm2.global.getProp('__resolveFunc');
@@ -40,7 +40,7 @@ describe('snapshot and restore', () => {
     vm2.executePendingJobs();
 
     expect(vm2.global.getProp('stepResult').consume(h => h.toString())).toBe('completed: step-42-result');
-    vm2.dispose(false);
+    vm2.dispose();
   });
 
   it('should support host callback re-registration after restore', async () => {
@@ -55,7 +55,7 @@ describe('snapshot and restore', () => {
     expect(vm1.evalCode('hostAdd(10, 20)').consume(h => h.toNumber())).toBe(30);
 
     const snapshot = vm1.snapshot();
-    vm1.dispose(false);
+    vm1.dispose();
 
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
     vm2.registerHostCallback(1, (_this, ...args) => {
@@ -64,6 +64,6 @@ describe('snapshot and restore', () => {
 
     using result = vm2.unwrapResult(vm2.evalCode('hostAdd(100, 200)'));
     expect(result.toNumber()).toBe(300);
-    vm2.dispose(false);
+    vm2.dispose();
   });
 });

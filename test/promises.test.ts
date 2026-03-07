@@ -26,7 +26,7 @@ describe('newPromise / Deferred', () => {
     expect(afterResolve.toString()).toBe('resolved: hello from host');
 
     deferred.handle.dispose();
-    vm.dispose(false);
+    vm.dispose();
   });
 });
 
@@ -42,7 +42,7 @@ describe('resolvePromise', () => {
       expect(result.value.toNumber()).toBe(42);
       result.value.dispose();
     }
-    vm.dispose(false);
+    vm.dispose();
   });
 
   it('should resolve a rejected promise', async () => {
@@ -58,7 +58,7 @@ describe('resolvePromise', () => {
       expect((dumped as Error).message).toBe('fail');
       result.error.dispose();
     }
-    vm.dispose(false);
+    vm.dispose();
   });
 
   it('should handle non-promise values', async () => {
