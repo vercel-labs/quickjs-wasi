@@ -349,13 +349,15 @@ vm.unwrapResult(vm.evalCode(`
 | `vm.newBigInt(val)` | Create a BigInt value |
 | `vm.newObject()` | Create an empty object |
 | `vm.newArray()` | Create an empty array |
+| `vm.newSymbolFor(description)` | Create a global symbol (`Symbol.for(description)`) |
 | `vm.newArrayBuffer(data)` | Create an ArrayBuffer from host `ArrayBuffer` or `Uint8Array` |
 | `vm.newUint8Array(data)` | Create a Uint8Array from host `Uint8Array` |
 | `vm.newFunction(name, callback)` | Create a function backed by a host callback |
 | `vm.newPromise()` | Create a `Deferred` (promise + resolve/reject) |
 | `vm.newError(messageOrError)` | Create an Error from a string or native `Error` |
 | `vm.resolvePromise(handle)` | Await a QuickJS promise from the host side |
-| `vm.setProp(obj, key, value)` | Set a property on a QuickJS object |
+| `vm.setProp(obj, key, value)` | Set a property (key: string or handle, including symbols) |
+| `vm.getProp(obj, key)` | Get a property using a handle key (including symbols) |
 | `vm.typeof(handle)` | Get the `typeof` as a string |
 | `vm.dump(handle)` | Convert a QuickJS value to a host value |
 | `vm.hostToHandle(value)` | Convert a host value to a QuickJS handle |
@@ -417,6 +419,7 @@ These are singleton handles — do **not** dispose them:
 | `number` | number | `number` | `number` |
 | `string` | string | `string` | `string` |
 | `bigint` | BigInt | `bigint` | `bigint` |
+| `Symbol.for()` | global Symbol | `Symbol.for(description)` | `Symbol.for(description)` |
 | `Error` | Error | `Error` (with name, message, stack) | `Error` |
 | `Array` | Array | `Array` (recursive) | `Array` (recursive) |
 | `ArrayBuffer` | ArrayBuffer | `ArrayBuffer` (copy) | `ArrayBuffer` |
@@ -427,6 +430,8 @@ These are singleton handles — do **not** dispose them:
 
 **Notes:**
 
+- Global symbols (`Symbol.for()`) round-trip as real host `Symbol` values via `Symbol.for(description)`
+- Local (anonymous) symbols dump as `undefined` and throw if passed to `hostToHandle()`
 - Functions dump as `undefined` (cannot be meaningfully serialized)
 - Circular and shared references are preserved — `dump()` returns the same host object for the same QuickJS object pointer
 - Only own enumerable string properties are included when dumping objects

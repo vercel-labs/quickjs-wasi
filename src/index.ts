@@ -86,6 +86,14 @@ interface QuickJSExports {
   qjs_is_array_buffer(valPtr: number): number;
   qjs_get_bool(valPtr: number): number;
 
+  // Symbol
+  qjs_new_symbol(descPtr: number, descLen: number, isGlobal: number): number;
+  qjs_get_symbol_description(valPtr: number, descOutPtr: number): number;
+
+  // Property access by value (for symbol keys)
+  qjs_get_prop_value(objPtr: number, keyPtr: number): number;
+  qjs_set_prop_value(objPtr: number, keyPtr: number, valPtr: number): number;
+
   // ArrayBuffer / TypedArray
   qjs_new_array_buffer(dataPtr: number, len: number): number;
   qjs_get_array_buffer(valPtr: number, lenOutPtr: number): number;
@@ -629,6 +637,19 @@ export class QuickJS {
   }
 
   /**
+   * Create a global symbol (`Symbol.for(description)`).
+   * Global symbols with the same description are always the same symbol,
+   * even across snapshot/restore.
+   */
+  newSymbolFor(description: string): JSValueHandle {
+    this.assertNotDisposed();
+    const { ptr, len } = this.writeString(description);
+    const result = new JSValueHandle(this, this.exports.qjs_new_symbol(ptr, len, 1));
+    this.exports.wasm_free(ptr);
+    return result;
+  }
+
+  /**
    * Create a new QuickJS ArrayBuffer by copying data from a host buffer.
    */
   newArrayBuffer(data: ArrayBuffer | Uint8Array): JSValueHandle {
@@ -856,6 +877,7 @@ export class QuickJS {
 
   /**
    * Set a property on an object. Accepts string or JSValueHandle as key.
+   * JSValueHandle keys support symbols (including `Symbol.for()`).
    */
   setProp(obj: JSValueHandle, key: string | JSValueHandle, value: JSValueHandle): void {
     this.assertNotDisposed();
@@ -864,13 +886,17 @@ export class QuickJS {
       this.exports.qjs_set_prop_string(obj.ptr, namePtr, value.ptr);
       this.exports.wasm_free(namePtr);
     } else {
-      // Use JS_SetProperty via eval as a fallback for handle keys
-      // For now, convert the key to a string
-      const keyStr = key.toString();
-      const { ptr: namePtr } = this.writeString(keyStr);
-      this.exports.qjs_set_prop_string(obj.ptr, namePtr, value.ptr);
-      this.exports.wasm_free(namePtr);
+      this.exports.qjs_set_prop_value(obj.ptr, key.ptr, value.ptr);
     }
+  }
+
+  /**
+   * Get a property from an object using a JSValueHandle key.
+   * Supports symbol keys (including `Symbol.for()`).
+   */
+  getProp(obj: JSValueHandle, key: JSValueHandle): JSValueHandle {
+    this.assertNotDisposed();
+    return new JSValueHandle(this, this.exports.qjs_get_prop_value(obj.ptr, key.ptr));
   }
 
   /**
@@ -953,6 +979,26 @@ export class QuickJS {
     if (e.qjs_is_number(handle.ptr)) return e.qjs_get_float64(handle.ptr);
     if (e.qjs_is_string(handle.ptr)) return handle.toString();
     if (e.qjs_is_big_int(handle.ptr)) return handle.toBigInt();
+    if (e.qjs_is_symbol(handle.ptr)) {
+      const descOutPtr = e.wasm_malloc(4);
+      const kind = e.qjs_get_symbol_description(handle.ptr, descOutPtr);
+      const view = new DataView(e.memory.buffer);
+      const descPtr = view.getUint32(descOutPtr, true);
+      e.wasm_free(descOutPtr);
+      if (kind === 1) {
+        // Global symbol — reconstruct as Symbol.for(description)
+        const descHandle = new JSValueHandle(this, descPtr);
+        const description = descHandle.toString();
+        descHandle.dispose();
+        return Symbol.for(description);
+      } else if (kind === 2) {
+        // Local (anonymous) symbol — can't be reconstructed on host
+        const descHandle = new JSValueHandle(this, descPtr);
+        descHandle.dispose();
+        return undefined;
+      }
+      return undefined;
+    }
     if (e.qjs_is_array_buffer(handle.ptr)) return handle.toArrayBuffer();
 
     if (e.qjs_is_exception(handle.ptr)) {
@@ -1098,6 +1144,15 @@ export class QuickJS {
     if (typeof value === 'number') return this.newNumber(value);
     if (typeof value === 'string') return this.newString(value);
     if (typeof value === 'bigint') return this.newBigInt(value);
+
+    if (typeof value === 'symbol') {
+      const key = Symbol.keyFor(value);
+      if (key !== undefined) {
+        return this.newSymbolFor(key);
+      }
+      // Local symbols can't be transferred to QuickJS
+      throw new Error(`Cannot convert local symbol to QuickJS handle. Use Symbol.for() for cross-boundary symbols.`);
+    }
 
     if (value instanceof Promise) {
       const deferred = this.newPromise();

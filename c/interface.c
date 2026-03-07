@@ -223,6 +223,48 @@ JSValue *qjs_get_false(void) {
     return jsvalue_to_heap(JS_FALSE);
 }
 
+__attribute__((export_name("qjs_new_symbol")))
+JSValue *qjs_new_symbol(const char *description, size_t len, int is_global) {
+    (void)len;
+    return jsvalue_to_heap(JS_NewSymbol(ctx, description, is_global != 0));
+}
+
+/*
+ * Get the description of a symbol. For global symbols (Symbol.for()),
+ * returns the key via Symbol.keyFor(). For local symbols, returns
+ * the description property.
+ *
+ * Returns:
+ *   0 = not a symbol
+ *   1 = global symbol (description written to out)
+ *   2 = local symbol (description written to out)
+ */
+__attribute__((export_name("qjs_get_symbol_description")))
+int qjs_get_symbol_description(JSValue *val, JSValue **desc_out) {
+    if (!JS_IsSymbol(*val)) return 0;
+
+    /* Try Symbol.keyFor(sym) to detect global symbols */
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue symbol_obj = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue key_for_fn = JS_GetPropertyStr(ctx, symbol_obj, "keyFor");
+    JSValue key_for_result = JS_Call(ctx, key_for_fn, symbol_obj, 1, val);
+    JS_FreeValue(ctx, key_for_fn);
+    JS_FreeValue(ctx, symbol_obj);
+    JS_FreeValue(ctx, global);
+
+    if (!JS_IsUndefined(key_for_result)) {
+        /* Global symbol — keyFor returned the description string */
+        *desc_out = jsvalue_to_heap(key_for_result);
+        return 1;
+    }
+    JS_FreeValue(ctx, key_for_result);
+
+    /* Local symbol — get the .description property */
+    JSValue desc = JS_GetPropertyStr(ctx, *val, "description");
+    *desc_out = jsvalue_to_heap(desc);
+    return 2;
+}
+
 /* ---- Value Extraction ---- */
 
 __attribute__((export_name("qjs_get_float64")))
@@ -350,6 +392,28 @@ int qjs_set_prop_string(JSValue *obj, const char *name, JSValue *val) {
     /* JS_SetPropertyStr takes ownership of val, so we dup it first since
        the caller still owns their handle */
     return JS_SetPropertyStr(ctx, *obj, name, JS_DupValue(ctx, *val));
+}
+
+/*
+ * Get/set a property using a JSValue as the key (works for symbol keys).
+ * The key is converted to an atom via JS_ValueToAtom.
+ */
+__attribute__((export_name("qjs_get_prop_value")))
+JSValue *qjs_get_prop_value(JSValue *obj, JSValue *key) {
+    JSAtom atom = JS_ValueToAtom(ctx, *key);
+    if (atom == JS_ATOM_NULL) return jsvalue_to_heap(JS_EXCEPTION);
+    JSValue val = JS_GetProperty(ctx, *obj, atom);
+    JS_FreeAtom(ctx, atom);
+    return jsvalue_to_heap(val);
+}
+
+__attribute__((export_name("qjs_set_prop_value")))
+int qjs_set_prop_value(JSValue *obj, JSValue *key, JSValue *val) {
+    JSAtom atom = JS_ValueToAtom(ctx, *key);
+    if (atom == JS_ATOM_NULL) return -1;
+    int ret = JS_SetProperty(ctx, *obj, atom, JS_DupValue(ctx, *val));
+    JS_FreeAtom(ctx, atom);
+    return ret;
 }
 
 __attribute__((export_name("qjs_get_prop_uint32")))
