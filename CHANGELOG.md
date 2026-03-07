@@ -1,5 +1,48 @@
 # quickjs-wasi
 
+## 0.2.0
+
+### Minor Changes
+
+- [`a8f453d`](https://github.com/vercel-labs/quickjs-wasi/commit/a8f453dbc3e5c74e8cf3bd1f81b0510282e6166d) Thanks [@TooTallNate](https://github.com/TooTallNate)! - **Breaking:** `HostFunction` type now uses TypeScript's `this` parameter instead of a leading `_this` argument. The `this` value from QuickJS is bound as the native `this` of the callback.
+
+  Before:
+
+  ```typescript
+  vm.newFunction("add", (_this, ...args) => {
+    return vm.newNumber(args[0].toNumber() + args[1].toNumber());
+  });
+  ```
+
+  After:
+
+  ```typescript
+  vm.newFunction("add", (...args) => {
+    return vm.newNumber(args[0].toNumber() + args[1].toNumber());
+  });
+  ```
+
+  To access `this`, use a regular function declaration:
+
+  ```typescript
+  vm.newFunction("method", function (...args) {
+    // `this` is the JSValueHandle for the QuickJS `this` value
+    return this.getProp("name");
+  });
+  ```
+
+- [`0316bfa`](https://github.com/vercel-labs/quickjs-wasi/commit/0316bfaeffdd23c5afe53d9a9246d196ab91b47e) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `QuickJS.serializeSnapshot()` and `QuickJS.deserializeSnapshot()` for converting snapshots to/from a versioned binary format suitable for persistent storage (S3, databases, etc.). The format includes a magic header and version number for forward compatibility. Apply your own compression (gzip, zstd) on top for best results.
+
+- [`416a929`](https://github.com/vercel-labs/quickjs-wasi/commit/416a9293e96b43d6480b44315fe967bd12d22d43) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add Symbol support:
+
+  - `vm.newSymbolFor(description)` — create global symbols (`Symbol.for()`)
+  - `vm.setProp(obj, symbolHandle, value)` / `vm.getProp(obj, symbolHandle)` — get/set properties using symbol keys
+  - `dump()` returns real host `Symbol.for(description)` for global symbols
+  - `hostToHandle()` converts host `Symbol.for()` values to QuickJS global symbols
+  - Local (anonymous) symbols dump as the string `"Symbol(description)"` and throw if passed to `hostToHandle()`
+
+  This enables the Workflow DevKit `globalThis[Symbol.for("WORKFLOW_USE_STEP")]` pattern.
+
 ## 0.1.0
 
 ### Minor Changes
