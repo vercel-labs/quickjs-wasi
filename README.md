@@ -555,4 +555,20 @@ Plus the `__stack_pointer` WASM global (a single i32).
 
 - **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
 - **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
-- **Browser compatibility**: The WASI shim and WebAssembly API usage should work in browsers, but the default WASM loading path uses `node:fs`. Pass `wasmBytes` directly for browser use.
+
+### Browser Usage
+
+quickjs-wasi works in browsers — the TypeScript API uses only the standard `WebAssembly` API and the WASI shim is environment-agnostic. The only Node.js-specific code is the default WASM loading fallback (which uses `node:fs`). In the browser, pass the WASM bytes directly:
+
+```typescript
+import { QuickJS } from 'quickjs-wasi';
+
+// Fetch the .wasm file and compile it once
+const response = await fetch('/quickjs.wasm');
+const wasmModule = await WebAssembly.compileStreaming(response);
+
+// Create VMs from the pre-compiled module (fast — no re-compilation)
+using vm = await QuickJS.create({ wasm: wasmModule });
+```
+
+See [`examples/browser/`](./examples/browser/) for a complete Vite demo app.

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>quickjs-wasi Browser Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+      background: #0a0a0a;
+      color: #e0e0e0;
+    }
+    h1 { margin-bottom: 0.25rem; font-size: 1.5rem; }
+    p.subtitle { color: #888; margin-bottom: 1.5rem; font-size: 0.9rem; }
+    label { display: block; font-weight: 600; margin-bottom: 0.5rem; }
+    textarea {
+      width: 100%;
+      height: 200px;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 0.75rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 14px;
+      resize: vertical;
+    }
+    textarea:focus { outline: none; border-color: #555; }
+    button {
+      margin-top: 0.75rem;
+      padding: 0.5rem 1.25rem;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #333; color: #666; cursor: not-allowed; }
+    #output {
+      margin-top: 1.5rem;
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 0.75rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      min-height: 80px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .log { color: #a0a0a0; }
+    .result { color: #4ade80; }
+    .error { color: #f87171; }
+    .info { color: #60a5fa; }
+    #status { margin-top: 1rem; font-size: 0.85rem; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>quickjs-wasi</h1>
+  <p class="subtitle">QuickJS running in the browser via WebAssembly</p>
+
+  <label for="code">JavaScript code:</label>
+  <textarea id="code">// Try any JavaScript — it runs in a sandboxed QuickJS VM
+const fib = (n) => n <= 1 ? n : fib(n - 1) + fib(n - 2);
+
+const results = [];
+for (let i = 0; i <= 20; i++) {
+  results.push(`fib(${i}) = ${fib(i)}`);
+}
+results.join('\n');</textarea>
+
+  <button id="run" disabled>Loading WASM...</button>
+
+  <div id="output"></div>
+  <div id="status"></div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
