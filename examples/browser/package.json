@@ -8,7 +8,7 @@
     "vercel-build": "bash build.sh && vite build"
   },
   "dependencies": {
-    "quickjs-wasi": "file:../../"
+    "quickjs-wasi": "workspace:*"
   },
   "devDependencies": {
     "vite": "^6.0.0"
