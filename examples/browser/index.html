@@ -50,37 +50,22 @@
       padding: 0.75rem;
       font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
       font-size: 13px;
-      white-space: pre-wrap;
       min-height: 80px;
       max-height: 400px;
       overflow-y: auto;
     }
-    .log { color: #a0a0a0; }
-    .result { color: #4ade80; }
-    .error { color: #f87171; }
+    .output-entry { padding: 2px 0; }
+    .output-entry.log { color: #a0a0a0; }
+    .output-entry.log span { vertical-align: top; }
+    .output-entry.result { color: #4ade80; }
+    .output-entry.error { color: #f87171; white-space: pre-wrap; }
     .info { color: #60a5fa; }
     #status { margin-top: 1rem; font-size: 0.85rem; color: #666; }
   </style>
 </head>
 <body>
-  <h1>quickjs-wasi</h1>
-  <p class="subtitle">QuickJS running in the browser via WebAssembly</p>
+  <div id="app"></div>
 
-  <label for="code">JavaScript code:</label>
-  <textarea id="code">// Try any JavaScript — it runs in a sandboxed QuickJS VM
-const fib = (n) => n <= 1 ? n : fib(n - 1) + fib(n - 2);
-
-const results = [];
-for (let i = 0; i <= 20; i++) {
-  results.push(`fib(${i}) = ${fib(i)}`);
-}
-results.join('\n');</textarea>
-
-  <button id="run" disabled>Loading WASM...</button>
-
-  <div id="output"></div>
-  <div id="status"></div>
-
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="./main.jsx"></script>
 </body>
 </html>

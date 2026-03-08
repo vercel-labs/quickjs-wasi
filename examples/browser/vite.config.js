@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 import { copyFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 
@@ -9,4 +10,6 @@ const publicDir = resolve(import.meta.dirname, 'public');
 mkdirSync(publicDir, { recursive: true });
 copyFileSync(wasmSrc, resolve(publicDir, 'quickjs.wasm'));
 
-export default defineConfig({});
+export default defineConfig({
+  plugins: [react()],
+});
