@@ -8,12 +8,20 @@
  */
 
 import { createWasiShim, type WasiOptions } from './wasi-shim.js';
+import {
+  loadExtension,
+  initExtension,
+  restoreExtensions,
+  type ExtensionDescriptor,
+  type LoadedExtension,
+} from './extensions.js';
 
 // ---- Public types ----
 
 export type HostFunction = (this: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
 
 export type { WasiOptions };
+export type { ExtensionDescriptor, LoadedExtension, DylinkInfo } from './extensions.js';
 
 export interface QuickJSOptions {
   /** WASM module bytes or pre-compiled module. If omitted, loads from the package. */
@@ -35,6 +43,15 @@ export interface QuickJSOptions {
    * so it should be fast.
    */
   interruptHandler?: () => boolean;
+  /**
+   * Native WASM extensions to load. Each extension is a WASM shared library
+   * (.so) compiled with wasi-sdk that links against the QuickJS C API.
+   *
+   * Extensions are loaded in order and their init functions are called
+   * after the QuickJS runtime is initialized. The same extensions (in the
+   * same order) must be provided when restoring from a snapshot.
+   */
+  extensions?: ExtensionDescriptor[];
 }
 
 // ---- WASM Export Types ----
@@ -42,6 +59,7 @@ export interface QuickJSOptions {
 interface QuickJSExports {
   memory: WebAssembly.Memory;
   __stack_pointer: WebAssembly.Global;
+  __indirect_function_table: WebAssembly.Table;
   _initialize(): void;
 
   // Lifecycle
@@ -151,6 +169,14 @@ interface QuickJSExports {
 
 // ---- Snapshot format ----
 
+/** Metadata about an extension saved in a snapshot */
+export interface SnapshotExtension {
+  name: string;
+  memoryBase: number;
+  tableBase: number;
+  initFn: string;
+}
+
 export interface Snapshot {
   /** The raw WASM linear memory contents */
   memory: Uint8Array;
@@ -160,16 +186,18 @@ export interface Snapshot {
   runtimePtr: number;
   /** Pointer to JSContext in the WASM memory */
   contextPtr: number;
+  /** Metadata about loaded extensions (empty if none) */
+  extensions: SnapshotExtension[];
 }
 
 // ---- Snapshot serialization ----
 
 /** Magic bytes: "QJSS" (QuickJS Snapshot) */
 const SNAPSHOT_MAGIC = 0x514A5353;
-/** Current serialization format version */
-const SNAPSHOT_VERSION = 1;
+/** Current serialization format version (2 = added extension metadata) */
+const SNAPSHOT_VERSION = 2;
 /**
- * Header layout (version 1):
+ * Header layout (version 2):
  *   0-3:   Magic "QJSS" (u32 big-endian)
  *   4:     Version (u8)
  *   5-7:   Reserved (zero)
@@ -177,7 +205,12 @@ const SNAPSHOT_VERSION = 1;
  *   12-15: Stack pointer (u32 little-endian)
  *   16-19: Runtime pointer (u32 little-endian)
  *   20-23: Context pointer (u32 little-endian)
- *   24+:   Memory data (memorySize bytes)
+ *   24-27: Extension count (u32 little-endian)
+ *   28+:   Extension entries (variable length):
+ *          nameLen(u32) + name(utf8) + memoryBase(u32) + tableBase(u32) + initFnLen(u32) + initFn(utf8)
+ *   N+:    Memory data (N = memory size from offset 8)
+ *
+ * Version 1 (legacy): no extension metadata, memory starts at offset 24.
  */
 const SNAPSHOT_HEADER_SIZE = 24;
 
@@ -218,6 +251,9 @@ export class QuickJS {
 
   // Handles that must be freed on dispose (e.g. unresolved promise resolve/reject functions)
   private _ownedHandles = new Set<JSValueHandle>();
+
+  /** Loaded extensions in deterministic order */
+  private loadedExtensions: LoadedExtension[] = [];
 
   private constructor(module: WebAssembly.Module) {
     this.module = module;
@@ -294,6 +330,16 @@ export class QuickJS {
       throw new Error('Failed to initialize QuickJS runtime');
     }
 
+    // Load and initialize extensions
+    if (opts.extensions) {
+      const mainExports = instance.exports as Record<string, WebAssembly.ExportValue>;
+      for (const desc of opts.extensions) {
+        const ext = await loadExtension(desc, mainExports);
+        vm.loadedExtensions.push(ext);
+        initExtension(ext, mainExports);
+      }
+    }
+
     // Apply runtime limits
     QuickJS.applyLimits(vm, opts);
 
@@ -314,16 +360,36 @@ export class QuickJS {
     const instance = await QuickJS.instantiate(module, vm, opts.wasi);
     vm.setInstance(instance);
 
+    const mainExports = instance.exports as Record<string, WebAssembly.ExportValue>;
     const exportedMemory = vm.exports.memory;
 
-    // Grow the exported memory to match the snapshot if needed
+    // Grow memory FIRST — extensions need the memory to be large enough
+    // for their __memory_base offsets (which were allocated in the original
+    // larger memory during create()).
     const currentPages = exportedMemory.buffer.byteLength / 65536;
     const neededPages = Math.ceil(snapshot.memory.byteLength / 65536);
     if (neededPages > currentPages) {
       exportedMemory.grow(neededPages - currentPages);
     }
 
-    // Copy snapshot data into the module's own memory
+    // Re-instantiate extensions BEFORE overwriting memory.
+    // This populates the indirect function table with the extension's
+    // function pointers (via elem segments and __wasm_apply_data_relocs).
+    // We use the exact same memory/table bases from the snapshot so that
+    // function table indices match what the snapshotted QuickJS state expects.
+    if (snapshot.extensions.length > 0) {
+      const descriptors = opts.extensions ?? [];
+      vm.loadedExtensions = await restoreExtensions(
+        descriptors,
+        snapshot.extensions,
+        mainExports,
+      );
+    }
+
+    // Copy snapshot data into the module's own memory.
+    // This overwrites EVERYTHING — including the regions that extensions
+    // just initialized. That's correct because the snapshot already contains
+    // the complete state including extension data.
     const dst = new Uint8Array(exportedMemory.buffer);
     dst.set(snapshot.memory);
 
@@ -362,7 +428,21 @@ export class QuickJS {
    * ```
    */
   static serializeSnapshot(snapshot: Snapshot): Uint8Array {
-    const totalSize = SNAPSHOT_HEADER_SIZE + snapshot.memory.byteLength;
+    const textEncoder = new TextEncoder();
+
+    // Calculate extension metadata size
+    let extMetaSize = 4; // extCount (u32)
+    const extEncodedNames: Uint8Array[] = [];
+    const extEncodedInitFns: Uint8Array[] = [];
+    for (const ext of snapshot.extensions) {
+      const nameBytes = textEncoder.encode(ext.name);
+      const initFnBytes = textEncoder.encode(ext.initFn);
+      extEncodedNames.push(nameBytes);
+      extEncodedInitFns.push(initFnBytes);
+      extMetaSize += 4 + nameBytes.length + 4 + 4 + 4 + initFnBytes.length;
+    }
+
+    const totalSize = SNAPSHOT_HEADER_SIZE + extMetaSize + snapshot.memory.byteLength;
 
     const buffer = new ArrayBuffer(totalSize);
     const view = new DataView(buffer);
@@ -377,8 +457,32 @@ export class QuickJS {
     view.setUint32(16, snapshot.runtimePtr, true);
     view.setUint32(20, snapshot.contextPtr, true);
 
+    // Extension metadata (version 2)
+    let offset = SNAPSHOT_HEADER_SIZE;
+    view.setUint32(offset, snapshot.extensions.length, true);
+    offset += 4;
+
+    for (let i = 0; i < snapshot.extensions.length; i++) {
+      const ext = snapshot.extensions[i];
+      const nameBytes = extEncodedNames[i];
+      const initFnBytes = extEncodedInitFns[i];
+
+      view.setUint32(offset, nameBytes.length, true);
+      offset += 4;
+      bytes.set(nameBytes, offset);
+      offset += nameBytes.length;
+      view.setUint32(offset, ext.memoryBase, true);
+      offset += 4;
+      view.setUint32(offset, ext.tableBase, true);
+      offset += 4;
+      view.setUint32(offset, initFnBytes.length, true);
+      offset += 4;
+      bytes.set(initFnBytes, offset);
+      offset += initFnBytes.length;
+    }
+
     // Memory data
-    bytes.set(snapshot.memory, SNAPSHOT_HEADER_SIZE);
+    bytes.set(snapshot.memory, offset);
 
     return bytes;
   }
@@ -401,7 +505,7 @@ export class QuickJS {
 
     // Validate version
     const version = view.getUint8(4);
-    if (version !== SNAPSHOT_VERSION) {
+    if (version !== SNAPSHOT_VERSION && version !== 1) {
       throw new Error(`Unsupported snapshot version: ${version} (expected ${SNAPSHOT_VERSION})`);
     }
 
@@ -410,14 +514,42 @@ export class QuickJS {
     const runtimePtr = view.getUint32(16, true);
     const contextPtr = view.getUint32(20, true);
 
-    const expectedSize = SNAPSHOT_HEADER_SIZE + memorySize;
+    let extensions: SnapshotExtension[] = [];
+    let memoryOffset = SNAPSHOT_HEADER_SIZE;
+
+    if (version >= 2) {
+      // Version 2 adds extension metadata between the header and the memory data
+      const extCount = view.getUint32(24, true);
+      let offset = 28;
+      const textDecoder = new TextDecoder();
+
+      for (let i = 0; i < extCount; i++) {
+        // name length (u32) + name (utf8) + memoryBase (u32) + tableBase (u32) + initFn length (u32) + initFn (utf8)
+        const nameLen = view.getUint32(offset, true);
+        offset += 4;
+        const name = textDecoder.decode(data.slice(offset, offset + nameLen));
+        offset += nameLen;
+        const memBase = view.getUint32(offset, true);
+        offset += 4;
+        const tblBase = view.getUint32(offset, true);
+        offset += 4;
+        const initFnLen = view.getUint32(offset, true);
+        offset += 4;
+        const initFn = textDecoder.decode(data.slice(offset, offset + initFnLen));
+        offset += initFnLen;
+        extensions.push({ name, memoryBase: memBase, tableBase: tblBase, initFn });
+      }
+      memoryOffset = offset;
+    }
+
+    const expectedSize = memoryOffset + memorySize;
     if (data.length < expectedSize) {
       throw new Error(`Invalid snapshot: expected ${expectedSize} bytes, got ${data.length}`);
     }
 
-    const memory = data.slice(SNAPSHOT_HEADER_SIZE, SNAPSHOT_HEADER_SIZE + memorySize);
+    const memory = data.slice(memoryOffset, memoryOffset + memorySize);
 
-    return { memory, stackPointer, runtimePtr, contextPtr };
+    return { memory, stackPointer, runtimePtr, contextPtr, extensions };
   }
 
   // ---- Internal instantiation helpers ----
@@ -425,7 +557,7 @@ export class QuickJS {
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
     if (!options) return {};
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'extensions' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
   }
@@ -1226,6 +1358,12 @@ export class QuickJS {
       stackPointer: this.exports.__stack_pointer.value as number,
       runtimePtr: this.exports.qjs_get_runtime_ptr(),
       contextPtr: this.exports.qjs_get_context_ptr(),
+      extensions: this.loadedExtensions.map((ext) => ({
+        name: ext.name,
+        memoryBase: ext.memoryBase,
+        tableBase: ext.tableBase,
+        initFn: ext.initFn,
+      })),
     };
   }
 

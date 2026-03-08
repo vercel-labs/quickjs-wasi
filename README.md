@@ -296,6 +296,39 @@ let snapshot: Snapshot;
 }
 ```
 
+### Native WASM Extensions
+
+Load C-based extensions compiled as WASM shared libraries. Extensions link directly against the QuickJS C API with zero marshalling overhead — they share the same linear memory and can register custom classes, prototypes, and globals.
+
+```typescript
+import { QuickJS } from 'quickjs-wasi';
+import { readFileSync } from 'fs';
+
+const urlExt = readFileSync('./extensions/url/url.so');
+
+using vm = await QuickJS.create({
+  extensions: [{ name: 'url', wasm: urlExt }],
+});
+
+using result = vm.unwrapResult(vm.evalCode(`
+  const url = new URL('https://example.com:8080/api?key=value#section');
+  url.hostname // 'example.com'
+`));
+```
+
+Extensions survive snapshot/restore — provide the same extensions when restoring:
+
+```typescript
+const snapshot = vm.snapshot();
+
+using vm2 = await QuickJS.restore(snapshot, {
+  extensions: [{ name: 'url', wasm: urlExt }],
+});
+// URL objects created before the snapshot still work
+```
+
+See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic linking works, and known limitations.
+
 ### Sandboxed Execution (PAC Files)
 
 quickjs-wasm can be used as a drop-in sandbox for running untrusted code, similar to how [pac-resolver](https://github.com/TooTallNate/proxy-agents/tree/main/packages/pac-resolver) uses quickjs-emscripten:
@@ -361,10 +394,28 @@ vm.unwrapResult(vm.evalCode(`
 | `vm.typeof(handle)` | Get the `typeof` as a string |
 | `vm.dump(handle)` | Convert a QuickJS value to a host value |
 | `vm.hostToHandle(value)` | Convert a host value to a QuickJS handle |
-| `vm.snapshot()` | Capture the entire VM state |
+| `vm.snapshot()` | Capture the entire VM state (including extension metadata) |
 | `vm.registerHostCallback(id, fn)` | Re-register a host callback after restore |
 | `vm.dispose()` | Free the VM |
 | `vm[Symbol.dispose]()` | Same as `dispose()` — enables `using vm = ...` |
+
+### `QuickJSOptions`
+
+| Option | Description |
+|--------|-------------|
+| `wasm` | WASM module bytes or pre-compiled `WebAssembly.Module` |
+| `wasi` | Custom WASI function implementations (`now`, `stdout`) |
+| `memoryLimit` | Maximum memory the QuickJS runtime can allocate (bytes) |
+| `interruptHandler` | Callback to interrupt execution (return `true` to stop) |
+| `extensions` | Array of `ExtensionDescriptor` objects — native WASM extensions to load |
+
+### `ExtensionDescriptor`
+
+| Property | Description |
+|----------|-------------|
+| `name` | Identifier string (used in snapshot metadata) |
+| `wasm` | WASM bytes (`BufferSource`) or pre-compiled `WebAssembly.Module` |
+| `initFn?` | Init function name (default: `qjs_ext_${name}_init`) |
 
 ### Cached Properties
 
@@ -487,26 +538,6 @@ This design survives snapshot/restore: the ID is stored in QuickJS's heap (part 
 | **Snapshot size** | N/A | ~256 KB baseline, grows with JS heap |
 | **Determinism requirement** | Yes (seeded PRNG, frozen time) | No (state is captured, not re-derived) |
 
-## Project Structure
-
-```
-quickjs-wasi/
- |-- quickjs-ng/            # Git submodule: github.com/quickjs-ng/quickjs
- |-- c/
- |   +-- interface.c        # C wrapper (~470 lines) exporting WASM functions
- |-- src/
- |   |-- index.ts           # QuickJS + JSValueHandle + Deferred
- |   +-- wasi-shim.ts       # Minimal WASI polyfill (6 functions)
- |-- dist/                  # Compiled JS + declarations (not committed)
- |-- quickjs.wasm           # Built WASM binary (not committed)
- |-- test/
- |   |-- snapshot.test.ts   # Core tests
- |   +-- pac-resolver/      # Integration tests (PAC file sandbox)
- |-- Makefile
- |-- package.json
- +-- tsconfig.json
-```
-
 ## Development
 
 ### Prerequisites
@@ -566,6 +597,7 @@ Plus the `__stack_pointer` WASM global (a single i32).
 - **Snapshot size**: Snapshots capture the entire WASM linear memory (~256 KB baseline, grows with heap). Use `serializeSnapshot()` to get a binary buffer, then apply your own compression (gzip/zstd) — the memory compresses very well due to large zero regions.
 - **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
 - **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
+- **Extension ABI**: Native WASM extensions use an experimental dynamic linking ABI that is [not yet stabilized](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md). All extensions must be compiled with the same wasi-sdk version as the main module. See [EXTENSIONS.md](./EXTENSIONS.md) for details.
 
 ### Browser Usage
 

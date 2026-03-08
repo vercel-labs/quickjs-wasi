@@ -110,7 +110,7 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
 
     const view = new DataView(bytes.buffer, bytes.byteOffset);
     expect(view.getUint32(0, false)).toBe(0x514A5353); // "QJSS"
-    expect(view.getUint8(4)).toBe(1); // version 1
+    expect(view.getUint8(4)).toBe(2); // version 2
   });
 
   it('should throw on invalid data', () => {

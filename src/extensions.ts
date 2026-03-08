@@ -1,0 +1,371 @@
+/**
+ * WASM Dynamic Linking - Extension Loader
+ *
+ * Loads WASM shared libraries (.so) compiled with wasi-sdk as extensions
+ * for the QuickJS WASM runtime. Extensions can call QuickJS C API functions
+ * directly through dynamic linking (shared memory + symbol resolution).
+ *
+ * Key concepts:
+ * - Extensions are WASM shared libraries with a `dylink.0` custom section
+ * - They share linear memory and the indirect function table with the main module
+ * - Symbol imports (env.*) are resolved against the main module's exports
+ * - Each extension gets a unique __memory_base and __table_base
+ * - Extensions export an init function (e.g., `qjs_ext_url_init`)
+ */
+
+// ---- Types ----
+
+/** Parsed content of a dylink.0 custom section */
+export interface DylinkInfo {
+  memorySize: number;
+  memoryAlignment: number;
+  tableSize: number;
+  tableAlignment: number;
+  needed: string[];
+}
+
+/** Metadata about a loaded extension, used for snapshot/restore */
+export interface LoadedExtension {
+  /** Name identifier for the extension */
+  name: string;
+  /** The compiled WASM module (needed for restore) */
+  module: WebAssembly.Module;
+  /** The instantiated WASM instance */
+  instance: WebAssembly.Instance;
+  /** Parsed dylink.0 info */
+  dylink: DylinkInfo;
+  /** Allocated base offset in linear memory for this extension's static data */
+  memoryBase: number;
+  /** Allocated base offset in the indirect function table */
+  tableBase: number;
+  /** Name of the init function exported by the extension */
+  initFn: string;
+}
+
+/** Description of an extension to load */
+export interface ExtensionDescriptor {
+  /** Name identifier (used in snapshot metadata) */
+  name: string;
+  /** WASM bytes or pre-compiled module */
+  wasm: BufferSource | WebAssembly.Module;
+  /** Name of the init function exported by the extension (default: `qjs_ext_${name}_init`) */
+  initFn?: string;
+}
+
+// ---- dylink.0 parser ----
+
+/** Read a ULEB128-encoded integer from a byte array */
+function readULEB128(bytes: Uint8Array, offset: { value: number }): number {
+  let result = 0;
+  let shift = 0;
+  while (offset.value < bytes.length) {
+    const byte = bytes[offset.value++];
+    result |= (byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  return result;
+}
+
+/** Parse the dylink.0 custom section from a WASM module */
+export function parseDylink(module: WebAssembly.Module): DylinkInfo | null {
+  const sections = WebAssembly.Module.customSections(module, 'dylink.0');
+  if (sections.length === 0) return null;
+
+  const bytes = new Uint8Array(sections[0]);
+  const offset = { value: 0 };
+
+  const info: DylinkInfo = {
+    memorySize: 0,
+    memoryAlignment: 0,
+    tableSize: 0,
+    tableAlignment: 0,
+    needed: [],
+  };
+
+  while (offset.value < bytes.length) {
+    const subsectionType = readULEB128(bytes, offset);
+    const subsectionSize = readULEB128(bytes, offset);
+    const subsectionEnd = offset.value + subsectionSize;
+
+    if (subsectionType === 1) {
+      // WASM_DYLINK_MEM_INFO
+      info.memorySize = readULEB128(bytes, offset);
+      info.memoryAlignment = readULEB128(bytes, offset);
+      info.tableSize = readULEB128(bytes, offset);
+      info.tableAlignment = readULEB128(bytes, offset);
+    } else if (subsectionType === 2) {
+      // WASM_DYLINK_NEEDED
+      const count = readULEB128(bytes, offset);
+      for (let i = 0; i < count; i++) {
+        const len = readULEB128(bytes, offset);
+        const name = new TextDecoder().decode(
+          bytes.slice(offset.value, offset.value + len)
+        );
+        offset.value += len;
+        info.needed.push(name);
+      }
+    }
+
+    offset.value = subsectionEnd;
+  }
+
+  return info;
+}
+
+// ---- Alignment helper ----
+
+/** Align a value up to 2^align */
+function alignUp(value: number, align: number): number {
+  if (align <= 0) return value;
+  const mask = (1 << align) - 1;
+  return (value + mask) & ~mask;
+}
+
+// ---- Extension Loader ----
+
+/**
+ * Load a WASM shared library extension and link it against the main module.
+ *
+ * @param descriptor - Extension description (name, wasm bytes, init function)
+ * @param mainExports - The main QuickJS WASM module's exports
+ * @param allocBase - Optional fixed memory/table bases (for snapshot restore)
+ */
+export async function loadExtension(
+  descriptor: ExtensionDescriptor,
+  mainExports: Record<string, WebAssembly.ExportValue>,
+  allocBase?: { memoryBase: number; tableBase: number }
+): Promise<LoadedExtension> {
+  // Compile the extension module
+  let module: WebAssembly.Module;
+  if (descriptor.wasm instanceof WebAssembly.Module) {
+    module = descriptor.wasm;
+  } else {
+    module = await WebAssembly.compile(descriptor.wasm);
+  }
+
+  // Parse dylink.0 section
+  const dylink = parseDylink(module);
+  if (!dylink) {
+    throw new Error(
+      `Extension "${descriptor.name}" is not a WASM shared library (missing dylink.0 section)`
+    );
+  }
+
+  const memory = mainExports.memory as WebAssembly.Memory;
+  const table = mainExports.__indirect_function_table as WebAssembly.Table;
+  const stackPointer = mainExports.__stack_pointer as WebAssembly.Global;
+  const mallocFn = mainExports.malloc as CallableFunction;
+
+  if (!memory) throw new Error('Main module does not export memory');
+  if (!table) throw new Error('Main module does not export __indirect_function_table');
+  if (!mallocFn) throw new Error('Main module does not export malloc');
+
+  // Allocate memory region for the extension's static data
+  let memoryBase: number;
+  let tableBase: number;
+
+  if (allocBase) {
+    // Restore mode: use the exact same bases as before
+    memoryBase = allocBase.memoryBase;
+    tableBase = allocBase.tableBase;
+  } else {
+    // Fresh allocation
+    if (dylink.memorySize > 0) {
+      // Use malloc from the main module to allocate in the shared heap
+      memoryBase = (mallocFn as Function)(dylink.memorySize) as number;
+      if (memoryBase === 0) {
+        throw new Error(
+          `Failed to allocate ${dylink.memorySize} bytes for extension "${descriptor.name}"`
+        );
+      }
+      // Zero-initialize the region
+      new Uint8Array(memory.buffer, memoryBase, dylink.memorySize).fill(0);
+    } else {
+      memoryBase = 0;
+    }
+  }
+
+  // Grow the function table if needed
+  if (allocBase) {
+    tableBase = allocBase.tableBase;
+    // Ensure table is large enough
+    if (tableBase + dylink.tableSize > table.length) {
+      table.grow(tableBase + dylink.tableSize - table.length);
+    }
+  } else {
+    tableBase = table.length;
+    if (dylink.tableSize > 0) {
+      table.grow(dylink.tableSize);
+    }
+  }
+
+  // Build the import object
+  const extImports = WebAssembly.Module.imports(module);
+  const importObj: Record<string, Record<string, WebAssembly.ImportValue>> = {
+    env: {},
+    'GOT.mem': {},
+    'GOT.func': {},
+  };
+
+  for (const imp of extImports) {
+    if (imp.module === 'env') {
+      if (imp.name === 'memory' && imp.kind === 'memory') {
+        importObj.env.memory = memory;
+      } else if (
+        imp.name === '__indirect_function_table' &&
+        imp.kind === 'table'
+      ) {
+        importObj.env.__indirect_function_table = table;
+      } else if (imp.name === '__memory_base' && imp.kind === 'global') {
+        importObj.env.__memory_base = new WebAssembly.Global(
+          { value: 'i32', mutable: false },
+          memoryBase
+        );
+      } else if (imp.name === '__table_base' && imp.kind === 'global') {
+        importObj.env.__table_base = new WebAssembly.Global(
+          { value: 'i32', mutable: false },
+          tableBase
+        );
+      } else if (imp.name === '__stack_pointer' && imp.kind === 'global') {
+        importObj.env.__stack_pointer = stackPointer;
+      } else if (imp.kind === 'function') {
+        // Resolve function imports from the main module's exports
+        const resolved = mainExports[imp.name];
+        if (resolved && typeof resolved === 'function') {
+          importObj.env[imp.name] = resolved;
+        } else {
+          throw new Error(
+            `Extension "${descriptor.name}" imports unresolved symbol: env.${imp.name}`
+          );
+        }
+      } else if (imp.kind === 'global') {
+        // Other globals - try to resolve from main exports
+        const resolved = mainExports[imp.name];
+        if (resolved instanceof WebAssembly.Global) {
+          importObj.env[imp.name] = resolved;
+        } else {
+          // Create a zero-initialized mutable global as fallback
+          importObj.env[imp.name] = new WebAssembly.Global(
+            { value: 'i32', mutable: true },
+            0
+          );
+        }
+      }
+    } else if (imp.module === 'GOT.mem' && imp.kind === 'global') {
+      // GOT.mem entries are mutable globals containing memory addresses of symbols
+      // Try to resolve the symbol's address - for now, create mutable globals
+      // that can be patched by __wasm_apply_data_relocs
+      importObj['GOT.mem'][imp.name] = new WebAssembly.Global(
+        { value: 'i32', mutable: true },
+        0
+      );
+    } else if (imp.module === 'GOT.func' && imp.kind === 'global') {
+      // GOT.func entries are mutable globals containing table indices of functions
+      importObj['GOT.func'][imp.name] = new WebAssembly.Global(
+        { value: 'i32', mutable: true },
+        0
+      );
+    }
+  }
+
+  // Instantiate the extension
+  const instance = await WebAssembly.instantiate(module, importObj);
+  const extExports = instance.exports;
+
+  // Apply data relocations if the extension has them
+  if (typeof extExports.__wasm_apply_data_relocs === 'function') {
+    (extExports.__wasm_apply_data_relocs as Function)();
+  }
+
+  // Call constructors if present
+  if (typeof extExports.__wasm_call_ctors === 'function') {
+    (extExports.__wasm_call_ctors as Function)();
+  }
+
+  const initFn =
+    descriptor.initFn ?? `qjs_ext_${descriptor.name}_init`;
+
+  return {
+    name: descriptor.name,
+    module,
+    instance,
+    dylink,
+    memoryBase,
+    tableBase,
+    initFn,
+  };
+}
+
+/**
+ * Call the extension's init function, passing the JSContext and JSRuntime
+ * pointers from the main module.
+ */
+export function initExtension(
+  ext: LoadedExtension,
+  mainExports: Record<string, WebAssembly.ExportValue>
+): void {
+  const initFunc = ext.instance.exports[ext.initFn];
+  if (typeof initFunc !== 'function') {
+    throw new Error(
+      `Extension "${ext.name}" does not export init function "${ext.initFn}"`
+    );
+  }
+
+  // Get the JSContext and JSRuntime pointers from the main module
+  const ctxPtr = (mainExports.qjs_get_context_ptr as Function)();
+  const rtPtr = (mainExports.qjs_get_runtime_ptr as Function)();
+
+  // Call the extension's init function: qjs_ext_xxx_init(ctx, rt)
+  const result = (initFunc as Function)(ctxPtr, rtPtr);
+  if (result !== 0) {
+    throw new Error(
+      `Extension "${ext.name}" init function returned error code ${result}`
+    );
+  }
+}
+
+/**
+ * Re-instantiate extensions for snapshot restore.
+ *
+ * During restore, we need to:
+ * 1. Instantiate extension modules with the same memory/table bases
+ * 2. Let them populate the function table (via elem segments and __wasm_apply_data_relocs)
+ * 3. Do NOT call the init function (the state is already in the snapshot memory)
+ *
+ * This reconstructs the function table entries that extensions need, without
+ * modifying linear memory (which will be overwritten by the snapshot).
+ */
+export async function restoreExtensions(
+  descriptors: ExtensionDescriptor[],
+  extensionMeta: Array<{
+    name: string;
+    memoryBase: number;
+    tableBase: number;
+    initFn: string;
+  }>,
+  mainExports: Record<string, WebAssembly.ExportValue>
+): Promise<LoadedExtension[]> {
+  const loaded: LoadedExtension[] = [];
+
+  for (const meta of extensionMeta) {
+    // Find the descriptor for this extension
+    const descriptor = descriptors.find((d) => d.name === meta.name);
+    if (!descriptor) {
+      throw new Error(
+        `Extension "${meta.name}" required by snapshot but not provided`
+      );
+    }
+
+    // Load with fixed bases
+    const ext = await loadExtension(descriptor, mainExports, {
+      memoryBase: meta.memoryBase,
+      tableBase: meta.tableBase,
+    });
+    ext.initFn = meta.initFn;
+
+    loaded.push(ext);
+  }
+
+  return loaded;
+}
