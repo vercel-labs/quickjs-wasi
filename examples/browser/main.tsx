@@ -1,23 +1,31 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Inspector, chromeDark } from 'react-inspector';
-import { QuickJS } from 'quickjs-wasi';
+import { ObjectInspector, chromeDark } from 'react-inspector';
+import { QuickJS, type JSValueHandle } from 'quickjs-wasi';
 
-// Custom dark theme for react-inspector extending chromeDark
+import './fonts.css';
+
+// Extend chromeDark with a transparent background and matching monospace font.
+// react-inspector v9 types `theme` as `string` but accepts objects at runtime.
 const inspectorTheme = {
   ...chromeDark,
-  BASE_FONT_FAMILY: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+  BASE_FONT_FAMILY: "'Geist Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
   BASE_FONT_SIZE: '13px',
   BASE_BACKGROUND_COLOR: 'transparent',
-  TREENODE_FONT_FAMILY: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+  TREENODE_FONT_FAMILY: "'Geist Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
   TREENODE_FONT_SIZE: '13px',
-};
+} as unknown as string;
 
-function OutputEntry({ entry }) {
+type OutputResult = { type: 'result'; value: unknown };
+type OutputLog = { type: 'log'; values: unknown[] };
+type OutputError = { type: 'error'; text: string };
+type OutputEntry = OutputResult | OutputLog | OutputError;
+
+function OutputEntryView({ entry }: { entry: OutputEntry }) {
   if (entry.type === 'result') {
     return (
       <div className="output-entry result">
-        <Inspector data={entry.value} theme={inspectorTheme} expandLevel={1} />
+        <ObjectInspector data={entry.value} theme={inspectorTheme} expandLevel={1} />
       </div>
     );
   }
@@ -29,7 +37,7 @@ function OutputEntry({ entry }) {
           <span key={i}>
             {i > 0 && ' '}
             {typeof v === 'object' && v !== null ? (
-              <Inspector data={v} theme={inspectorTheme} expandLevel={0} />
+              <ObjectInspector data={v} theme={inspectorTheme} expandLevel={0} />
             ) : (
               String(v)
             )}
@@ -49,11 +57,11 @@ function OutputEntry({ entry }) {
 function App() {
   const [status, setStatus] = useState('');
   const [running, setRunning] = useState(false);
-  const [output, setOutput] = useState([]);
+  const [output, setOutput] = useState<OutputEntry[]>([]);
   const [wasmReady, setWasmReady] = useState(false);
-  const wasmModuleRef = useRef(null);
-  const codeRef = useRef(null);
-  const outputRef = useRef(null);
+  const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
+  const codeRef = useRef<HTMLTextAreaElement | null>(null);
+  const outputRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll output to bottom
   useEffect(() => {
@@ -72,37 +80,39 @@ function App() {
         setWasmReady(true);
         setStatus(`WASM loaded (${(bytes.byteLength / 1024).toFixed(0)} KB)`);
       } catch (err) {
-        setStatus(`Failed to load WASM: ${err.message}`);
-        setOutput([{ type: 'error', text: `Error loading WASM: ${err.message}` }]);
+        const message = err instanceof Error ? err.message : String(err);
+        setStatus(`Failed to load WASM: ${message}`);
+        setOutput([{ type: 'error', text: `Error loading WASM: ${message}` }]);
       }
     }
     init();
   }, []);
 
   const run = useCallback(async () => {
-    const code = codeRef.current.value;
+    const code = codeRef.current?.value;
+    if (!code) return;
     setOutput([]);
     setRunning(true);
 
-    const entries = [];
+    const entries: OutputEntry[] = [];
     const start = performance.now();
 
     try {
       const execStart = Date.now();
       const vm = await QuickJS.create({
-        wasm: wasmModuleRef.current,
+        wasm: wasmModuleRef.current!,
         memoryLimit: 8 * 1024 * 1024,
         interruptHandler: () => Date.now() - execStart > 5000,
       });
 
       // Provide console.log / console.error via host functions
       {
-        const log = vm.newFunction('log', (...args) => {
+        const log = vm.newFunction('log', function (this: JSValueHandle, ...args: JSValueHandle[]) {
           const values = args.map((a) => vm.dump(a));
           entries.push({ type: 'log', values });
           return vm.undefined;
         });
-        const error = vm.newFunction('error', (...args) => {
+        const error = vm.newFunction('error', function (this: JSValueHandle, ...args: JSValueHandle[]) {
           const text = args.map((a) => vm.dump(a)).map(String).join(' ');
           entries.push({ type: 'error', text });
           return vm.undefined;
@@ -143,7 +153,8 @@ function App() {
 
       vm.dispose();
     } catch (err) {
-      entries.push({ type: 'error', text: `Host error: ${err.message}` });
+      const message = err instanceof Error ? err.message : String(err);
+      entries.push({ type: 'error', text: `Host error: ${message}` });
       setStatus('Execution failed');
     } finally {
       setOutput(entries);
@@ -152,7 +163,7 @@ function App() {
   }, []);
 
   const handleKeyDown = useCallback(
-    (e) => {
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         run();
@@ -189,7 +200,7 @@ obj;`}
 
       <div id="output" ref={outputRef}>
         {output.map((entry, i) => (
-          <OutputEntry key={i} entry={entry} />
+          <OutputEntryView key={i} entry={entry} />
         ))}
       </div>
       <div id="status">{status}</div>
@@ -197,4 +208,4 @@ obj;`}
   );
 }
 
-createRoot(document.getElementById('app')).render(<App />);
+createRoot(document.getElementById('app')!).render(<App />);

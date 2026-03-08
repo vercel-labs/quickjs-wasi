@@ -8,13 +8,17 @@
     "vercel-build": "bash build.sh && vite build"
   },
   "dependencies": {
+    "geist": "^1.7.0",
     "quickjs-wasi": "workspace:*",
     "react": "^19",
     "react-dom": "^19",
     "react-inspector": "^9"
   },
   "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
+    "typescript": "^5",
     "vite": "^6.0.0"
   }
 }
