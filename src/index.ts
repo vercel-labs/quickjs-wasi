@@ -149,6 +149,7 @@ interface QuickJSExports {
   // Error handling
   qjs_get_exception(): number;
   qjs_new_error(): number;
+  qjs_throw(valPtr: number): number;
 
   // Runtime limits
   qjs_set_memory_limit(limit: number): void;
@@ -633,11 +634,12 @@ export class QuickJS {
       const result = callback.call(thisHandle, ...args);
       return this.exports.qjs_dup_value(result.ptr);
     } catch (err) {
-      const errStr = err instanceof Error ? err.message : String(err);
-      const errHandle = this.newError(errStr);
-      const excPtr = this.exports.qjs_dup_value(errHandle.ptr);
+      // Throw an exception inside QuickJS and return NULL to signal
+      // to the C trampoline that an exception was thrown.
+      const errHandle = this.newError(err instanceof Error ? err : String(err));
+      this.exports.qjs_throw(errHandle.ptr);
       errHandle.dispose();
-      return excPtr;
+      return 0;
     }
   }
 
@@ -679,19 +681,18 @@ export class QuickJS {
   }
 
   /**
-   * Unwrap a result handle. If it's an exception, throws a host Error
-   * with the QuickJS error as the `cause`. Otherwise returns the handle.
+   * Unwrap a result handle. If it's an exception, throws a `JSException`
+   * (which extends `Error`). The exception's `.handle` property is a live
+   * `JSValueHandle` to the QuickJS error value. Otherwise returns the handle.
    */
   unwrapResult(result: JSValueHandle): JSValueHandle {
     if (result.isException) {
       const exc = this.getException();
-      const dumped = this.dump(exc);
-      exc.dispose();
       result.dispose();
-      if (dumped instanceof Error) {
-        throw dumped;
-      }
-      throw new Error(String(dumped));
+      // Track the handle so it gets cleaned up if the VM is disposed
+      // before the caller disposes the exception.
+      this._ownedHandles.add(exc);
+      throw new JSException(exc);
     }
     return result;
   }
@@ -1441,6 +1442,80 @@ export class QuickJS {
   /** @internal */
   _readCString(ptr: number): string {
     return this.readCString(ptr);
+  }
+}
+
+// ---- JSException ----
+
+/**
+ * An exception thrown from QuickJS code. Extends `Error` so it works with
+ * standard error handling (`instanceof Error`, `.message`, `.stack`), and
+ * also exposes a `handle` property — a live `JSValueHandle` to the QuickJS
+ * exception value, allowing direct inspection of custom properties.
+ *
+ * The `handle` must be disposed when you're done with it (or use `using`).
+ * If the error propagates uncaught, the handle will be cleaned up when the
+ * VM is disposed.
+ */
+export class JSException extends Error {
+  /**
+   * A live handle to the QuickJS exception value. You can read custom
+   * properties, call methods, etc. Must be disposed when done.
+   */
+  readonly handle: JSValueHandle;
+
+  // Cached values so they survive handle disposal / VM teardown.
+  // Using # fields keeps them out of console.log / Object.keys output.
+  #name: string;
+  #message: string;
+  #stack: string | undefined;
+
+  /** @internal */
+  constructor(handle: JSValueHandle) {
+    super();
+    this.handle = handle;
+
+    // V8 installs a lazy `stack` accessor on Error instances that shadows
+    // our prototype getter. Delete it so our getter takes effect.
+    delete (this as any).stack;
+
+    // Read error properties eagerly and cache them.
+    using msgHandle = handle.getProp('message');
+    this.#name = handle.getProp('name').consume(h => h.isUndefined ? 'Error' : h.toString());
+    this.#message = msgHandle.isUndefined ? handle.toString() : msgHandle.toString();
+    this.#stack = handle.getProp('stack').consume(h => h.isUndefined ? undefined : h.toString());
+  }
+
+  override get name(): string {
+    return this.#name;
+  }
+
+  override set name(v: string) {
+    this.#name = v;
+  }
+
+  override get message(): string {
+    return this.#message;
+  }
+
+  override set message(v: string) {
+    this.#message = v;
+  }
+
+  override get stack(): string | undefined {
+    return this.#stack;
+  }
+
+  override set stack(v: string | undefined) {
+    this.#stack = v;
+  }
+
+  dispose(): void {
+    this.handle.dispose();
+  }
+
+  [Symbol.dispose](): void {
+    this.handle.dispose();
   }
 }
 

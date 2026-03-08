@@ -87,14 +87,15 @@ static JSValue host_callback_trampoline(JSContext *ctx, JSValueConst this_val,
     /* Call into the host */
     JSValue *result_ptr = host_call(func_id, this_ptr, argc, argv_ptrs);
 
-    /* Extract and dup the result, then free the pointer */
+    /* Extract and dup the result, then free the pointer.
+       NULL means the host threw an exception (via qjs_throw). */
     JSValue result;
     if (result_ptr) {
         result = JS_DupValue(ctx, *result_ptr);
         JS_FreeValue(ctx, *result_ptr);
         free(result_ptr);
     } else {
-        result = JS_UNDEFINED;
+        result = JS_EXCEPTION;
     }
 
     /* Free the this_ptr (was dup'd for host) */
