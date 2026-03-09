@@ -1,5 +1,21 @@
 # quickjs-wasi
 
+## 1.0.0
+
+### Major Changes
+
+- [`4e37d4a`](https://github.com/vercel-labs/quickjs-wasi/commit/4e37d4abdf503adb2a6824a4dc9a9ea99585b5bb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - **Breaking:** `evalCode()` and `callFunction()` now throw a `JSException` directly when the evaluated code or called function throws, matching standard JavaScript semantics. The `unwrapResult()` method and `isException` property have been removed — exceptions propagate naturally via try/catch.
+
+### Minor Changes
+
+- [`f64397e`](https://github.com/vercel-labs/quickjs-wasi/commit/f64397e7e3634818eaee9eb2a08975a179131b6f) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `JSException` class that extends `Error` and is thrown by `unwrapResult()`. It exposes a `handle` property — a live `JSValueHandle` to the QuickJS exception value — allowing direct inspection of custom properties on the thrown error. Also fixes a bug where errors thrown from host callbacks were returned as regular values instead of being propagated as QuickJS exceptions.
+
+- [`710c39a`](https://github.com/vercel-labs/quickjs-wasi/commit/710c39a688e70eb6336f8cca4d4a737b82fe97b0) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add native WASM extension support via dynamic linking. Extensions are C-based WASM shared libraries that link directly against the QuickJS C API with zero marshalling overhead. Extensions are fully compatible with snapshot/restore. Includes a proof-of-concept URL and URLSearchParams extension.
+
+### Patch Changes
+
+- [`3aff089`](https://github.com/vercel-labs/quickjs-wasi/commit/3aff0894fdd5c28faccf1f32bd20857922d486c7) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Increase WASM stack size to 1MB to prevent stack overflow traps. The default wasi-sdk stack (~173KB) was too small for QuickJS, causing hard WASM traps instead of catchable JS exceptions during recursive operations like JSON.stringify or devalue serialization at moderate depths.
+
 ## 0.2.0
 
 ### Minor Changes
