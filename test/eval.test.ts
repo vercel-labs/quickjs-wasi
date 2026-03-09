@@ -1,12 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { QuickJS } from '../src/index.ts';
+import { QuickJS, JSException } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 
 describe('evalCode', () => {
   it('should evaluate arithmetic', async () => {
     using vm = await QuickJS.create(wasmBytes);
     using result = vm.evalCode('1 + 2');
-    expect(result.isException).toBe(false);
     expect(result.toNumber()).toBe(3);
   });
 
@@ -15,31 +14,25 @@ describe('evalCode', () => {
     using result = vm.evalCode('"hello" + " " + "world"');
     expect(result.toString()).toBe('hello world');
   });
-});
 
-describe('unwrapResult', () => {
-  it('should return the handle on success', async () => {
-    using vm = await QuickJS.create(wasmBytes);
-    using result = vm.unwrapResult(vm.evalCode('42'));
-    expect(result.toNumber()).toBe(42);
-  });
-
-  it('should throw on exception', async () => {
+  it('should throw JSException on error', async () => {
     using vm = await QuickJS.create(wasmBytes);
     expect(() => {
-      vm.unwrapResult(vm.evalCode('throw new Error("boom")'));
+      vm.evalCode('throw new Error("boom")');
     }).toThrow('boom');
   });
 
-  it('should throw with error name and message preserved', async () => {
+  it('should throw JSException with error name and message preserved', async () => {
     using vm = await QuickJS.create(wasmBytes);
     try {
-      vm.unwrapResult(vm.evalCode('throw new TypeError("bad type")'));
+      vm.evalCode('throw new TypeError("bad type")');
       expect.unreachable();
     } catch (err: any) {
       expect(err).toBeInstanceOf(Error);
+      expect(err).toBeInstanceOf(JSException);
       expect(err.name).toBe('TypeError');
       expect(err.message).toBe('bad type');
+      err.dispose();
     }
   });
 });

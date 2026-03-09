@@ -5,7 +5,7 @@ import { wasmBytes } from './helpers.ts';
 describe('snapshot and restore', () => {
   it('should preserve simple state across snapshot/restore', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.unwrapResult(vm1.evalCode('globalThis.counter = 42')).dispose();
+    vm1.evalCode('globalThis.counter = 42').dispose();
 
     const snapshot = vm1.snapshot();
     vm1.dispose();
@@ -17,7 +17,7 @@ describe('snapshot and restore', () => {
 
   it('should resolve a pending promise in a restored VM', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.unwrapResult(vm1.evalCode(`
+    vm1.evalCode(`
       globalThis.stepResult = "not yet";
       let __resolve;
       globalThis.pendingStep = new Promise(r => { __resolve = r; });
@@ -25,7 +25,7 @@ describe('snapshot and restore', () => {
       globalThis.pendingStep.then(value => {
         globalThis.stepResult = "completed: " + value;
       });
-    `)).dispose();
+    `).dispose();
     vm1.executePendingJobs();
 
     expect(vm1.global.getProp('stepResult').consume(h => h.toString())).toBe('not yet');
@@ -62,7 +62,7 @@ describe('snapshot and restore', () => {
       return vm2.newNumber(args[0].toNumber() + args[1].toNumber());
     });
 
-    using result = vm2.unwrapResult(vm2.evalCode('hostAdd(100, 200)'));
+    using result = vm2.evalCode('hostAdd(100, 200)');
     expect(result.toNumber()).toBe(300);
     vm2.dispose();
   });
@@ -71,7 +71,7 @@ describe('snapshot and restore', () => {
 describe('serializeSnapshot / deserializeSnapshot', () => {
   it('should round-trip a snapshot through serialize/deserialize', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.unwrapResult(vm1.evalCode('globalThis.x = 42')).dispose();
+    vm1.evalCode('globalThis.x = 42').dispose();
     const snapshot = vm1.snapshot();
     vm1.dispose();
 
@@ -87,10 +87,10 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
 
   it('should produce a working snapshot after round-trip', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.unwrapResult(vm1.evalCode(`
+    vm1.evalCode(`
       globalThis.message = "survived serialization";
       globalThis.count = 99;
-    `)).dispose();
+    `).dispose();
     const snapshot = vm1.snapshot();
     vm1.dispose();
 
@@ -127,13 +127,13 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
 
   it('should round-trip with pending promises', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.unwrapResult(vm1.evalCode(`
+    vm1.evalCode(`
       globalThis.result = "pending";
       let __resolve;
       globalThis.p = new Promise(r => { __resolve = r; });
       globalThis.__resolve = __resolve;
       globalThis.p.then(v => { globalThis.result = "done: " + v; });
-    `)).dispose();
+    `).dispose();
     vm1.executePendingJobs();
     const snapshot = vm1.snapshot();
     vm1.dispose();

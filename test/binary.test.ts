@@ -21,7 +21,7 @@ describe('ArrayBuffer', () => {
 
   it('should extract an ArrayBuffer to host', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    using ab = vm.unwrapResult(vm.evalCode('new ArrayBuffer(4)'));
+    using ab = vm.evalCode('new ArrayBuffer(4)');
     const hostBuf = ab.toArrayBuffer();
     expect(hostBuf).toBeInstanceOf(ArrayBuffer);
     expect(hostBuf.byteLength).toBe(4);
@@ -34,10 +34,10 @@ describe('ArrayBuffer', () => {
     vm.setProp(vm.global, 'buf', ab);
 
     // Modify in QuickJS
-    vm.unwrapResult(vm.evalCode('new Uint8Array(buf)[1] = 0xFF')).dispose();
+    vm.evalCode('new Uint8Array(buf)[1] = 0xFF').dispose();
 
     // Read back
-    using result = vm.unwrapResult(vm.evalCode('buf'));
+    using result = vm.evalCode('buf');
     const hostBuf = new Uint8Array(result.toArrayBuffer());
     expect(hostBuf[0]).toBe(0xDE);
     expect(hostBuf[1]).toBe(0xFF); // modified
@@ -47,7 +47,7 @@ describe('ArrayBuffer', () => {
 
   it('should dump() ArrayBuffer values', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    using ab = vm.unwrapResult(vm.evalCode('new ArrayBuffer(3)'));
+    using ab = vm.evalCode('new ArrayBuffer(3)');
     const dumped = vm.dump(ab);
     expect(dumped).toBeInstanceOf(ArrayBuffer);
     expect((dumped as ArrayBuffer).byteLength).toBe(3);
@@ -67,7 +67,7 @@ describe('Uint8Array', () => {
 
   it('should extract a Uint8Array to host', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    using u8 = vm.unwrapResult(vm.evalCode('new Uint8Array([10, 20, 30])'));
+    using u8 = vm.evalCode('new Uint8Array([10, 20, 30])');
     const hostArr = u8.toUint8Array();
     expect(hostArr).toBeInstanceOf(Uint8Array);
     expect(Array.from(hostArr)).toEqual([10, 20, 30]);
@@ -80,17 +80,17 @@ describe('Uint8Array', () => {
     vm.setProp(vm.global, 'arr', u8);
 
     // Reverse in QuickJS
-    vm.unwrapResult(vm.evalCode('arr.reverse()')).dispose();
+    vm.evalCode('arr.reverse()').dispose();
 
     // Read back
-    using result = vm.unwrapResult(vm.evalCode('arr'));
+    using result = vm.evalCode('arr');
     const hostArr = result.toUint8Array();
     expect(Array.from(hostArr)).toEqual([5, 4, 3, 2, 1]);
   });
 
   it('should dump() Uint8Array values', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    using u8 = vm.unwrapResult(vm.evalCode('new Uint8Array([1, 2, 3])'));
+    using u8 = vm.evalCode('new Uint8Array([1, 2, 3])');
     const dumped = vm.dump(u8);
     expect(dumped).toBeInstanceOf(Uint8Array);
     expect(Array.from(dumped as Uint8Array)).toEqual([1, 2, 3]);

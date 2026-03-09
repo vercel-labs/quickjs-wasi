@@ -40,8 +40,7 @@ export function compile<R = unknown, A extends unknown[] = []>(
     }
   }
 
-  const fnResult = vm.evalCode(`${compiled};${returnName}`, options.filename);
-  const fn = vm.unwrapResult(fnResult);
+  const fn = vm.evalCode(`${compiled};${returnName}`, options.filename);
 
   const t = vm.typeof(fn);
   if (t !== 'function') {
@@ -54,12 +53,11 @@ export function compile<R = unknown, A extends unknown[] = []>(
     let promiseHandle: JSValueHandle | undefined;
     let resolvedHandle: JSValueHandle | undefined;
     try {
-      const result = vm.callFunction(
+      promiseHandle = vm.callFunction(
         fn,
         vm.undefined,
         ...args.map((arg) => vm.hostToHandle(arg))
       );
-      promiseHandle = vm.unwrapResult(result);
       const resolvedResultP = vm.resolvePromise(promiseHandle);
       vm.executePendingJobs();
       const resolvedResult = await resolvedResultP;

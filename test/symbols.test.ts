@@ -19,7 +19,7 @@ describe('Symbol.for() (global symbols)', () => {
     vm.setProp(vm.global, hostSym, vm.newString('hello from host'));
 
     // QuickJS code uses Symbol.for('MY_KEY') — should find the same property
-    using result = vm.unwrapResult(vm.evalCode('globalThis[Symbol.for("MY_KEY")]'));
+    using result = vm.evalCode('globalThis[Symbol.for("MY_KEY")]');
     expect(result.toString()).toBe('hello from host');
   });
 
@@ -62,10 +62,10 @@ describe('Symbol.for() (global symbols)', () => {
     vm.setProp(vm.global, sym, fn);
 
     // QuickJS code accesses it via Symbol.for
-    using result = vm.unwrapResult(vm.evalCode(`
+    using result = vm.evalCode(`
       const useStep = globalThis[Symbol.for("WORKFLOW_USE_STEP")];
       useStep("my-step-id");
-    `));
+    `);
     expect(result.toString()).toBe('step:my-step-id');
   });
 
@@ -82,7 +82,7 @@ describe('Symbol.for() (global symbols)', () => {
 
     using vm2 = await QuickJS.restore(snapshot, wasmBytes);
     // After restore, Symbol.for('PERSIST_ME') should still have the value
-    using result = vm2.unwrapResult(vm2.evalCode('globalThis[Symbol.for("PERSIST_ME")]'));
+    using result = vm2.evalCode('globalThis[Symbol.for("PERSIST_ME")]');
     expect(result.toString()).toBe('persisted');
   });
 });
@@ -90,7 +90,7 @@ describe('Symbol.for() (global symbols)', () => {
 describe('dump() with symbol values', () => {
   it('should dump a global symbol as Symbol.for()', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    using sym = vm.unwrapResult(vm.evalCode('Symbol.for("test")'));
+    using sym = vm.evalCode('Symbol.for("test")');
     const dumped = vm.dump(sym);
     expect(typeof dumped).toBe('symbol');
     expect(dumped).toBe(Symbol.for('test'));
@@ -106,7 +106,7 @@ describe('dump() with symbol values', () => {
 
   it('should dump a local (anonymous) symbol as undefined', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    using sym = vm.unwrapResult(vm.evalCode('Symbol("local")'));
+    using sym = vm.evalCode('Symbol("local")');
     const dumped = vm.dump(sym);
     // Local symbols can't be reconstructed on the host
     expect(dumped).toBeUndefined();

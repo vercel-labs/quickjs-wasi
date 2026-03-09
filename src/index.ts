@@ -667,26 +667,11 @@ export class QuickJS {
   // ---- Public API ----
 
   /**
-   * Evaluate JavaScript code and return the result as a handle.
-   * If the code throws, the returned handle will have `isException === true`.
+   * Check if a result handle is an exception and throw a JSException if so.
+   * Used internally by evalCode and callFunction.
    */
-  evalCode(code: string, filename: string = '<eval>'): JSValueHandle {
-    this.assertNotDisposed();
-    const codeStr = this.writeString(code);
-    const fnStr = this.writeString(filename);
-    const resultPtr = this.exports.qjs_eval(codeStr.ptr, codeStr.len, fnStr.ptr, 0);
-    this.exports.wasm_free(codeStr.ptr);
-    this.exports.wasm_free(fnStr.ptr);
-    return new JSValueHandle(this, resultPtr);
-  }
-
-  /**
-   * Unwrap a result handle. If it's an exception, throws a `JSException`
-   * (which extends `Error`). The exception's `.handle` property is a live
-   * `JSValueHandle` to the QuickJS error value. Otherwise returns the handle.
-   */
-  unwrapResult(result: JSValueHandle): JSValueHandle {
-    if (result.isException) {
+  private throwIfException(result: JSValueHandle): JSValueHandle {
+    if (this.exports.qjs_is_exception(result.ptr) !== 0) {
       const exc = this.getException();
       result.dispose();
       // Track the handle so it gets cleaned up if the VM is disposed
@@ -695,6 +680,21 @@ export class QuickJS {
       throw new JSException(exc);
     }
     return result;
+  }
+
+  /**
+   * Evaluate JavaScript code and return the result as a handle.
+   * If the code throws, a `JSException` (which extends `Error`) is thrown
+   * on the host side — matching standard JavaScript semantics.
+   */
+  evalCode(code: string, filename: string = '<eval>'): JSValueHandle {
+    this.assertNotDisposed();
+    const codeStr = this.writeString(code);
+    const fnStr = this.writeString(filename);
+    const resultPtr = this.exports.qjs_eval(codeStr.ptr, codeStr.len, fnStr.ptr, 0);
+    this.exports.wasm_free(codeStr.ptr);
+    this.exports.wasm_free(fnStr.ptr);
+    return this.throwIfException(new JSValueHandle(this, resultPtr));
   }
 
   /**
@@ -917,7 +917,7 @@ export class QuickJS {
 
           const thenFn = promiseHandle.getProp('then');
           const onSettleDup = onSettleFn.dup();
-          vm.callFunction(thenFn, promiseHandle, onSettleFn, onSettleDup).dispose();
+          vm.callFunctionRaw(thenFn, promiseHandle, onSettleFn, onSettleDup).dispose();
           thenFn.dispose();
           onSettleFn.dispose();
           onSettleDup.dispose();
@@ -925,12 +925,12 @@ export class QuickJS {
         return _settled;
       },
       resolve(value: JSValueHandle) {
-        vm.callFunction(resolveHandle, vm.undefined, value).dispose();
+        vm.callFunctionRaw(resolveHandle, vm.undefined, value).dispose();
         vm._ownedHandles.delete(resolveHandle);
         resolveHandle.dispose();
       },
       reject(value: JSValueHandle) {
-        vm.callFunction(rejectHandle, vm.undefined, value).dispose();
+        vm.callFunctionRaw(rejectHandle, vm.undefined, value).dispose();
         vm._ownedHandles.delete(rejectHandle);
         rejectHandle.dispose();
       },
@@ -978,7 +978,7 @@ export class QuickJS {
       });
 
       const thenFn = promiseHandle.getProp('then');
-      this.callFunction(thenFn, promiseHandle, onFulfilled, onRejected).dispose();
+      this.callFunctionRaw(thenFn, promiseHandle, onFulfilled, onRejected).dispose();
       thenFn.dispose();
       onFulfilled.dispose();
       onRejected.dispose();
@@ -986,9 +986,18 @@ export class QuickJS {
   }
 
   /**
-   * Call a QuickJS function.
+   * Call a QuickJS function. If the function throws, a `JSException`
+   * is thrown on the host side.
    */
   callFunction(func: JSValueHandle, thisVal: JSValueHandle, ...args: JSValueHandle[]): JSValueHandle {
+    return this.throwIfException(this.callFunctionRaw(func, thisVal, ...args));
+  }
+
+  /**
+   * Internal: call a QuickJS function without throwing on exception.
+   * Used by promise plumbing where exceptions are handled differently.
+   */
+  private callFunctionRaw(func: JSValueHandle, thisVal: JSValueHandle, ...args: JSValueHandle[]): JSValueHandle {
     this.assertNotDisposed();
     const argc = args.length;
 
@@ -1163,7 +1172,7 @@ export class QuickJS {
       const abPtr = e.qjs_get_typed_array_buffer(handle.ptr, byteOffsetPtr, byteLengthPtr, bytesPerElemPtr);
       const abHandle = new JSValueHandle(this, abPtr);
 
-      if (!abHandle.isException) {
+      if (e.qjs_is_exception(abHandle.ptr) === 0) {
         const view = new DataView(e.memory.buffer);
         const byteOffset = view.getUint32(byteOffsetPtr, true);
         const byteLength = view.getUint32(byteLengthPtr, true);
@@ -1235,7 +1244,7 @@ export class QuickJS {
     if (e.qjs_is_object(handle.ptr)) {
       const keysPtr = e.qjs_get_own_property_names(handle.ptr);
       const keysHandle = new JSValueHandle(this, keysPtr);
-      if (keysHandle.isException) {
+      if (e.qjs_is_exception(keysHandle.ptr) !== 0) {
         keysHandle.dispose();
         return {};
       }
@@ -1535,10 +1544,6 @@ export class JSValueHandle {
     this.ptr = ptr;
   }
 
-  get isException(): boolean {
-    return this.vm._getExports().qjs_is_exception(this.ptr) !== 0;
-  }
-
   get isUndefined(): boolean {
     return this.vm._getExports().qjs_is_undefined(this.ptr) !== 0;
   }
@@ -1630,7 +1635,7 @@ export class JSValueHandle {
     const abPtr = e.qjs_get_typed_array_buffer(this.ptr, byteOffsetPtr, byteLengthPtr, bytesPerElemPtr);
     const abHandle = new JSValueHandle(this.vm, abPtr);
 
-    if (abHandle.isException) {
+    if (this.vm._getExports().qjs_is_exception(abHandle.ptr) !== 0) {
       abHandle.dispose();
       e.wasm_free(byteOffsetPtr);
       e.wasm_free(byteLengthPtr);

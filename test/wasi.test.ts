@@ -105,7 +105,7 @@ describe('options backwards compatibility', () => {
 describe('restore with wasi options', () => {
   it('should use custom clock after restore', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.unwrapResult(vm1.evalCode('globalThis.x = 42')).dispose();
+    vm1.evalCode('globalThis.x = 42').dispose();
     const snapshot = vm1.snapshot();
     vm1.dispose();
 

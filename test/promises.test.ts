@@ -10,12 +10,12 @@ describe('newPromise / Deferred', () => {
 
     vm.setProp(vm.global, 'testPromise', deferred.handle);
 
-    vm.unwrapResult(vm.evalCode(`
+    vm.evalCode(`
       globalThis.promiseResult = undefined;
       testPromise.then(value => {
         globalThis.promiseResult = "resolved: " + value;
       });
-    `)).dispose();
+    `).dispose();
     vm.executePendingJobs();
 
     using val = vm.newString('hello from host');
@@ -33,7 +33,7 @@ describe('newPromise / Deferred', () => {
 describe('resolvePromise', () => {
   it('should resolve a fulfilled promise', async () => {
     const vm = await QuickJS.create(wasmBytes);
-    using promiseHandle = vm.unwrapResult(vm.evalCode('Promise.resolve(42)'));
+    using promiseHandle = vm.evalCode('Promise.resolve(42)');
     vm.executePendingJobs();
 
     const result = await vm.resolvePromise(promiseHandle);
@@ -47,7 +47,7 @@ describe('resolvePromise', () => {
 
   it('should resolve a rejected promise', async () => {
     const vm = await QuickJS.create(wasmBytes);
-    using promiseHandle = vm.unwrapResult(vm.evalCode('Promise.reject(new Error("fail"))'));
+    using promiseHandle = vm.evalCode('Promise.reject(new Error("fail"))');
     vm.executePendingJobs();
 
     const result = await vm.resolvePromise(promiseHandle);
@@ -63,7 +63,7 @@ describe('resolvePromise', () => {
 
   it('should handle non-promise values', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    using handle = vm.unwrapResult(vm.evalCode('"just a string"'));
+    using handle = vm.evalCode('"just a string"');
 
     const result = await vm.resolvePromise(handle);
     expect('value' in result).toBe(true);

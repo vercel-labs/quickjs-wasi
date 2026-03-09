@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { QuickJS } from '../src/index.ts';
+import { QuickJS, JSException } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 
 describe('memoryLimit', () => {
@@ -46,7 +46,7 @@ describe('memoryLimit', () => {
       wasm: wasmBytes,
       memoryLimit: 4 * 1024 * 1024,
     });
-    vm1.unwrapResult(vm1.evalCode('globalThis.x = 1')).dispose();
+    vm1.evalCode('globalThis.x = 1').dispose();
     const snapshot = vm1.snapshot();
     vm1.dispose();
 
@@ -86,9 +86,13 @@ describe('interruptHandler', () => {
       },
     });
 
-    const result = vm.evalCode('while (true) {}');
-    expect(result.isException).toBe(true);
-    result.dispose();
+    try {
+      vm.evalCode('while (true) {}');
+      expect.unreachable('should have been interrupted');
+    } catch (err) {
+      expect(err).toBeInstanceOf(JSException);
+      (err as JSException).dispose();
+    }
     expect(calls).toBeGreaterThan(100);
 
     // VM is still usable after interrupt
@@ -119,15 +123,19 @@ describe('interruptHandler', () => {
       },
     });
 
-    const result = vm.evalCode('while (true) {}');
-    expect(result.isException).toBe(true);
-    result.dispose();
+    try {
+      vm.evalCode('while (true) {}');
+      expect.unreachable('should have been interrupted');
+    } catch (err) {
+      expect(err).toBeInstanceOf(JSException);
+      (err as JSException).dispose();
+    }
     expect(Date.now() - start).toBeLessThan(1000);
   });
 
   it('should work after snapshot restore', async () => {
     const vm1 = await QuickJS.create(wasmBytes);
-    vm1.unwrapResult(vm1.evalCode('globalThis.x = 1')).dispose();
+    vm1.evalCode('globalThis.x = 1').dispose();
     const snapshot = vm1.snapshot();
     vm1.dispose();
 
@@ -142,8 +150,12 @@ describe('interruptHandler', () => {
 
     expect(vm2.evalCode('x').consume(h => h.toNumber())).toBe(1);
 
-    const result = vm2.evalCode('while (true) {}');
-    expect(result.isException).toBe(true);
-    result.dispose();
+    try {
+      vm2.evalCode('while (true) {}');
+      expect.unreachable('should have been interrupted');
+    } catch (err) {
+      expect(err).toBeInstanceOf(JSException);
+      (err as JSException).dispose();
+    }
   });
 });

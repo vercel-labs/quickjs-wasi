@@ -12,7 +12,7 @@ describe('host callbacks', () => {
       vm.setProp(vm.global, 'add', addFn);
     }
 
-    using result = vm.unwrapResult(vm.evalCode('add(3, 4)'));
+    using result = vm.evalCode('add(3, 4)');
     expect(result.toNumber()).toBe(7);
   });
 
@@ -25,7 +25,7 @@ describe('host callbacks', () => {
       vm.setProp(vm.global, 'greet', greetFn);
     }
 
-    expect(vm.unwrapResult(vm.evalCode('greet("World")')).consume(h => h.toString())).toBe('Hello, World!');
+    expect(vm.evalCode('greet("World")').consume(h => h.toString())).toBe('Hello, World!');
   });
 
   it('should call a host function multiple times', async () => {
@@ -39,7 +39,7 @@ describe('host callbacks', () => {
       vm.setProp(vm.global, 'log', logFn);
     }
 
-    vm.unwrapResult(vm.evalCode('log("first"); log("second"); log("third")')).dispose();
+    vm.evalCode('log("first"); log("second"); log("third")').dispose();
     expect(calls).toEqual(['first', 'second', 'third']);
   });
 });
@@ -55,11 +55,11 @@ describe('host callback this binding', () => {
       vm.setProp(vm.global, 'getName', getName);
     }
 
-    vm.unwrapResult(vm.evalCode(`
+    vm.evalCode(`
       globalThis.obj = { name: "alice", getName };
-    `)).dispose();
+    `).dispose();
 
-    using result = vm.unwrapResult(vm.evalCode('obj.getName()'));
+    using result = vm.evalCode('obj.getName()');
     expect(result.toString()).toBe('alice');
   });
 
@@ -75,12 +75,12 @@ describe('host callback this binding', () => {
     }
 
     // Free function call — `this` is globalThis (which has `eval`)
-    expect(vm.dump(vm.unwrapResult(vm.evalCode('checkThis()')))).toBe(true);
+    expect(vm.dump(vm.evalCode('checkThis()'))).toBe(true);
   });
 });
 
 describe('host callback error propagation', () => {
-  it('should return an exception result when a host function throws', async () => {
+  it('should throw JSException when a host function throws', async () => {
     using vm = await QuickJS.create(wasmBytes);
     {
       using fn = vm.newFunction('throwError', () => {
@@ -89,10 +89,7 @@ describe('host callback error propagation', () => {
       vm.setProp(vm.global, 'throwError', fn);
     }
 
-    // The result has isException === true, NOT a regular return value
-    const result = vm.evalCode('throwError()');
-    expect(result.isException).toBe(true);
-    result.dispose();
+    expect(() => vm.evalCode('throwError()')).toThrow('host error');
   });
 
   it('should be catchable in a try/catch inside the guest VM', async () => {
@@ -108,17 +105,16 @@ describe('host callback error propagation', () => {
     }
 
     // Successful call — returns a normal value
-    expect(vm.unwrapResult(vm.evalCode('mayFail(5)')).consume(h => h.toNumber())).toBe(10);
+    expect(vm.evalCode('mayFail(5)').consume(h => h.toNumber())).toBe(10);
 
     // Failed call — the guest catches it in JS, so evalCode returns a normal value
-    const result = vm.unwrapResult(vm.evalCode(`
+    using result = vm.evalCode(`
       try { mayFail(-1) } catch(e) { e.message }
-    `));
+    `);
     expect(result.toString()).toBe('must be non-negative');
-    result.dispose();
   });
 
-  it('should allow the VM to continue after an uncaught host error', async () => {
+  it('should allow the VM to continue after a caught host error', async () => {
     using vm = await QuickJS.create(wasmBytes);
     {
       using fn = vm.newFunction('boom', () => {
@@ -127,13 +123,15 @@ describe('host callback error propagation', () => {
       vm.setProp(vm.global, 'boom', fn);
     }
 
-    // Uncaught — result is an exception, dispose it
-    const result = vm.evalCode('boom()');
-    expect(result.isException).toBe(true);
-    result.dispose();
+    // Uncaught on host side — throws JSException
+    try {
+      vm.evalCode('boom()');
+    } catch (err) {
+      (err as JSException).dispose();
+    }
 
-    // VM is still usable after disposing the exception
-    expect(vm.unwrapResult(vm.evalCode('1 + 2')).consume(h => h.toNumber())).toBe(3);
+    // VM is still usable
+    expect(vm.evalCode('1 + 2').consume(h => h.toNumber())).toBe(3);
   });
 });
 
@@ -142,7 +140,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode('throw new TypeError("bad")'));
+      vm.evalCode('throw new TypeError("bad")');
     } catch (err) {
       expect(err).toBeInstanceOf(Error);
       expect(err).toBeInstanceOf(JSException);
@@ -156,7 +154,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode('throw new RangeError("out of bounds")', 'test.js'));
+      vm.evalCode('throw new RangeError("out of bounds")', 'test.js');
     } catch (err) {
       const exc = err as JSException;
       expect(exc.name).toBe('RangeError');
@@ -172,12 +170,12 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode(`
+      vm.evalCode(`
         const e = new Error("test");
         e.code = 42;
         e.details = { reason: "validation" };
         throw e;
-      `));
+      `);
     } catch (err) {
       const exc = err as JSException;
       // Read custom properties via the handle
@@ -194,7 +192,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode('throw "oops"'));
+      vm.evalCode('throw "oops"');
     } catch (err) {
       const exc = err as JSException;
       expect(exc).toBeInstanceOf(JSException);
@@ -209,7 +207,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode('throw 404'));
+      vm.evalCode('throw 404');
     } catch (err) {
       const exc = err as JSException;
       expect(exc).toBeInstanceOf(JSException);
@@ -224,7 +222,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode('throw { code: "ENOENT", path: "/tmp/missing" }'));
+      vm.evalCode('throw { code: "ENOENT", path: "/tmp/missing" }');
     } catch (err) {
       const exc = err as JSException;
       expect(exc).toBeInstanceOf(JSException);
@@ -245,7 +243,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode(`
+      vm.evalCode(`
         class HttpError extends Error {
           constructor(status, body) {
             super('HTTP ' + status);
@@ -255,7 +253,7 @@ describe('JSException', () => {
           }
         }
         throw new HttpError(422, { errors: ['field is required'] });
-      `));
+      `);
     } catch (err) {
       const exc = err as JSException;
       // Standard Error properties
@@ -284,7 +282,7 @@ describe('JSException', () => {
     }
 
     try {
-      vm.unwrapResult(vm.evalCode('fail()'));
+      vm.evalCode('fail()');
     } catch (err) {
       const exc = err as JSException;
       expect(exc).toBeInstanceOf(JSException);
@@ -299,7 +297,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode('throw new Error("test")'));
+      vm.evalCode('throw new Error("test")');
     } catch (err) {
       // using declaration auto-disposes the exception
       using exc = err as JSException;
@@ -313,7 +311,7 @@ describe('JSException', () => {
     using vm = await QuickJS.create(wasmBytes);
 
     try {
-      vm.unwrapResult(vm.evalCode('throw new TypeError("bad argument")'));
+      vm.evalCode('throw new TypeError("bad argument")');
     } catch (err) {
       const str = String(err);
       expect(str).toContain('TypeError');
@@ -343,12 +341,12 @@ describe('async host callbacks', () => {
       vm.setProp(vm.global, 'dnsResolve', dnsResolveFn);
     }
 
-    vm.unwrapResult(vm.evalCode(`
+    vm.evalCode(`
       globalThis.resolvedIP = "pending";
       dnsResolve("example.com").then(ip => {
         globalThis.resolvedIP = ip;
       });
-    `)).dispose();
+    `).dispose();
     vm.executePendingJobs();
 
     expect(vm.global.getProp('resolvedIP').consume(h => h.toString())).toBe('93.184.216.34');

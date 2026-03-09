@@ -15,7 +15,7 @@ describe('native WASM extensions', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    const result = vm.unwrapResult(vm.evalCode(`
+    const result = vm.evalCode(`
       const url = new URL('https://example.com:8080/path?query=value#hash');
       JSON.stringify({
         protocol: url.protocol,
@@ -28,7 +28,7 @@ describe('native WASM extensions', () => {
         origin: url.origin,
         host: url.host,
       })
-    `));
+    `);
     const parsed = JSON.parse(result.toString());
     result.dispose();
 
@@ -48,7 +48,7 @@ describe('native WASM extensions', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    const result = vm.unwrapResult(vm.evalCode(`
+    const result = vm.evalCode(`
       const params = new URLSearchParams('foo=bar&baz=qux&foo=two');
       JSON.stringify({
         foo: params.get('foo'),
@@ -58,7 +58,7 @@ describe('native WASM extensions', () => {
         size: params.size,
         str: params.toString(),
       })
-    `));
+    `);
     const parsed = JSON.parse(result.toString());
     result.dispose();
 
@@ -76,7 +76,7 @@ describe('native WASM extensions', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    const result = vm.unwrapResult(vm.evalCode(`
+    const result = vm.evalCode(`
       const url = new URL('https://user:pass@example.com/path');
       JSON.stringify({
         toString: url.toString(),
@@ -84,7 +84,7 @@ describe('native WASM extensions', () => {
         username: url.username,
         password: url.password,
       })
-    `));
+    `);
     const parsed = JSON.parse(result.toString());
     result.dispose();
 
@@ -113,13 +113,13 @@ describe('native WASM extensions', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    const result = vm.unwrapResult(vm.evalCode(`
+    const result = vm.evalCode(`
       const params = new URLSearchParams('a=1&b=2&c=3');
       params.set('b', '20');
       params.delete('c');
       params.append('d', '4');
       params.toString()
-    `));
+    `);
     expect(result.toString()).toBe('a=1&b=20&d=4');
     result.dispose();
   });
@@ -133,9 +133,9 @@ describe('extension snapshot/restore', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    vm1.unwrapResult(vm1.evalCode(`
+    vm1.evalCode(`
       globalThis.savedUrl = new URL('https://example.com:3000/api?key=value#section');
-    `)).dispose();
+    `).dispose();
 
     const snapshot = vm1.snapshot();
     vm1.dispose();
@@ -147,7 +147,7 @@ describe('extension snapshot/restore', () => {
     });
 
     // Access the URL object that was created before the snapshot
-    const result = vm2.unwrapResult(vm2.evalCode(`
+    const result = vm2.evalCode(`
       JSON.stringify({
         hostname: savedUrl.hostname,
         port: savedUrl.port,
@@ -155,7 +155,7 @@ describe('extension snapshot/restore', () => {
         search: savedUrl.search,
         hash: savedUrl.hash,
       })
-    `));
+    `);
     const parsed = JSON.parse(result.toString());
     result.dispose();
     vm2.dispose();
@@ -173,7 +173,7 @@ describe('extension snapshot/restore', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    vm1.unwrapResult(vm1.evalCode('globalThis.x = 1')).dispose();
+    vm1.evalCode('globalThis.x = 1').dispose();
     const snapshot = vm1.snapshot();
     vm1.dispose();
 
@@ -183,10 +183,10 @@ describe('extension snapshot/restore', () => {
     });
 
     // Create a NEW URL object in the restored VM
-    const result = vm2.unwrapResult(vm2.evalCode(`
+    const result = vm2.evalCode(`
       const url = new URL('http://localhost:8080/test');
       url.hostname
-    `));
+    `);
     expect(result.toString()).toBe('localhost');
     result.dispose();
     vm2.dispose();
@@ -198,9 +198,9 @@ describe('extension snapshot/restore', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    vm1.unwrapResult(vm1.evalCode(`
+    vm1.evalCode(`
       globalThis.myUrl = new URL('https://test.com/page');
-    `)).dispose();
+    `).dispose();
 
     const snapshot = vm1.snapshot();
     vm1.dispose();
@@ -221,7 +221,7 @@ describe('extension snapshot/restore', () => {
       extensions: [{ name: 'url', wasm: urlExtBytes }],
     });
 
-    const result = vm2.unwrapResult(vm2.evalCode('myUrl.hostname'));
+    const result = vm2.evalCode('myUrl.hostname');
     expect(result.toString()).toBe('test.com');
     result.dispose();
     vm2.dispose();
@@ -235,13 +235,13 @@ describe('extension snapshot/restore', () => {
     });
 
     // Use extension
-    vm1.unwrapResult(vm1.evalCode(`
+    vm1.evalCode(`
       globalThis.urls = [
         new URL('https://a.com/1'),
         new URL('https://b.com/2'),
       ];
       globalThis.params = new URLSearchParams('x=1&y=2');
-    `)).dispose();
+    `).dispose();
 
     // Snapshot
     const snapshot1 = vm1.snapshot();
@@ -260,7 +260,7 @@ describe('extension snapshot/restore', () => {
     });
 
     // Verify state survived
-    const result = vm2.unwrapResult(vm2.evalCode(`
+    const result = vm2.evalCode(`
       JSON.stringify({
         url0: urls[0].hostname,
         url1: urls[1].hostname,
@@ -268,7 +268,7 @@ describe('extension snapshot/restore', () => {
         paramY: params.get('y'),
         newUrl: new URL('https://c.com/3').hostname,
       })
-    `));
+    `);
     const parsed = JSON.parse(result.toString());
     result.dispose();
     vm2.dispose();
