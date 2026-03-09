@@ -82,7 +82,9 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
     expect(restored.stackPointer).toBe(snapshot.stackPointer);
     expect(restored.runtimePtr).toBe(snapshot.runtimePtr);
     expect(restored.contextPtr).toBe(snapshot.contextPtr);
-    expect(restored.memory).toEqual(snapshot.memory);
+    // Use Buffer.compare for fast byte-level equality instead of deep
+    // equality, which is O(n) with a large constant for large Uint8Arrays.
+    expect(Buffer.compare(restored.memory, snapshot.memory)).toBe(0);
   });
 
   it('should produce a working snapshot after round-trip', async () => {
