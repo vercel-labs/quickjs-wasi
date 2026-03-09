@@ -53,6 +53,7 @@ LDFLAGS = \
 	-lwasi-emulated-signal \
 	-Wl,--export-dynamic \
 	-Wl,--export=__stack_pointer \
+	-Wl,-z,stack-size=1048576 \
 	-Wl,--export=__indirect_function_table \
 	-Wl,--growable-table \
 	-Wl,--export=malloc \
