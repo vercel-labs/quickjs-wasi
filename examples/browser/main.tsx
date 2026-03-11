@@ -627,12 +627,7 @@ function App() {
       <div className="rounded-xl border border-border bg-card overflow-hidden shadow-lg">
         {/* Editor Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/80">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-muted-foreground">Editor</span>
-            <Badge variant="secondary" className="text-[10px] font-mono px-1.5 py-0">
-              ES2023
-            </Badge>
-          </div>
+          <span className="text-sm font-medium text-muted-foreground">Editor</span>
           <div className="flex items-center gap-4">
             {/* Vim Toggle */}
             <div className="flex items-center gap-2">
