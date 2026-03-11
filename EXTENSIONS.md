@@ -391,22 +391,6 @@ const vm = await QuickJS.create({
 
 **`atob(data)`**: Decodes a base64 string to a binary string. Supports forgiving decode (strips ASCII whitespace, allows missing padding). Throws `InvalidCharacterError` for invalid input.
 
-### `quickjs-wasi/queue-microtask`
-
-WHATWG HTML Standard compliant `queueMicrotask()` global function. Uses QuickJS's `JS_EnqueueJob` internally to schedule callbacks on the microtask queue.
-
-```typescript
-import { queueMicrotaskExtension } from 'quickjs-wasi/queue-microtask';
-
-const vm = await QuickJS.create({
-  extensions: [queueMicrotaskExtension],
-});
-```
-
-**`queueMicrotask(callback)`**: Queues a function to be executed as a microtask. Throws `TypeError` if the argument is not callable. Microtasks execute when the host calls `vm.executePendingJobs()`.
-
-**Note**: After `vm.evalCode()`, queued microtasks are NOT automatically executed. The host must call `vm.executePendingJobs()` to drain the microtask queue (this is the same as promise reactions).
-
 ### `quickjs-wasi/structured-clone`
 
 WHATWG HTML Standard compliant `structuredClone()` global function. Deep clones values following the Structured Clone algorithm with circular reference detection.

@@ -181,17 +181,13 @@ EXT_ENC_SO = $(EXT_ENC_DIR)/encoding.so
 EXT_B64_DIR = extensions/base64
 EXT_B64_SO = $(EXT_B64_DIR)/base64.so
 
-# Extensions: queueMicrotask
-EXT_QMT_DIR = extensions/queue-microtask
-EXT_QMT_SO = $(EXT_QMT_DIR)/queue-microtask.so
-
 # Extensions: structuredClone
 EXT_SC_DIR = extensions/structured-clone
 EXT_SC_SO = $(EXT_SC_DIR)/structured-clone.so
 
 .PHONY: all clean
 
-all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_QMT_SO) $(EXT_SC_SO)
+all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_SC_SO)
 
 $(OUTPUT): $(ALL_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -246,15 +242,6 @@ $(EXT_B64_SO): $(EXT_B64_DIR)/base64.o
 		--shared --no-entry --export-dynamic --allow-undefined \
 		-o $@ $<
 
-# queueMicrotask extension: compile and link
-$(EXT_QMT_DIR)/queue-microtask.o: $(EXT_QMT_DIR)/queue-microtask.c
-	$(CC) $(EXT_CFLAGS) -c -o $@ $<
-
-$(EXT_QMT_SO): $(EXT_QMT_DIR)/queue-microtask.o
-	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
-		-o $@ $<
-
 # structuredClone extension: compile and link
 $(EXT_SC_DIR)/structured-clone.o: $(EXT_SC_DIR)/structured-clone.c
 	$(CC) $(EXT_CFLAGS) -c -o $@ $<
@@ -274,5 +261,4 @@ clean:
 		$(EXT_URL_SO) \
 		$(EXT_ENC_DIR)/encoding.o $(EXT_ENC_SO) \
 		$(EXT_B64_DIR)/base64.o $(EXT_B64_SO) \
-		$(EXT_QMT_DIR)/queue-microtask.o $(EXT_QMT_SO) \
 		$(EXT_SC_DIR)/structured-clone.o $(EXT_SC_SO)

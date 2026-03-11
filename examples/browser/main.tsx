@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, Timer, Copy } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary, Copy } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
@@ -18,7 +18,6 @@ const STORAGE_KEYS = {
   urlExt: 'qjs-playground:urlExt',
   encodingExt: 'qjs-playground:encodingExt',
   base64Ext: 'qjs-playground:base64Ext',
-  queueMicrotaskExt: 'qjs-playground:queueMicrotaskExt',
   structuredCloneExt: 'qjs-playground:structuredCloneExt',
   vim: 'qjs-playground:vim',
 } as const;
@@ -109,13 +108,6 @@ declare function btoa(data: string): string;
 declare function atob(data: string): string;
 `;
 
-// ─── queueMicrotask type definitions ─────────────────────────────────────────
-
-const QUEUEMICROTASK_TYPE_DEFS = `
-/** Queues a function to be called during the microtask checkpoint. */
-declare function queueMicrotask(callback: () => void): void;
-`;
-
 // ─── structuredClone type definitions ─────────────────────────────────────────
 
 const STRUCTUREDCLONE_TYPE_DEFS = `
@@ -201,7 +193,6 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
 const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
 const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
-const QUEUEMICROTASK_TYPES_URI = 'ts:queue-microtask-extension/queue-microtask.d.ts';
 const STRUCTUREDCLONE_TYPES_URI = 'ts:structured-clone-extension/structured-clone.d.ts';
 
 function App() {
@@ -212,14 +203,12 @@ function App() {
   const [urlExtEnabled, setUrlExtEnabled] = useState(() => loadBool(STORAGE_KEYS.urlExt, false));
   const [encodingExtEnabled, setEncodingExtEnabled] = useState(() => loadBool(STORAGE_KEYS.encodingExt, false));
   const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
-  const [queueMicrotaskExtEnabled, setQueueMicrotaskExtEnabled] = useState(() => loadBool(STORAGE_KEYS.queueMicrotaskExt, false));
   const [structuredCloneExtEnabled, setStructuredCloneExtEnabled] = useState(() => loadBool(STORAGE_KEYS.structuredCloneExt, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
   const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
-  const queueMicrotaskExtBytesRef = useRef<ArrayBuffer | null>(null);
   const structuredCloneExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
@@ -228,7 +217,6 @@ function App() {
   const urlTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
-  const queueMicrotaskTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
@@ -236,7 +224,6 @@ function App() {
   useEffect(() => { save(STORAGE_KEYS.urlExt, urlExtEnabled); }, [urlExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.encodingExt, encodingExtEnabled); }, [encodingExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.queueMicrotaskExt, queueMicrotaskExtEnabled); }, [queueMicrotaskExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.structuredCloneExt, structuredCloneExtEnabled); }, [structuredCloneExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
@@ -264,9 +251,6 @@ function App() {
         if (base64ExtEnabled && !base64ExtBytesRef.current) {
           fetches.push(fetch('/base64.so').then((r) => r.arrayBuffer()));
         }
-        if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current) {
-          fetches.push(fetch('/queue-microtask.so').then((r) => r.arrayBuffer()));
-        }
         if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current) {
           fetches.push(fetch('/structured-clone.so').then((r) => r.arrayBuffer()));
         }
@@ -281,9 +265,6 @@ function App() {
         }
         if (base64ExtEnabled && !base64ExtBytesRef.current && extBytes[extIdx]) {
           base64ExtBytesRef.current = extBytes[extIdx++];
-        }
-        if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current && extBytes[extIdx]) {
-          queueMicrotaskExtBytesRef.current = extBytes[extIdx++];
         }
         if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current && extBytes[extIdx]) {
           structuredCloneExtBytesRef.current = extBytes[extIdx++];
@@ -426,21 +407,6 @@ function App() {
     }
   }, []);
 
-  // Lazily fetch the queueMicrotask extension binary on first enable
-  const handleQueueMicrotaskExtToggle = useCallback(async (checked: boolean) => {
-    setQueueMicrotaskExtEnabled(checked);
-    if (checked && !queueMicrotaskExtBytesRef.current) {
-      try {
-        const response = await fetch('/queue-microtask.so');
-        queueMicrotaskExtBytesRef.current = await response.arrayBuffer();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load queueMicrotask extension: ${message}` }]);
-        setQueueMicrotaskExtEnabled(false);
-      }
-    }
-  }, []);
-
   // Lazily fetch the structuredClone extension binary on first enable
   const handleStructuredCloneExtToggle = useCallback(async (checked: boolean) => {
     setStructuredCloneExtEnabled(checked);
@@ -480,9 +446,6 @@ function App() {
       }
       if (base64ExtEnabled && base64ExtBytesRef.current) {
         extensions.push({ name: 'base64', wasm: new Uint8Array(base64ExtBytesRef.current) });
-      }
-      if (queueMicrotaskExtEnabled && queueMicrotaskExtBytesRef.current) {
-        extensions.push({ name: 'queue-microtask', wasm: new Uint8Array(queueMicrotaskExtBytesRef.current), initFn: 'qjs_ext_queue_microtask_init' });
       }
       if (structuredCloneExtEnabled && structuredCloneExtBytesRef.current) {
         extensions.push({ name: 'structured-clone', wasm: new Uint8Array(structuredCloneExtBytesRef.current), initFn: 'qjs_ext_structured_clone_init' });
@@ -552,7 +515,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, queueMicrotaskExtEnabled, structuredCloneExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, structuredCloneExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -756,19 +719,6 @@ function App() {
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleBase64ExtToggle(!base64ExtEnabled)}>
                 <Binary className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Base64</span>
-              </label>
-            </div>
-
-            {/* queueMicrotask Extension Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={queueMicrotaskExtEnabled}
-                onCheckedChange={handleQueueMicrotaskExtToggle}
-                aria-label="Enable queueMicrotask extension"
-              />
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleQueueMicrotaskExtToggle(!queueMicrotaskExtEnabled)}>
-                <Timer className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Microtask</span>
               </label>
             </div>
 

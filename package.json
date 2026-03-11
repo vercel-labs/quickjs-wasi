@@ -23,10 +23,6 @@
       "types": "./dist/base64.d.ts",
       "default": "./dist/base64.js"
     },
-    "./queue-microtask": {
-      "types": "./dist/queue-microtask.d.ts",
-      "default": "./dist/queue-microtask.js"
-    },
     "./structured-clone": {
       "types": "./dist/structured-clone.d.ts",
       "default": "./dist/structured-clone.js"
@@ -38,7 +34,6 @@
     "extensions/url/url.so",
     "extensions/encoding/encoding.so",
     "extensions/base64/base64.so",
-    "extensions/queue-microtask/queue-microtask.so",
     "extensions/structured-clone/structured-clone.so"
   ],
   "publishConfig": {
