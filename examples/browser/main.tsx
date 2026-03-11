@@ -8,6 +8,7 @@ import { Play, Loader2, Globe, Terminal, Type, Binary, Copy, Github } from 'luci
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './src/components/ui/tooltip';
 
 import './src/index.css';
 
@@ -617,6 +618,7 @@ function App() {
   const savedCode = loadString(STORAGE_KEYS.code, DEFAULT_CODE);
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
       {/* Header */}
       <div className="mb-8">
@@ -651,16 +653,21 @@ function App() {
           <span className="text-sm font-medium text-muted-foreground">Editor</span>
           <div className="flex items-center gap-4">
             {/* Vim Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={vimEnabled}
-                onCheckedChange={setVimEnabled}
-                aria-label="Enable Vim mode"
-              />
-              <label className="text-xs text-muted-foreground cursor-pointer select-none" onClick={() => setVimEnabled(!vimEnabled)}>
-                Vim
-              </label>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={vimEnabled}
+                    onCheckedChange={setVimEnabled}
+                    aria-label="Enable Vim mode"
+                  />
+                  <label className="text-xs text-muted-foreground cursor-pointer select-none" onClick={() => setVimEnabled(!vimEnabled)}>
+                    Vim
+                  </label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>Enable Vim keybindings in the editor</TooltipContent>
+            </Tooltip>
             <span className="text-xs text-muted-foreground/60 hidden sm:inline">
               {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to run
             </span>
@@ -725,56 +732,76 @@ function App() {
           {/* Extension toggles */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {/* URL Extension Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={urlExtEnabled}
-                onCheckedChange={handleUrlExtToggle}
-                aria-label="Enable URL extension"
-              />
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleUrlExtToggle(!urlExtEnabled)}>
-                <Globe className="w-3.5 h-3.5" />
-                URL
-              </label>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={urlExtEnabled}
+                    onCheckedChange={handleUrlExtToggle}
+                    aria-label="Enable URL extension"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleUrlExtToggle(!urlExtEnabled)}>
+                    <Globe className="w-3.5 h-3.5" />
+                    URL
+                  </label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>Adds URL and URLSearchParams (native WASM)</TooltipContent>
+            </Tooltip>
 
             {/* Encoding Extension Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={encodingExtEnabled}
-                onCheckedChange={handleEncodingExtToggle}
-                aria-label="Enable Encoding extension"
-              />
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleEncodingExtToggle(!encodingExtEnabled)}>
-                <Type className="w-3.5 h-3.5" />
-                Encoding
-              </label>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={encodingExtEnabled}
+                    onCheckedChange={handleEncodingExtToggle}
+                    aria-label="Enable Encoding extension"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleEncodingExtToggle(!encodingExtEnabled)}>
+                    <Type className="w-3.5 h-3.5" />
+                    Encoding
+                  </label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>Adds TextEncoder and TextDecoder (native WASM)</TooltipContent>
+            </Tooltip>
 
             {/* Base64 Extension Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={base64ExtEnabled}
-                onCheckedChange={handleBase64ExtToggle}
-                aria-label="Enable Base64 extension"
-              />
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleBase64ExtToggle(!base64ExtEnabled)}>
-                <Binary className="w-3.5 h-3.5" />
-                Base64
-              </label>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={base64ExtEnabled}
+                    onCheckedChange={handleBase64ExtToggle}
+                    aria-label="Enable Base64 extension"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleBase64ExtToggle(!base64ExtEnabled)}>
+                    <Binary className="w-3.5 h-3.5" />
+                    Base64
+                  </label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>Adds atob() and btoa() (native WASM)</TooltipContent>
+            </Tooltip>
 
             {/* structuredClone Extension Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={structuredCloneExtEnabled}
-                onCheckedChange={handleStructuredCloneExtToggle}
-                aria-label="Enable structuredClone extension"
-              />
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleStructuredCloneExtToggle(!structuredCloneExtEnabled)}>
-                <Copy className="w-3.5 h-3.5" />
-                Clone
-              </label>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={structuredCloneExtEnabled}
+                    onCheckedChange={handleStructuredCloneExtToggle}
+                    aria-label="Enable structuredClone extension"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleStructuredCloneExtToggle(!structuredCloneExtEnabled)}>
+                    <Copy className="w-3.5 h-3.5" />
+                    Clone
+                  </label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>Adds structuredClone() (native WASM)</TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Spacer + status */}
@@ -804,6 +831,7 @@ function App() {
         </div>
       )}
     </div>
+    </TooltipProvider>
   );
 }
 
