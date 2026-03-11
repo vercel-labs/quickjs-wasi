@@ -26,11 +26,6 @@ if (existsSync(base64ExtSrc)) {
   copyFileSync(base64ExtSrc, resolve(publicDir, 'base64.so'));
 }
 
-const domExceptionExtSrc = resolve(repoRoot, 'extensions/dom-exception/dom-exception.so');
-if (existsSync(domExceptionExtSrc)) {
-  copyFileSync(domExceptionExtSrc, resolve(publicDir, 'dom-exception.so'));
-}
-
 const queueMicrotaskExtSrc = resolve(repoRoot, 'extensions/queue-microtask/queue-microtask.so');
 if (existsSync(queueMicrotaskExtSrc)) {
   copyFileSync(queueMicrotaskExtSrc, resolve(publicDir, 'queue-microtask.so'));

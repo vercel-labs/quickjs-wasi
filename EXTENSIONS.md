@@ -391,27 +391,6 @@ const vm = await QuickJS.create({
 
 **`atob(data)`**: Decodes a base64 string to a binary string. Supports forgiving decode (strips ASCII whitespace, allows missing padding). Throws `InvalidCharacterError` for invalid input.
 
-### `quickjs-wasi/dom-exception`
-
-WebIDL spec compliant `DOMException` class with all 25 legacy error code constants. The prototype chain is `DOMException` -> `Error` -> `Object`.
-
-```typescript
-import { domExceptionExtension } from 'quickjs-wasi/dom-exception';
-
-const vm = await QuickJS.create({
-  extensions: [domExceptionExtension],
-});
-```
-
-**`DOMException`** class:
-- Constructor: `new DOMException(message?, name?)` — defaults: `""` and `"Error"`
-- Properties: `name`, `message`, `code` (legacy code lookup by name, or 0)
-- Method: `toString()` — returns `"Name: message"` format
-- All 25 legacy constants: `INDEX_SIZE_ERR` (1) through `DATA_CLONE_ERR` (25)
-- Constants available on both the constructor and prototype
-- Prototype inherits from `Error.prototype` (`instanceof Error` is true)
-- When loaded alongside the base64 extension, `btoa`/`atob` throw proper `DOMException` with `InvalidCharacterError` name
-
 ### `quickjs-wasi/queue-microtask`
 
 WHATWG HTML Standard compliant `queueMicrotask()` global function. Uses QuickJS's `JS_EnqueueJob` internally to schedule callbacks on the microtask queue.

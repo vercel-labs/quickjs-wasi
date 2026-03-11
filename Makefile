@@ -181,10 +181,6 @@ EXT_ENC_SO = $(EXT_ENC_DIR)/encoding.so
 EXT_B64_DIR = extensions/base64
 EXT_B64_SO = $(EXT_B64_DIR)/base64.so
 
-# Extensions: DOMException
-EXT_DOMEXC_DIR = extensions/dom-exception
-EXT_DOMEXC_SO = $(EXT_DOMEXC_DIR)/dom-exception.so
-
 # Extensions: queueMicrotask
 EXT_QMT_DIR = extensions/queue-microtask
 EXT_QMT_SO = $(EXT_QMT_DIR)/queue-microtask.so
@@ -195,7 +191,7 @@ EXT_SC_SO = $(EXT_SC_DIR)/structured-clone.so
 
 .PHONY: all clean
 
-all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_DOMEXC_SO) $(EXT_QMT_SO) $(EXT_SC_SO)
+all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_QMT_SO) $(EXT_SC_SO)
 
 $(OUTPUT): $(ALL_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -250,15 +246,6 @@ $(EXT_B64_SO): $(EXT_B64_DIR)/base64.o
 		--shared --no-entry --export-dynamic --allow-undefined \
 		-o $@ $<
 
-# DOMException extension: compile and link
-$(EXT_DOMEXC_DIR)/dom-exception.o: $(EXT_DOMEXC_DIR)/dom-exception.c
-	$(CC) $(EXT_CFLAGS) -c -o $@ $<
-
-$(EXT_DOMEXC_SO): $(EXT_DOMEXC_DIR)/dom-exception.o
-	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
-		-o $@ $<
-
 # queueMicrotask extension: compile and link
 $(EXT_QMT_DIR)/queue-microtask.o: $(EXT_QMT_DIR)/queue-microtask.c
 	$(CC) $(EXT_CFLAGS) -c -o $@ $<
@@ -287,6 +274,5 @@ clean:
 		$(EXT_URL_SO) \
 		$(EXT_ENC_DIR)/encoding.o $(EXT_ENC_SO) \
 		$(EXT_B64_DIR)/base64.o $(EXT_B64_SO) \
-		$(EXT_DOMEXC_DIR)/dom-exception.o $(EXT_DOMEXC_SO) \
 		$(EXT_QMT_DIR)/queue-microtask.o $(EXT_QMT_SO) \
 		$(EXT_SC_DIR)/structured-clone.o $(EXT_SC_SO)

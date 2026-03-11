@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, AlertTriangle, Timer, Copy } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary, Timer, Copy } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
@@ -18,7 +18,6 @@ const STORAGE_KEYS = {
   urlExt: 'qjs-playground:urlExt',
   encodingExt: 'qjs-playground:encodingExt',
   base64Ext: 'qjs-playground:base64Ext',
-  domExceptionExt: 'qjs-playground:domExceptionExt',
   queueMicrotaskExt: 'qjs-playground:queueMicrotaskExt',
   structuredCloneExt: 'qjs-playground:structuredCloneExt',
   vim: 'qjs-playground:vim',
@@ -108,43 +107,6 @@ const BASE64_TYPE_DEFS = `
 declare function btoa(data: string): string;
 /** Decodes a base64-encoded string to a binary string. */
 declare function atob(data: string): string;
-`;
-
-// ─── DOMException type definitions ───────────────────────────────────────────
-
-const DOMEXCEPTION_TYPE_DEFS = `
-/** The DOMException interface represents an abnormal event related to the DOM. */
-declare class DOMException extends Error {
-  constructor(message?: string, name?: string);
-  readonly name: string;
-  readonly message: string;
-  readonly code: number;
-  static readonly INDEX_SIZE_ERR: 1;
-  static readonly DOMSTRING_SIZE_ERR: 2;
-  static readonly HIERARCHY_REQUEST_ERR: 3;
-  static readonly WRONG_DOCUMENT_ERR: 4;
-  static readonly INVALID_CHARACTER_ERR: 5;
-  static readonly NO_DATA_ALLOWED_ERR: 6;
-  static readonly NO_MODIFICATION_ALLOWED_ERR: 7;
-  static readonly NOT_FOUND_ERR: 8;
-  static readonly NOT_SUPPORTED_ERR: 9;
-  static readonly INUSE_ATTRIBUTE_ERR: 10;
-  static readonly INVALID_STATE_ERR: 11;
-  static readonly SYNTAX_ERR: 12;
-  static readonly INVALID_MODIFICATION_ERR: 13;
-  static readonly NAMESPACE_ERR: 14;
-  static readonly INVALID_ACCESS_ERR: 15;
-  static readonly VALIDATION_ERR: 16;
-  static readonly TYPE_MISMATCH_ERR: 17;
-  static readonly SECURITY_ERR: 18;
-  static readonly NETWORK_ERR: 19;
-  static readonly ABORT_ERR: 20;
-  static readonly URL_MISMATCH_ERR: 21;
-  static readonly QUOTA_EXCEEDED_ERR: 22;
-  static readonly TIMEOUT_ERR: 23;
-  static readonly INVALID_NODE_TYPE_ERR: 24;
-  static readonly DATA_CLONE_ERR: 25;
-}
 `;
 
 // ─── queueMicrotask type definitions ─────────────────────────────────────────
@@ -239,7 +201,6 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
 const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
 const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
-const DOMEXCEPTION_TYPES_URI = 'ts:dom-exception-extension/dom-exception.d.ts';
 const QUEUEMICROTASK_TYPES_URI = 'ts:queue-microtask-extension/queue-microtask.d.ts';
 const STRUCTUREDCLONE_TYPES_URI = 'ts:structured-clone-extension/structured-clone.d.ts';
 
@@ -251,7 +212,6 @@ function App() {
   const [urlExtEnabled, setUrlExtEnabled] = useState(() => loadBool(STORAGE_KEYS.urlExt, false));
   const [encodingExtEnabled, setEncodingExtEnabled] = useState(() => loadBool(STORAGE_KEYS.encodingExt, false));
   const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
-  const [domExceptionExtEnabled, setDomExceptionExtEnabled] = useState(() => loadBool(STORAGE_KEYS.domExceptionExt, false));
   const [queueMicrotaskExtEnabled, setQueueMicrotaskExtEnabled] = useState(() => loadBool(STORAGE_KEYS.queueMicrotaskExt, false));
   const [structuredCloneExtEnabled, setStructuredCloneExtEnabled] = useState(() => loadBool(STORAGE_KEYS.structuredCloneExt, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
@@ -259,7 +219,6 @@ function App() {
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
   const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
-  const domExceptionExtBytesRef = useRef<ArrayBuffer | null>(null);
   const queueMicrotaskExtBytesRef = useRef<ArrayBuffer | null>(null);
   const structuredCloneExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
@@ -269,7 +228,6 @@ function App() {
   const urlTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
-  const domExceptionTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const queueMicrotaskTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
@@ -278,7 +236,6 @@ function App() {
   useEffect(() => { save(STORAGE_KEYS.urlExt, urlExtEnabled); }, [urlExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.encodingExt, encodingExtEnabled); }, [encodingExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.domExceptionExt, domExceptionExtEnabled); }, [domExceptionExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.queueMicrotaskExt, queueMicrotaskExtEnabled); }, [queueMicrotaskExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.structuredCloneExt, structuredCloneExtEnabled); }, [structuredCloneExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
@@ -307,9 +264,6 @@ function App() {
         if (base64ExtEnabled && !base64ExtBytesRef.current) {
           fetches.push(fetch('/base64.so').then((r) => r.arrayBuffer()));
         }
-        if (domExceptionExtEnabled && !domExceptionExtBytesRef.current) {
-          fetches.push(fetch('/dom-exception.so').then((r) => r.arrayBuffer()));
-        }
         if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current) {
           fetches.push(fetch('/queue-microtask.so').then((r) => r.arrayBuffer()));
         }
@@ -327,9 +281,6 @@ function App() {
         }
         if (base64ExtEnabled && !base64ExtBytesRef.current && extBytes[extIdx]) {
           base64ExtBytesRef.current = extBytes[extIdx++];
-        }
-        if (domExceptionExtEnabled && !domExceptionExtBytesRef.current && extBytes[extIdx]) {
-          domExceptionExtBytesRef.current = extBytes[extIdx++];
         }
         if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current && extBytes[extIdx]) {
           queueMicrotaskExtBytesRef.current = extBytes[extIdx++];
@@ -430,69 +381,6 @@ function App() {
     };
   }, [base64ExtEnabled]);
 
-  // DOMException extension types: add/remove type definitions in Monaco
-  useEffect(() => {
-    const monaco = monacoRef.current;
-    if (!monaco) return;
-
-    if (domExceptionExtEnabled) {
-      domExceptionTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        DOMEXCEPTION_TYPE_DEFS,
-        DOMEXCEPTION_TYPES_URI,
-      );
-    } else {
-      domExceptionTypesDisposableRef.current?.dispose();
-      domExceptionTypesDisposableRef.current = null;
-    }
-
-    return () => {
-      domExceptionTypesDisposableRef.current?.dispose();
-      domExceptionTypesDisposableRef.current = null;
-    };
-  }, [domExceptionExtEnabled]);
-
-  // queueMicrotask extension types: add/remove type definitions in Monaco
-  useEffect(() => {
-    const monaco = monacoRef.current;
-    if (!monaco) return;
-
-    if (queueMicrotaskExtEnabled) {
-      queueMicrotaskTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        QUEUEMICROTASK_TYPE_DEFS,
-        QUEUEMICROTASK_TYPES_URI,
-      );
-    } else {
-      queueMicrotaskTypesDisposableRef.current?.dispose();
-      queueMicrotaskTypesDisposableRef.current = null;
-    }
-
-    return () => {
-      queueMicrotaskTypesDisposableRef.current?.dispose();
-      queueMicrotaskTypesDisposableRef.current = null;
-    };
-  }, [queueMicrotaskExtEnabled]);
-
-  // structuredClone extension types
-  useEffect(() => {
-    const monaco = monacoRef.current;
-    if (!monaco) return;
-
-    if (structuredCloneExtEnabled) {
-      structuredCloneTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        STRUCTUREDCLONE_TYPE_DEFS,
-        STRUCTUREDCLONE_TYPES_URI,
-      );
-    } else {
-      structuredCloneTypesDisposableRef.current?.dispose();
-      structuredCloneTypesDisposableRef.current = null;
-    }
-
-    return () => {
-      structuredCloneTypesDisposableRef.current?.dispose();
-      structuredCloneTypesDisposableRef.current = null;
-    };
-  }, [structuredCloneExtEnabled]);
-
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
     setUrlExtEnabled(checked);
@@ -568,21 +456,6 @@ function App() {
     }
   }, []);
 
-  // Lazily fetch the DOMException extension binary on first enable
-  const handleDomExceptionExtToggle = useCallback(async (checked: boolean) => {
-    setDomExceptionExtEnabled(checked);
-    if (checked && !domExceptionExtBytesRef.current) {
-      try {
-        const response = await fetch('/dom-exception.so');
-        domExceptionExtBytesRef.current = await response.arrayBuffer();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load DOMException extension: ${message}` }]);
-        setDomExceptionExtEnabled(false);
-      }
-    }
-  }, []);
-
   // Use a ref so that the Monaco keybinding action always calls the latest
   // version of run() without needing to re-register the action on every render.
   const runRef = useRef<() => void>(() => {});
@@ -604,9 +477,6 @@ function App() {
       }
       if (encodingExtEnabled && encodingExtBytesRef.current) {
         extensions.push({ name: 'encoding', wasm: new Uint8Array(encodingExtBytesRef.current) });
-      }
-      if (domExceptionExtEnabled && domExceptionExtBytesRef.current) {
-        extensions.push({ name: 'dom-exception', wasm: new Uint8Array(domExceptionExtBytesRef.current), initFn: 'qjs_ext_dom_exception_init' });
       }
       if (base64ExtEnabled && base64ExtBytesRef.current) {
         extensions.push({ name: 'base64', wasm: new Uint8Array(base64ExtBytesRef.current) });
@@ -682,7 +552,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, domExceptionExtEnabled, queueMicrotaskExtEnabled, structuredCloneExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, queueMicrotaskExtEnabled, structuredCloneExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -723,12 +593,6 @@ function App() {
     }
     if (loadBool(STORAGE_KEYS.base64Ext, false)) {
       base64TypesDisposableRef.current = jsDefaults.addExtraLib(BASE64_TYPE_DEFS, BASE64_TYPES_URI);
-    }
-    if (loadBool(STORAGE_KEYS.domExceptionExt, false)) {
-      domExceptionTypesDisposableRef.current = jsDefaults.addExtraLib(DOMEXCEPTION_TYPE_DEFS, DOMEXCEPTION_TYPES_URI);
-    }
-    if (loadBool(STORAGE_KEYS.queueMicrotaskExt, false)) {
-      queueMicrotaskTypesDisposableRef.current = jsDefaults.addExtraLib(QUEUEMICROTASK_TYPE_DEFS, QUEUEMICROTASK_TYPES_URI);
     }
     if (loadBool(STORAGE_KEYS.structuredCloneExt, false)) {
       structuredCloneTypesDisposableRef.current = jsDefaults.addExtraLib(STRUCTUREDCLONE_TYPE_DEFS, STRUCTUREDCLONE_TYPES_URI);
@@ -892,19 +756,6 @@ function App() {
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleBase64ExtToggle(!base64ExtEnabled)}>
                 <Binary className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Base64</span>
-              </label>
-            </div>
-
-            {/* DOMException Extension Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={domExceptionExtEnabled}
-                onCheckedChange={handleDomExceptionExtToggle}
-                aria-label="Enable DOMException extension"
-              />
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleDomExceptionExtToggle(!domExceptionExtEnabled)}>
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">DOMException</span>
               </label>
             </div>
 
