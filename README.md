@@ -329,40 +329,6 @@ using vm2 = await QuickJS.restore(snapshot, {
 
 See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic linking works, and known limitations.
 
-### Sandboxed Execution (PAC Files)
-
-quickjs-wasm can be used as a drop-in sandbox for running untrusted code, similar to how [pac-resolver](https://github.com/TooTallNate/proxy-agents/tree/main/packages/pac-resolver) uses quickjs-emscripten:
-
-```typescript
-using vm = await QuickJS.create(wasmBytes);
-
-// Inject sandbox functions
-{
-  using isPlainHostName = vm.newFunction('isPlainHostName', (...args) => {
-    const host = args[0].toString();
-    return host.includes('.') ? vm.false : vm.true;
-  });
-  vm.setProp(vm.global, 'isPlainHostName', isPlainHostName);
-}
-
-// Evaluate untrusted PAC code
-vm.unwrapResult(vm.evalCode(`
-  function FindProxyForURL(url, host) {
-    if (isPlainHostName(host)) return "DIRECT";
-    return "PROXY proxy:8080";
-  }
-`)).dispose();
-
-// Call it
-{
-  using fn = vm.global.getProp('FindProxyForURL');
-  using url = vm.newString('http://intranet/');
-  using host = vm.newString('intranet');
-  using result = vm.unwrapResult(vm.callFunction(fn, vm.undefined, url, host));
-  console.log(result.toString()); // "DIRECT"
-}
-```
-
 ## API Reference
 
 ### `QuickJS` (VM Instance)
