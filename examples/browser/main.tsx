@@ -362,6 +362,27 @@ function App() {
     };
   }, [base64ExtEnabled]);
 
+  // structuredClone extension types: add/remove type definitions in Monaco
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (structuredCloneExtEnabled) {
+      structuredCloneTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        STRUCTUREDCLONE_TYPE_DEFS,
+        STRUCTUREDCLONE_TYPES_URI,
+      );
+    } else {
+      structuredCloneTypesDisposableRef.current?.dispose();
+      structuredCloneTypesDisposableRef.current = null;
+    }
+
+    return () => {
+      structuredCloneTypesDisposableRef.current?.dispose();
+      structuredCloneTypesDisposableRef.current = null;
+    };
+  }, [structuredCloneExtEnabled]);
+
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
     setUrlExtEnabled(checked);
