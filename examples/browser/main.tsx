@@ -1,16 +1,82 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
+import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
+import { initVimMode } from 'monaco-vim';
 import { Play, Loader2, Globe, Terminal } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
-import { cn } from './src/lib/utils';
 
 import './src/index.css';
 
-// Inspector theme matching our dark UI
+// ─── localStorage helpers ────────────────────────────────────────────────────
+
+const STORAGE_KEYS = {
+  code: 'qjs-playground:code',
+  urlExt: 'qjs-playground:urlExt',
+  vim: 'qjs-playground:vim',
+} as const;
+
+function loadString(key: string, fallback: string): string {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+
+function loadBool(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === 'true';
+  } catch { return fallback; }
+}
+
+function save(key: string, value: string | boolean) {
+  try { localStorage.setItem(key, String(value)); } catch { /* ignore */ }
+}
+
+// ─── URL / URLSearchParams type definitions ──────────────────────────────────
+
+const URL_TYPE_DEFS = `
+/** The URL interface represents an object providing static methods for creating object URLs. */
+declare class URL {
+  constructor(url: string | URL, base?: string | URL);
+  hash: string;
+  host: string;
+  hostname: string;
+  href: string;
+  readonly origin: string;
+  password: string;
+  pathname: string;
+  port: string;
+  protocol: string;
+  search: string;
+  username: string;
+  toString(): string;
+  toJSON(): string;
+  static canParse(url: string | URL, base?: string): boolean;
+}
+
+/** The URLSearchParams interface defines utility methods to work with the query string of a URL. */
+declare class URLSearchParams {
+  constructor(init?: string | URLSearchParams | Record<string, string> | [string, string][]);
+  readonly size: number;
+  append(name: string, value: string): void;
+  delete(name: string, value?: string): void;
+  get(name: string): string | null;
+  getAll(name: string): string[];
+  has(name: string, value?: string): boolean;
+  set(name: string, value: string): void;
+  sort(): void;
+  toString(): string;
+  forEach(callbackfn: (value: string, key: string, parent: URLSearchParams) => void, thisArg?: any): void;
+  entries(): IterableIterator<[string, string]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<string>;
+}
+`;
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
 const inspectorTheme = {
   ...chromeDark,
   BASE_FONT_FAMILY: "var(--font-mono)",
@@ -35,6 +101,8 @@ const obj = {
 
 console.log("Hello from QuickJS!", obj);
 obj;`;
+
+// ─── Output rendering ────────────────────────────────────────────────────────
 
 function OutputEntryView({ entry }: { entry: OutputEntry }) {
   if (entry.type === 'result') {
@@ -80,16 +148,29 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
   return null;
 }
 
+// ─── App ─────────────────────────────────────────────────────────────────────
+
+const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
+
 function App() {
   const [status, setStatus] = useState('');
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState<OutputEntry[]>([]);
   const [wasmReady, setWasmReady] = useState(false);
-  const [urlExtEnabled, setUrlExtEnabled] = useState(false);
+  const [urlExtEnabled, setUrlExtEnabled] = useState(() => loadBool(STORAGE_KEYS.urlExt, false));
+  const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
-  const codeRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+  const vimModeRef = useRef<ReturnType<typeof initVimMode> | null>(null);
+  const vimStatusRef = useRef<HTMLDivElement | null>(null);
+  const urlTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
+
+  // Persist checkbox states
+  useEffect(() => { save(STORAGE_KEYS.urlExt, urlExtEnabled); }, [urlExtEnabled]);
+  useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
   // Auto-scroll output to bottom
   useEffect(() => {
@@ -98,15 +179,24 @@ function App() {
     }
   }, [output]);
 
-  // Load WASM on mount
+  // Load WASM on mount (and URL extension binary if persisted as enabled)
   useEffect(() => {
     async function init() {
       try {
-        const response = await fetch('/quickjs.wasm');
-        const bytes = await response.arrayBuffer();
-        wasmModuleRef.current = await WebAssembly.compile(bytes);
+        const fetches: Promise<ArrayBuffer>[] = [
+          fetch('/quickjs.wasm').then((r) => r.arrayBuffer()),
+        ];
+        // Pre-fetch URL extension if it was enabled in a previous session
+        if (urlExtEnabled && !urlExtBytesRef.current) {
+          fetches.push(fetch('/url.so').then((r) => r.arrayBuffer()));
+        }
+        const [wasmBytes, urlExtBytes] = await Promise.all(fetches);
+        wasmModuleRef.current = await WebAssembly.compile(wasmBytes);
+        if (urlExtBytes) {
+          urlExtBytesRef.current = urlExtBytes;
+        }
         setWasmReady(true);
-        setStatus(`WASM loaded (${(bytes.byteLength / 1024).toFixed(0)} KB)`);
+        setStatus(`WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setStatus(`Failed to load WASM: ${message}`);
@@ -114,7 +204,47 @@ function App() {
       }
     }
     init();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- urlExtEnabled read only for initial value
+
+  // Vim mode: managed entirely via editorMounted + vimEnabled
+  // We track editorMounted as state so this effect re-runs once the editor is ready.
+  const [editorMounted, setEditorMounted] = useState(false);
+
+  useEffect(() => {
+    if (!editorRef.current) return;
+    if (vimEnabled) {
+      vimModeRef.current = initVimMode(editorRef.current, vimStatusRef.current);
+    } else {
+      vimModeRef.current?.dispose();
+      vimModeRef.current = null;
+    }
+    return () => {
+      vimModeRef.current?.dispose();
+      vimModeRef.current = null;
+    };
+  }, [vimEnabled, editorMounted]);
+
+  // URL extension types: add/remove type definitions in Monaco
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (urlExtEnabled) {
+      // Add URL type definitions as an extra lib
+      urlTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        URL_TYPE_DEFS,
+        URL_TYPES_URI,
+      );
+    } else {
+      urlTypesDisposableRef.current?.dispose();
+      urlTypesDisposableRef.current = null;
+    }
+
+    return () => {
+      urlTypesDisposableRef.current?.dispose();
+      urlTypesDisposableRef.current = null;
+    };
+  }, [urlExtEnabled]);
 
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
@@ -131,8 +261,12 @@ function App() {
     }
   }, []);
 
+  // Use a ref so that the Monaco keybinding action always calls the latest
+  // version of run() without needing to re-register the action on every render.
+  const runRef = useRef<() => void>(() => {});
+
   const run = useCallback(async () => {
-    const code = codeRef.current?.value;
+    const code = editorRef.current?.getValue();
     if (!code) return;
     setOutput([]);
     setRunning(true);
@@ -210,25 +344,74 @@ function App() {
     }
   }, [urlExtEnabled]);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      // Handle Tab key for indentation
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const textarea = e.currentTarget;
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
-        textarea.selectionStart = textarea.selectionEnd = start + 2;
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        run();
-      }
-    },
-    [run]
-  );
+  // Keep the ref in sync with the latest run callback
+  runRef.current = run;
+
+  // Configure Monaco before it mounts: strip down to barebones JS (no DOM, no Node)
+  const handleEditorWillMount: BeforeMount = useCallback((monaco) => {
+    monacoRef.current = monaco;
+
+    const jsDefaults = monaco.languages.typescript.javascriptDefaults;
+
+    // Include core ES lib types (String, Array, Promise, Map, etc.)
+    // but exclude DOM and Node types since this is a QuickJS sandbox
+    jsDefaults.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ES2022,
+      lib: ['es2022'],
+      allowJs: true,
+      checkJs: false,
+      allowNonTsExtensions: true,
+    });
+
+    // Add console declaration (not part of ES spec, provided by our host)
+    jsDefaults.addExtraLib(
+      `
+      declare var console: {
+        log(...args: any[]): void;
+        error(...args: any[]): void;
+      };
+      `,
+      'ts:quickjs-env/globals.d.ts',
+    );
+
+    // If URL extension was persisted as enabled, add types immediately
+    if (loadBool(STORAGE_KEYS.urlExt, false)) {
+      urlTypesDisposableRef.current = jsDefaults.addExtraLib(URL_TYPE_DEFS, URL_TYPES_URI);
+    }
+
+    // Disable validation noise for a playground
+    jsDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    });
+  }, []);
+
+  const handleEditorMount: OnMount = useCallback((editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+
+    // Cmd/Ctrl+Enter to run - calls through ref so it always uses the latest run()
+    editor.addAction({
+      id: 'run-code',
+      label: 'Run Code',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => { runRef.current(); },
+    });
+
+    // Save editor content to localStorage on change (debounced)
+    let saveTimer: ReturnType<typeof setTimeout>;
+    editor.onDidChangeModelContent(() => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        save(STORAGE_KEYS.code, editor.getValue());
+      }, 500);
+    });
+
+    // Signal that the editor is ready so the vim effect can run
+    setEditorMounted(true);
+  }, []);
+
+  const savedCode = loadString(STORAGE_KEYS.code, DEFAULT_CODE);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
@@ -262,19 +445,40 @@ function App() {
           </span>
         </div>
 
-        {/* Textarea */}
-        <textarea
-          ref={codeRef}
-          defaultValue={DEFAULT_CODE}
-          onKeyDown={handleKeyDown}
-          spellCheck={false}
-          className={cn(
-            "w-full h-56 sm:h-64 resize-y p-4",
-            "bg-background text-foreground",
-            "font-mono text-sm leading-relaxed",
-            "border-none outline-none",
-            "placeholder:text-muted-foreground/40",
-          )}
+        {/* Monaco Editor */}
+        <Editor
+          height="280px"
+          defaultLanguage="javascript"
+          defaultValue={savedCode}
+          theme="vs-dark"
+          beforeMount={handleEditorWillMount}
+          onMount={handleEditorMount}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 13,
+            fontFamily: "'Geist Mono', 'SF Mono', 'Fira Code', monospace",
+            fontLigatures: true,
+            lineNumbers: 'on',
+            scrollBeyondLastLine: false,
+            padding: { top: 12, bottom: 12 },
+            renderLineHighlight: 'none',
+            overviewRulerLanes: 0,
+            hideCursorInOverviewRuler: true,
+            overviewRulerBorder: false,
+            scrollbar: {
+              vertical: 'hidden',
+              horizontal: 'hidden',
+            },
+            tabSize: 2,
+            wordWrap: 'on',
+            automaticLayout: true,
+          }}
+        />
+
+        {/* Vim status bar (hidden unless vim mode enabled) */}
+        <div
+          ref={vimStatusRef}
+          className={`px-4 py-1 font-mono text-xs text-muted-foreground border-t border-border bg-background ${vimEnabled ? '' : 'hidden'}`}
         />
 
         {/* Toolbar */}
@@ -294,6 +498,9 @@ function App() {
               {wasmReady ? 'Run' : 'Loading...'}
             </Button>
 
+            {/* Divider */}
+            <div className="h-5 w-px bg-border" />
+
             {/* URL Extension Toggle */}
             <div className="flex items-center gap-2">
               <Switch
@@ -303,7 +510,19 @@ function App() {
               />
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleUrlExtToggle(!urlExtEnabled)}>
                 <Globe className="w-3.5 h-3.5" />
-                <span>URL extension</span>
+                <span className="hidden sm:inline">URL</span>
+              </label>
+            </div>
+
+            {/* Vim Toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={vimEnabled}
+                onCheckedChange={setVimEnabled}
+                aria-label="Enable Vim mode"
+              />
+              <label className="text-xs text-muted-foreground cursor-pointer select-none" onClick={() => setVimEnabled(!vimEnabled)}>
+                Vim
               </label>
             </div>
           </div>
