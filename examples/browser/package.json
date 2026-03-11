@@ -8,11 +8,17 @@
     "vercel-build": "bash build.sh && vite build"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "geist": "^1.7.0",
+    "lucide-react": "^0.577.0",
     "quickjs-wasi": "workspace:*",
     "react": "^19",
     "react-dom": "^19",
-    "react-inspector": "^9"
+    "react-inspector": "^9",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
     "@types/react": "^19",

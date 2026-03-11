@@ -2,17 +2,21 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 're
 import { createRoot } from 'react-dom/client';
 import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
+import { Play, Loader2, Globe, Terminal } from 'lucide-react';
+import { Button } from './src/components/ui/button';
+import { Switch } from './src/components/ui/switch';
+import { Badge } from './src/components/ui/badge';
+import { cn } from './src/lib/utils';
 
-import './fonts.css';
+import './src/index.css';
 
-// Extend chromeDark with a transparent background and matching monospace font.
-// react-inspector v9 types `theme` as `string` but accepts objects at runtime.
+// Inspector theme matching our dark UI
 const inspectorTheme = {
   ...chromeDark,
-  BASE_FONT_FAMILY: "'Geist Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+  BASE_FONT_FAMILY: "var(--font-mono)",
   BASE_FONT_SIZE: '13px',
   BASE_BACKGROUND_COLOR: 'transparent',
-  TREENODE_FONT_FAMILY: "'Geist Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+  TREENODE_FONT_FAMILY: "var(--font-mono)",
   TREENODE_FONT_SIZE: '13px',
 } as unknown as string;
 
@@ -21,34 +25,56 @@ type OutputLog = { type: 'log'; values: unknown[] };
 type OutputError = { type: 'error'; text: string };
 type OutputEntry = OutputResult | OutputLog | OutputError;
 
+const DEFAULT_CODE = `// Try any JavaScript \u2014 it runs in a sandboxed QuickJS VM
+const obj = {
+  name: "QuickJS",
+  version: "2024.2",
+  features: ["ES2023", "modules", "BigInt"],
+  nested: { a: 1, b: [2, 3, { c: true }] },
+};
+
+console.log("Hello from QuickJS!", obj);
+obj;`;
+
 function OutputEntryView({ entry }: { entry: OutputEntry }) {
   if (entry.type === 'result') {
     return (
-      <div className="output-entry result">
-        <ObjectInspector data={entry.value} theme={inspectorTheme} expandLevel={1} />
+      <div className="flex gap-2 py-0.5">
+        <span className="text-emerald-400 select-none shrink-0">&larr;</span>
+        <div className="text-emerald-400 min-w-0">
+          <ObjectInspector data={entry.value} theme={inspectorTheme} expandLevel={1} />
+        </div>
       </div>
     );
   }
 
   if (entry.type === 'log') {
     return (
-      <div className="output-entry log">
-        {entry.values.map((v, i) => (
-          <span key={i}>
-            {i > 0 && ' '}
-            {typeof v === 'object' && v !== null ? (
-              <ObjectInspector data={v} theme={inspectorTheme} expandLevel={0} />
-            ) : (
-              String(v)
-            )}
-          </span>
-        ))}
+      <div className="flex gap-2 py-0.5 text-muted-foreground">
+        <span className="select-none shrink-0">&gt;</span>
+        <div className="min-w-0">
+          {entry.values.map((v, i) => (
+            <span key={i} className="align-top">
+              {i > 0 && ' '}
+              {typeof v === 'object' && v !== null ? (
+                <ObjectInspector data={v} theme={inspectorTheme} expandLevel={0} />
+              ) : (
+                String(v)
+              )}
+            </span>
+          ))}
+        </div>
       </div>
     );
   }
 
   if (entry.type === 'error') {
-    return <div className="output-entry error">{entry.text}</div>;
+    return (
+      <div className="flex gap-2 py-0.5">
+        <span className="text-destructive select-none shrink-0">!</span>
+        <span className="text-destructive whitespace-pre-wrap">{entry.text}</span>
+      </div>
+    );
   }
 
   return null;
@@ -126,7 +152,7 @@ function App() {
         extensions,
       });
 
-      // Provide console.log / console.error via host functions
+      // Provide console.log / console.error
       {
         const log = vm.newFunction('log', function (this: JSValueHandle, ...args: JSValueHandle[]) {
           const values = args.map((a) => vm.dump(a));
@@ -147,7 +173,7 @@ function App() {
         consoleObj.dispose();
       }
 
-      // Evaluate the user's code
+      // Evaluate
       try {
         const result = vm.evalCode(code);
         const value = vm.dump(result);
@@ -171,7 +197,7 @@ function App() {
       }
 
       const elapsed = (performance.now() - start).toFixed(1);
-      setStatus(`Executed in ${elapsed}ms`);
+      setStatus(`${elapsed}ms`);
 
       vm.dispose();
     } catch (err) {
@@ -186,6 +212,16 @@ function App() {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Handle Tab key for indentation
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const textarea = e.currentTarget;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+        textarea.selectionStart = textarea.selectionEnd = start + 2;
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         run();
@@ -195,48 +231,108 @@ function App() {
   );
 
   return (
-    <>
-      <h1>quickjs-wasi</h1>
-      <p className="subtitle">QuickJS running in the browser via WebAssembly</p>
-
-      <label htmlFor="code">JavaScript code:</label>
-      <textarea
-        id="code"
-        ref={codeRef}
-        defaultValue={`// Try any JavaScript — it runs in a sandboxed QuickJS VM
-const obj = {
-  name: "QuickJS",
-  version: "2024.2",
-  features: ["ES2023", "modules", "BigInt"],
-  nested: { a: 1, b: [2, 3, { c: true }] },
-};
-
-console.log("Hello from QuickJS!", obj);
-obj;`}
-        onKeyDown={handleKeyDown}
-      />
-
-      <div className="toolbar">
-        <button id="run" disabled={!wasmReady || running} onClick={run}>
-          {wasmReady ? 'Run' : 'Loading WASM...'}
-        </button>
-        <label className="ext-toggle">
-          <input
-            type="checkbox"
-            checked={urlExtEnabled}
-            onChange={(e) => handleUrlExtToggle(e.target.checked)}
-          />
-          URL extension
-        </label>
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
+      {/* Header */}
+      <div className="mb-8">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
+            <Terminal className="w-5 h-5" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            quickjs-wasi
+          </h1>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          QuickJS running in the browser via WebAssembly
+        </p>
       </div>
 
-      <div id="output" ref={outputRef}>
-        {output.map((entry, i) => (
-          <OutputEntryView key={i} entry={entry} />
-        ))}
+      {/* Editor Card */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden shadow-lg">
+        {/* Editor Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/80">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground">Editor</span>
+            <Badge variant="secondary" className="text-[10px] font-mono px-1.5 py-0">
+              ES2023
+            </Badge>
+          </div>
+          <span className="text-xs text-muted-foreground/60 hidden sm:inline">
+            {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to run
+          </span>
+        </div>
+
+        {/* Textarea */}
+        <textarea
+          ref={codeRef}
+          defaultValue={DEFAULT_CODE}
+          onKeyDown={handleKeyDown}
+          spellCheck={false}
+          className={cn(
+            "w-full h-56 sm:h-64 resize-y p-4",
+            "bg-background text-foreground",
+            "font-mono text-sm leading-relaxed",
+            "border-none outline-none",
+            "placeholder:text-muted-foreground/40",
+          )}
+        />
+
+        {/* Toolbar */}
+        <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-card/80">
+          <div className="flex items-center gap-4">
+            <Button
+              onClick={run}
+              disabled={!wasmReady || running}
+              size="sm"
+              className="gap-1.5"
+            >
+              {running ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
+              {wasmReady ? 'Run' : 'Loading...'}
+            </Button>
+
+            {/* URL Extension Toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={urlExtEnabled}
+                onCheckedChange={handleUrlExtToggle}
+                aria-label="Enable URL extension"
+              />
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleUrlExtToggle(!urlExtEnabled)}>
+                <Globe className="w-3.5 h-3.5" />
+                <span>URL extension</span>
+              </label>
+            </div>
+          </div>
+
+          {status && (
+            <Badge variant="success" className="text-[10px] font-mono">
+              {status}
+            </Badge>
+          )}
+        </div>
       </div>
-      <div id="status">{status}</div>
-    </>
+
+      {/* Output */}
+      {output.length > 0 && (
+        <div className="mt-4 rounded-xl border border-border bg-card overflow-hidden shadow-lg">
+          <div className="px-4 py-2.5 border-b border-border bg-card/80">
+            <span className="text-sm font-medium text-muted-foreground">Output</span>
+          </div>
+          <div
+            ref={outputRef}
+            className="p-4 font-mono text-[13px] leading-relaxed max-h-96 overflow-y-auto"
+          >
+            {output.map((entry, i) => (
+              <OutputEntryView key={i} entry={entry} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
