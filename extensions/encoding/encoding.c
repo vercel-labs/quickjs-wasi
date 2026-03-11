@@ -641,8 +641,9 @@ static JSValue js_text_decoder_constructor(JSContext *ctx, JSValueConst new_targ
         if (enc_result < 0) {
             /* Check if it's a known but unsupported encoding, or replacement */
             if (is_replacement_encoding(label, label_len)) {
+                JSValue err = JS_ThrowRangeError(ctx, "The encoding label provided ('%s') is not supported.", label);
                 JS_FreeCString(ctx, label);
-                return JS_ThrowRangeError(ctx, "The encoding label provided ('%s') is not supported.", label);
+                return err;
             }
             JS_FreeCString(ctx, label);
             return JS_ThrowRangeError(ctx, "The encoding label provided is not supported.");

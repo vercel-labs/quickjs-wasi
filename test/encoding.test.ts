@@ -349,6 +349,18 @@ describe('TextDecoder labels', () => {
     }).toThrow();
   });
 
+  it('should include the label in the error message for replacement encoding', async () => {
+    const result = await evalStr(`
+      try {
+        new TextDecoder('csiso2022kr');
+        'no error';
+      } catch(e) {
+        e.message;
+      }
+    `);
+    expect(result).toContain('csiso2022kr');
+  });
+
   it('should throw RangeError for completely invalid label', async () => {
     using vm = await createVM();
     expect(() => {
