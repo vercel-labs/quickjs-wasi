@@ -5,6 +5,7 @@
 
 WASI_SDK ?= /tmp/wasi-sdk
 CC = $(WASI_SDK)/bin/clang
+CXX = $(WASI_SDK)/bin/clang++
 AR = $(WASI_SDK)/bin/llvm-ar
 SYSROOT = $(WASI_SDK)/share/wasi-sysroot
 
@@ -141,17 +142,35 @@ INTERFACE_OBJ = $(BUILD_DIR)/interface.o
 
 ALL_OBJS = $(QJS_OBJS) $(INTERFACE_OBJ)
 
-# Extension compiler flags (PIC, no LTO)
+# Extension compiler flags (C, PIC, no LTO)
 EXT_CFLAGS = \
 	--target=wasm32-wasip1 \
 	--sysroot=$(SYSROOT) \
 	-fPIC -O2 \
 	-I$(QJS_DIR)
 
-# Extensions
-EXT_URL_SRC = extensions/url/url.c
-EXT_URL_OBJ = extensions/url/url.o
-EXT_URL_SO  = extensions/url/url.so
+# Extension compiler flags (C++20, PIC, no LTO)
+EXT_CXXFLAGS = \
+	--target=wasm32-wasip1 \
+	--sysroot=$(SYSROOT) \
+	-fPIC -O2 -std=c++20 \
+	-fno-exceptions -fno-rtti \
+	-D_LIBCPP_HAS_NO_THREADS \
+	-D_LIBCPP_DISABLE_EXTERN_TEMPLATE
+
+# Extensions: URL (backed by ada-url)
+# The libc++ string.cpp.o is extracted from the archive and linked directly
+# to provide std::basic_string<char> method implementations that ada uses.
+# The wstring (wchar_t) symbols it pulls in are dead code never called at runtime.
+EXT_URL_DIR = extensions/url
+EXT_URL_BUILD = $(EXT_URL_DIR)/build
+WASM_LIB_DIR = $(SYSROOT)/lib/wasm32-wasip1
+EXT_URL_OBJS = \
+	$(EXT_URL_DIR)/url.o \
+	$(EXT_URL_DIR)/ada/ada.o \
+	$(EXT_URL_DIR)/cxxstubs.o \
+	$(EXT_URL_BUILD)/string.cpp.o
+EXT_URL_SO = $(EXT_URL_DIR)/url.so
 
 .PHONY: all clean
 
@@ -166,15 +185,36 @@ $(BUILD_DIR)/%.o: $(QJS_DIR)/%.c | $(BUILD_DIR)
 $(BUILD_DIR)/interface.o: $(INTERFACE_SRC) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Extensions
-$(EXT_URL_OBJ): $(EXT_URL_SRC)
-	$(CC) $(EXT_CFLAGS) -c -o $@ $<
+# URL extension: compile C source
+$(EXT_URL_DIR)/url.o: $(EXT_URL_DIR)/url.c
+	$(CC) $(EXT_CFLAGS) -I$(EXT_URL_DIR) -c -o $@ $<
 
-$(EXT_URL_SO): $(EXT_URL_OBJ)
-	$(WASI_SDK)/bin/wasm-ld --shared --no-entry --export-dynamic --allow-undefined -o $@ $<
+# URL extension: compile ada C++ source
+$(EXT_URL_DIR)/ada/ada.o: $(EXT_URL_DIR)/ada/ada.cpp
+	$(CXX) $(EXT_CXXFLAGS) -c -o $@ $<
+
+# URL extension: compile C++ runtime stubs
+$(EXT_URL_DIR)/cxxstubs.o: $(EXT_URL_DIR)/cxxstubs.cpp
+	$(CXX) $(EXT_CXXFLAGS) -c -o $@ $<
+
+# URL extension: extract libc++ std::string implementation
+$(EXT_URL_BUILD)/string.cpp.o: | $(EXT_URL_BUILD)
+	$(AR) x $(WASM_LIB_DIR)/libc++.a string.cpp.o --output=$(EXT_URL_BUILD)
+
+$(EXT_URL_BUILD):
+	mkdir -p $(EXT_URL_BUILD)
+
+# URL extension: link as shared library
+$(EXT_URL_SO): $(EXT_URL_OBJS)
+	$(WASI_SDK)/bin/wasm-ld \
+		--shared --no-entry --export-dynamic --allow-undefined \
+		-o $@ $(EXT_URL_OBJS)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 clean:
-	rm -rf $(BUILD_DIR) $(OUTPUT) extensions/url/url.o extensions/url/url.so
+	rm -rf $(BUILD_DIR) $(OUTPUT) \
+		$(EXT_URL_DIR)/url.o $(EXT_URL_DIR)/ada/ada.o \
+		$(EXT_URL_DIR)/cxxstubs.o $(EXT_URL_BUILD) \
+		$(EXT_URL_SO)

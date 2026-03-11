@@ -6,16 +6,16 @@ This enables implementing Web API polyfills (URL, FormData, Blob, etc.) and othe
 
 ## Quick Start
 
-### Using an Extension
+### Using a Built-in Extension
+
+The URL extension is available as a package sub-export:
 
 ```typescript
 import { QuickJS } from 'quickjs-wasi';
-import { readFileSync } from 'fs';
-
-const urlExt = readFileSync('./extensions/url/url.so');
+import { urlExtension } from 'quickjs-wasi/url';
 
 const vm = await QuickJS.create({
-  extensions: [{ name: 'url', wasm: urlExt }],
+  extensions: [urlExtension],
 });
 
 vm.unwrapResult(vm.evalCode(`
@@ -26,6 +26,19 @@ vm.unwrapResult(vm.evalCode(`
   const params = new URLSearchParams('a=1&b=2');
   console.log(params.get('a')); // '1'
 `)).dispose();
+```
+
+You can also load extensions manually from WASM bytes:
+
+```typescript
+import { QuickJS } from 'quickjs-wasi';
+import { readFileSync } from 'fs';
+
+const urlExt = readFileSync('./extensions/url/url.so');
+
+const vm = await QuickJS.create({
+  extensions: [{ name: 'url', wasm: urlExt }],
+});
 ```
 
 ### Building an Extension
@@ -293,22 +306,36 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 
 ## Included Extensions
 
-### `extensions/url/url.so`
+### `quickjs-wasi/url`
 
-A minimal WHATWG URL API implementation:
+A fully WHATWG URL Standard compliant implementation of `URL` and `URLSearchParams`, backed by the [ada-url](https://github.com/ada-url/ada) library (the same URL parser used by Node.js).
 
-- **`URL`** — constructor, `protocol`, `hostname`, `port`, `pathname`, `search`, `hash`, `origin`, `host`, `href`, `username`, `password`, `toString()`, `toJSON()`
-- **`URLSearchParams`** — constructor (parses query strings), `get()`, `set()`, `has()`, `delete()`, `append()`, `toString()`, `size`
+```typescript
+import { urlExtension } from 'quickjs-wasi/url';
 
-Build with:
+const vm = await QuickJS.create({
+  extensions: [urlExtension],
+});
+```
+
+**`URL`** class:
+- Constructor: `new URL(url)`, `new URL(url, base)` — full base URL resolution support
+- Getters/Setters: `href`, `protocol`, `username`, `password`, `host`, `hostname`, `port`, `pathname`, `search`, `hash`
+- Read-only: `origin`
+- Methods: `toString()`, `toJSON()`
+- Static: `URL.canParse(url)`, `URL.canParse(url, base)`
+- Full WHATWG compliance: percent-encoding, IDNA hostname normalization, default port stripping, path normalization
+
+**`URLSearchParams`** class:
+- Constructor: `new URLSearchParams(init)` — parses query strings
+- Methods: `get()`, `getAll()`, `set()`, `has()`, `delete()`, `append()`, `sort()`, `toString()`, `forEach()`, `entries()`, `keys()`, `values()`
+- Property: `size`
+- Full WHATWG compliance: proper percent-encoding (spaces as `+`), key sorting
+
+Build from source with:
 
 ```bash
-make  # builds quickjs.wasm
-cd extensions/url
-/tmp/wasi-sdk/bin/clang --target=wasm32-wasip1 --sysroot=/tmp/wasi-sdk/share/wasi-sysroot \
-  -fPIC -O2 -I ../../quickjs-ng -c url.c -o url.o
-/tmp/wasi-sdk/bin/wasm-ld --shared --no-entry --export-dynamic --allow-undefined \
-  -o url.so url.o
+make  # builds both quickjs.wasm and extensions/url/url.so
 ```
 
 ## Known Limitations

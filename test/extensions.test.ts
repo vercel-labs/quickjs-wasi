@@ -123,6 +123,222 @@ describe('native WASM extensions', () => {
     expect(result.toString()).toBe('a=1&b=20&d=4');
     result.dispose();
   });
+
+  // --- New ada-backed feature tests ---
+
+  it('should support base URL resolution', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const url = new URL('/api/data', 'https://example.com:3000');
+      JSON.stringify({
+        href: url.href,
+        hostname: url.hostname,
+        port: url.port,
+        pathname: url.pathname,
+      })
+    `);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(parsed.href).toBe('https://example.com:3000/api/data');
+    expect(parsed.hostname).toBe('example.com');
+    expect(parsed.port).toBe('3000');
+    expect(parsed.pathname).toBe('/api/data');
+  });
+
+  it('should support URL.canParse() static method', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      JSON.stringify({
+        valid: URL.canParse('https://example.com'),
+        invalid: URL.canParse('not a url'),
+        withBase: URL.canParse('/path', 'https://example.com'),
+      })
+    `);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(parsed.valid).toBe(true);
+    expect(parsed.invalid).toBe(false);
+    expect(parsed.withBase).toBe(true);
+  });
+
+  it('should support URL property setters', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const url = new URL('https://example.com/old');
+      url.pathname = '/new';
+      url.hash = '#section';
+      url.search = '?key=val';
+      JSON.stringify({
+        pathname: url.pathname,
+        hash: url.hash,
+        search: url.search,
+        href: url.href,
+      })
+    `);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(parsed.pathname).toBe('/new');
+    expect(parsed.hash).toBe('#section');
+    expect(parsed.search).toBe('?key=val');
+    expect(parsed.href).toBe('https://example.com/new?key=val#section');
+  });
+
+  it('should strip default ports (WHATWG compliance)', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const url = new URL('https://example.com:443/path');
+      JSON.stringify({
+        port: url.port,
+        host: url.host,
+        origin: url.origin,
+      })
+    `);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+
+    // WHATWG URL standard: default port for https (443) should be stripped
+    expect(parsed.port).toBe('');
+    expect(parsed.host).toBe('example.com');
+    expect(parsed.origin).toBe('https://example.com');
+  });
+
+  it('should handle percent-encoding in URLs', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const url = new URL('https://example.com/path with spaces?q=hello world');
+      JSON.stringify({
+        pathname: url.pathname,
+        search: url.search,
+      })
+    `);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(parsed.pathname).toBe('/path%20with%20spaces');
+    expect(parsed.search).toBe('?q=hello%20world');
+  });
+
+  it('should support URLSearchParams.sort()', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const params = new URLSearchParams('c=3&a=1&b=2');
+      params.sort();
+      params.toString()
+    `);
+    expect(result.toString()).toBe('a=1&b=2&c=3');
+    result.dispose();
+  });
+
+  it('should support URLSearchParams.getAll()', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const params = new URLSearchParams('foo=1&bar=2&foo=3');
+      JSON.stringify(params.getAll('foo'))
+    `);
+    expect(JSON.parse(result.toString())).toEqual(['1', '3']);
+    result.dispose();
+  });
+
+  it('should support URLSearchParams.forEach()', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const params = new URLSearchParams('a=1&b=2');
+      const entries = [];
+      params.forEach((value, key) => {
+        entries.push(key + '=' + value);
+      });
+      JSON.stringify(entries)
+    `);
+    expect(JSON.parse(result.toString())).toEqual(['a=1', 'b=2']);
+    result.dispose();
+  });
+
+  it('should support URLSearchParams iterator methods', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const params = new URLSearchParams('a=1&b=2');
+      const keys = [...params.keys()];
+      const values = [...params.values()];
+      const entries = [...params.entries()].map(([k, v]) => k + '=' + v);
+      JSON.stringify({ keys, values, entries })
+    `);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(parsed.keys).toEqual(['a', 'b']);
+    expect(parsed.values).toEqual(['1', '2']);
+    expect(parsed.entries).toEqual(['a=1', 'b=2']);
+  });
+
+  it('should handle URLSearchParams percent-encoding', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const params = new URLSearchParams();
+      params.set('key', 'hello world');
+      params.set('special', 'a&b=c');
+      params.toString()
+    `);
+    // WHATWG URL standard encodes spaces as + in search params
+    expect(result.toString()).toBe('key=hello+world&special=a%26b%3Dc');
+    result.dispose();
+  });
+
+  it('should normalize hostnames to lowercase', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      const url = new URL('https://EXAMPLE.COM/Path');
+      url.hostname
+    `);
+    expect(result.toString()).toBe('example.com');
+    result.dispose();
+  });
 });
 
 describe('extension snapshot/restore', () => {

@@ -208,6 +208,14 @@ export async function loadExtension(
     'GOT.func': {},
   };
 
+  // Collect names of functions the extension exports (for self-resolution)
+  const extExportNames = new Set(
+    WebAssembly.Module.exports(module)
+      .filter((e) => e.kind === 'function')
+      .map((e) => e.name)
+  );
+  const unresolvedFuncs = new Set<string>();
+
   for (const imp of extImports) {
     if (imp.module === 'env') {
       if (imp.name === 'memory' && imp.kind === 'memory') {
@@ -235,9 +243,15 @@ export async function loadExtension(
         if (resolved && typeof resolved === 'function') {
           importObj.env[imp.name] = resolved;
         } else {
-          throw new Error(
-            `Extension "${descriptor.name}" imports unresolved symbol: env.${imp.name}`
-          );
+          // Provide a trap stub for unresolved symbols (e.g., C++ runtime
+          // functions like wstring methods that are imported but never called).
+          // If actually called at runtime, this will throw.
+          unresolvedFuncs.add(imp.name);
+          importObj.env[imp.name] = () => {
+            throw new Error(
+              `Extension "${descriptor.name}" called unresolved symbol: env.${imp.name}`
+            );
+          };
         }
       } else if (imp.kind === 'global') {
         // Other globals - try to resolve from main exports
@@ -269,9 +283,42 @@ export async function loadExtension(
     }
   }
 
-  // Instantiate the extension
+  // Self-resolve: in WASM shared libraries, the linker with --allow-undefined
+  // may leave symbols as both imports and exports (e.g., C++ weak symbols from
+  // libc++ string.cpp.o that satisfy references from ada.o). We use indirection
+  // through mutable wrapper functions: first create wrappers that initially trap,
+  // then instantiate, then patch the wrappers to forward to the instance's own exports.
+  // This way all internal calls go through the wrappers which point to the final exports.
+  const selfResolvable = [...unresolvedFuncs].filter((name) =>
+    extExportNames.has(name)
+  );
+
+  // For self-resolvable symbols, create mutable wrappers
+  const wrappers: Record<string, { target: Function | null }> = {};
+  for (const name of selfResolvable) {
+    const wrapper = { target: null as Function | null };
+    wrappers[name] = wrapper;
+    // Replace the trap stub with a wrapper that forwards to the target
+    importObj.env[name] = (...args: unknown[]) => {
+      if (!wrapper.target) {
+        throw new Error(
+          `Extension "${descriptor.name}" called unresolved symbol during init: env.${name}`
+        );
+      }
+      return (wrapper.target as Function)(...args);
+    };
+  }
+
   const instance = await WebAssembly.instantiate(module, importObj);
   const extExports = instance.exports;
+
+  // Patch wrappers to point to the instance's own exports
+  for (const name of selfResolvable) {
+    const selfExport = extExports[name];
+    if (typeof selfExport === 'function') {
+      wrappers[name].target = selfExport;
+    }
+  }
 
   // Apply data relocations if the extension has them
   if (typeof extExports.__wasm_apply_data_relocs === 'function') {
