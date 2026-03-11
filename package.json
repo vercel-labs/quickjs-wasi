@@ -14,12 +14,17 @@
     "./url": {
       "types": "./dist/url.d.ts",
       "default": "./dist/url.js"
+    },
+    "./encoding": {
+      "types": "./dist/encoding.d.ts",
+      "default": "./dist/encoding.js"
     }
   },
   "files": [
     "dist",
     "quickjs.wasm",
-    "extensions/url/url.so"
+    "extensions/url/url.so",
+    "extensions/encoding/encoding.so"
   ],
   "publishConfig": {
     "access": "public"
@@ -35,12 +40,16 @@
     "build": "pnpm run build:wasm && pnpm run build:ts",
     "test": "vitest run",
     "bench": "bun run bench/url-benchmark.ts",
+    "bench:encoding": "bun run bench/encoding-benchmark.ts",
     "changeset": "changeset",
     "ci:version": "changeset version",
     "ci:publish": "pnpm run build && changeset publish"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["bun", "esbuild"]
+    "onlyBuiltDependencies": [
+      "bun",
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
@@ -50,6 +59,7 @@
     "core-js-pure": "^3.48.0",
     "degenerator": "^5.0.1",
     "esbuild": "^0.27.3",
+    "fast-text-encoding": "^1.0.6",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
   }

@@ -172,9 +172,14 @@ EXT_URL_OBJS = \
 	$(EXT_URL_BUILD)/string.cpp.o
 EXT_URL_SO = $(EXT_URL_DIR)/url.so
 
+# Extensions: Encoding (TextEncoder / TextDecoder)
+# Pure C extension — no C++ dependencies needed.
+EXT_ENC_DIR = extensions/encoding
+EXT_ENC_SO = $(EXT_ENC_DIR)/encoding.so
+
 .PHONY: all clean
 
-all: $(OUTPUT) $(EXT_URL_SO)
+all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO)
 
 $(OUTPUT): $(ALL_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -210,6 +215,16 @@ $(EXT_URL_SO): $(EXT_URL_OBJS)
 		--shared --no-entry --export-dynamic --allow-undefined \
 		-o $@ $(EXT_URL_OBJS)
 
+# Encoding extension: compile C source
+$(EXT_ENC_DIR)/encoding.o: $(EXT_ENC_DIR)/encoding.c
+	$(CC) $(EXT_CFLAGS) -c -o $@ $<
+
+# Encoding extension: link as shared library
+$(EXT_ENC_SO): $(EXT_ENC_DIR)/encoding.o
+	$(WASI_SDK)/bin/wasm-ld \
+		--shared --no-entry --export-dynamic --allow-undefined \
+		-o $@ $<
+
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
@@ -217,4 +232,6 @@ clean:
 	rm -rf $(BUILD_DIR) $(OUTPUT) \
 		$(EXT_URL_DIR)/url.o $(EXT_URL_DIR)/ada/ada.o \
 		$(EXT_URL_DIR)/cxxstubs.o $(EXT_URL_BUILD) \
-		$(EXT_URL_SO)
+		$(EXT_URL_SO) \
+		$(EXT_ENC_DIR)/encoding.o \
+		$(EXT_ENC_SO)

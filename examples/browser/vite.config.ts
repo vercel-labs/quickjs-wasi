@@ -16,6 +16,11 @@ if (existsSync(urlExtSrc)) {
   copyFileSync(urlExtSrc, resolve(publicDir, 'url.so'));
 }
 
+const encodingExtSrc = resolve(repoRoot, 'extensions/encoding/encoding.so');
+if (existsSync(encodingExtSrc)) {
+  copyFileSync(encodingExtSrc, resolve(publicDir, 'encoding.so'));
+}
+
 export default defineConfig({
   plugins: [tailwindcss(), react()],
 });

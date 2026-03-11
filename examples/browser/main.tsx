@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
@@ -16,6 +16,7 @@ import './src/index.css';
 const STORAGE_KEYS = {
   code: 'qjs-playground:code',
   urlExt: 'qjs-playground:urlExt',
+  encodingExt: 'qjs-playground:encodingExt',
   vim: 'qjs-playground:vim',
 } as const;
 
@@ -72,6 +73,27 @@ declare class URLSearchParams {
   entries(): IterableIterator<[string, string]>;
   keys(): IterableIterator<string>;
   values(): IterableIterator<string>;
+}
+`;
+
+// ─── TextEncoder / TextDecoder type definitions ─────────────────────────────
+
+const ENCODING_TYPE_DEFS = `
+/** The TextEncoder interface encodes a string into a Uint8Array containing UTF-8 encoded text. */
+declare class TextEncoder {
+  constructor();
+  readonly encoding: "utf-8";
+  encode(input?: string): Uint8Array;
+  encodeInto(source: string, destination: Uint8Array): { read: number; written: number };
+}
+
+/** The TextDecoder interface decodes bytes into a string using a specified encoding. */
+declare class TextDecoder {
+  constructor(label?: string, options?: { fatal?: boolean; ignoreBOM?: boolean });
+  readonly encoding: string;
+  readonly fatal: boolean;
+  readonly ignoreBOM: boolean;
+  decode(input?: ArrayBuffer | ArrayBufferView, options?: { stream?: boolean }): string;
 }
 `;
 
@@ -151,6 +173,7 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
+const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 
 function App() {
   const [status, setStatus] = useState('');
@@ -158,18 +181,22 @@ function App() {
   const [output, setOutput] = useState<OutputEntry[]>([]);
   const [wasmReady, setWasmReady] = useState(false);
   const [urlExtEnabled, setUrlExtEnabled] = useState(() => loadBool(STORAGE_KEYS.urlExt, false));
+  const [encodingExtEnabled, setEncodingExtEnabled] = useState(() => loadBool(STORAGE_KEYS.encodingExt, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
+  const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const vimModeRef = useRef<ReturnType<typeof initVimMode> | null>(null);
   const vimStatusRef = useRef<HTMLDivElement | null>(null);
   const urlTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
   // Persist checkbox states
   useEffect(() => { save(STORAGE_KEYS.urlExt, urlExtEnabled); }, [urlExtEnabled]);
+  useEffect(() => { save(STORAGE_KEYS.encodingExt, encodingExtEnabled); }, [encodingExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
   // Auto-scroll output to bottom
@@ -186,14 +213,21 @@ function App() {
         const fetches: Promise<ArrayBuffer>[] = [
           fetch('/quickjs.wasm').then((r) => r.arrayBuffer()),
         ];
-        // Pre-fetch URL extension if it was enabled in a previous session
+        // Pre-fetch extensions if they were enabled in a previous session
         if (urlExtEnabled && !urlExtBytesRef.current) {
           fetches.push(fetch('/url.so').then((r) => r.arrayBuffer()));
         }
-        const [wasmBytes, urlExtBytes] = await Promise.all(fetches);
+        if (encodingExtEnabled && !encodingExtBytesRef.current) {
+          fetches.push(fetch('/encoding.so').then((r) => r.arrayBuffer()));
+        }
+        const [wasmBytes, ...extBytes] = await Promise.all(fetches);
         wasmModuleRef.current = await WebAssembly.compile(wasmBytes);
-        if (urlExtBytes) {
-          urlExtBytesRef.current = urlExtBytes;
+        let extIdx = 0;
+        if (urlExtEnabled && !urlExtBytesRef.current && extBytes[extIdx]) {
+          urlExtBytesRef.current = extBytes[extIdx++];
+        }
+        if (encodingExtEnabled && !encodingExtBytesRef.current && extBytes[extIdx]) {
+          encodingExtBytesRef.current = extBytes[extIdx++];
         }
         setWasmReady(true);
         setStatus(`WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`);
@@ -246,6 +280,27 @@ function App() {
     };
   }, [urlExtEnabled]);
 
+  // Encoding extension types: add/remove type definitions in Monaco
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (encodingExtEnabled) {
+      encodingTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        ENCODING_TYPE_DEFS,
+        ENCODING_TYPES_URI,
+      );
+    } else {
+      encodingTypesDisposableRef.current?.dispose();
+      encodingTypesDisposableRef.current = null;
+    }
+
+    return () => {
+      encodingTypesDisposableRef.current?.dispose();
+      encodingTypesDisposableRef.current = null;
+    };
+  }, [encodingExtEnabled]);
+
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
     setUrlExtEnabled(checked);
@@ -257,6 +312,21 @@ function App() {
         const message = err instanceof Error ? err.message : String(err);
         setOutput([{ type: 'error', text: `Failed to load URL extension: ${message}` }]);
         setUrlExtEnabled(false);
+      }
+    }
+  }, []);
+
+  // Lazily fetch the Encoding extension binary on first enable
+  const handleEncodingExtToggle = useCallback(async (checked: boolean) => {
+    setEncodingExtEnabled(checked);
+    if (checked && !encodingExtBytesRef.current) {
+      try {
+        const response = await fetch('/encoding.so');
+        encodingExtBytesRef.current = await response.arrayBuffer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setOutput([{ type: 'error', text: `Failed to load Encoding extension: ${message}` }]);
+        setEncodingExtEnabled(false);
       }
     }
   }, []);
@@ -276,9 +346,13 @@ function App() {
 
     try {
       const execStart = Date.now();
-      const extensions = urlExtEnabled && urlExtBytesRef.current
-        ? [{ name: 'url', wasm: new Uint8Array(urlExtBytesRef.current) }]
-        : [];
+      const extensions: { name: string; wasm: Uint8Array }[] = [];
+      if (urlExtEnabled && urlExtBytesRef.current) {
+        extensions.push({ name: 'url', wasm: new Uint8Array(urlExtBytesRef.current) });
+      }
+      if (encodingExtEnabled && encodingExtBytesRef.current) {
+        extensions.push({ name: 'encoding', wasm: new Uint8Array(encodingExtBytesRef.current) });
+      }
       const vm = await QuickJS.create({
         wasm: wasmModuleRef.current!,
         memoryLimit: 8 * 1024 * 1024,
@@ -342,7 +416,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -374,9 +448,12 @@ function App() {
       'ts:quickjs-env/globals.d.ts',
     );
 
-    // If URL extension was persisted as enabled, add types immediately
+    // If extensions were persisted as enabled, add types immediately
     if (loadBool(STORAGE_KEYS.urlExt, false)) {
       urlTypesDisposableRef.current = jsDefaults.addExtraLib(URL_TYPE_DEFS, URL_TYPES_URI);
+    }
+    if (loadBool(STORAGE_KEYS.encodingExt, false)) {
+      encodingTypesDisposableRef.current = jsDefaults.addExtraLib(ENCODING_TYPE_DEFS, ENCODING_TYPES_URI);
     }
 
     // Disable validation noise for a playground
@@ -511,6 +588,19 @@ function App() {
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleUrlExtToggle(!urlExtEnabled)}>
                 <Globe className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">URL</span>
+              </label>
+            </div>
+
+            {/* Encoding Extension Toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={encodingExtEnabled}
+                onCheckedChange={handleEncodingExtToggle}
+                aria-label="Enable Encoding extension"
+              />
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleEncodingExtToggle(!encodingExtEnabled)}>
+                <Type className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Encoding</span>
               </label>
             </div>
 
