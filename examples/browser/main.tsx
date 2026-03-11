@@ -182,7 +182,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, []);
+  }, [urlExtEnabled]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
