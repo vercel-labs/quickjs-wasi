@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, Copy } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary, Copy, Github } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
@@ -599,13 +599,24 @@ function App() {
     <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
-            <Terminal className="w-5 h-5" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
+              <Terminal className="w-5 h-5" />
+            </div>
+            <h1 className="text-2xl tracking-tight" style={{ fontFamily: "'Geist Pixel', monospace" }}>
+              quickjs-wasi
+            </h1>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            quickjs-wasi
-          </h1>
+          <a
+            href="https://github.com/vercel-labs/quickjs-wasi"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="View on GitHub"
+          >
+            <Github className="w-5 h-5" />
+          </a>
         </div>
         <p className="text-sm text-muted-foreground">
           QuickJS running in the browser via WebAssembly
@@ -622,9 +633,22 @@ function App() {
               ES2023
             </Badge>
           </div>
-          <span className="text-xs text-muted-foreground/60 hidden sm:inline">
-            {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to run
-          </span>
+          <div className="flex items-center gap-4">
+            {/* Vim Toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={vimEnabled}
+                onCheckedChange={setVimEnabled}
+                aria-label="Enable Vim mode"
+              />
+              <label className="text-xs text-muted-foreground cursor-pointer select-none" onClick={() => setVimEnabled(!vimEnabled)}>
+                Vim
+              </label>
+            </div>
+            <span className="text-xs text-muted-foreground/60 hidden sm:inline">
+              {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to run
+            </span>
+          </div>
         </div>
 
         {/* Monaco Editor */}
@@ -664,25 +688,26 @@ function App() {
         />
 
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-card/80">
-          <div className="flex items-center gap-4">
-            <Button
-              onClick={run}
-              disabled={!wasmReady || running}
-              size="sm"
-              className="gap-1.5"
-            >
-              {running ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Play className="w-3.5 h-3.5" />
-              )}
-              {wasmReady ? 'Run' : 'Loading...'}
-            </Button>
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-border bg-card/80">
+          <Button
+            onClick={run}
+            disabled={!wasmReady || running}
+            size="sm"
+            className="gap-1.5"
+          >
+            {running ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Play className="w-3.5 h-3.5" />
+            )}
+            {wasmReady ? 'Run' : 'Loading...'}
+          </Button>
 
-            {/* Divider */}
-            <div className="h-5 w-px bg-border" />
+          {/* Divider */}
+          <div className="h-5 w-px bg-border" />
 
+          {/* Extension toggles */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {/* URL Extension Toggle */}
             <div className="flex items-center gap-2">
               <Switch
@@ -692,7 +717,7 @@ function App() {
               />
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleUrlExtToggle(!urlExtEnabled)}>
                 <Globe className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">URL</span>
+                URL
               </label>
             </div>
 
@@ -705,7 +730,7 @@ function App() {
               />
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleEncodingExtToggle(!encodingExtEnabled)}>
                 <Type className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Encoding</span>
+                Encoding
               </label>
             </div>
 
@@ -718,7 +743,7 @@ function App() {
               />
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleBase64ExtToggle(!base64ExtEnabled)}>
                 <Binary className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Base64</span>
+                Base64
               </label>
             </div>
 
@@ -731,25 +756,15 @@ function App() {
               />
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleStructuredCloneExtToggle(!structuredCloneExtEnabled)}>
                 <Copy className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Clone</span>
-              </label>
-            </div>
-
-            {/* Vim Toggle */}
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={vimEnabled}
-                onCheckedChange={setVimEnabled}
-                aria-label="Enable Vim mode"
-              />
-              <label className="text-xs text-muted-foreground cursor-pointer select-none" onClick={() => setVimEnabled(!vimEnabled)}>
-                Vim
+                Clone
               </label>
             </div>
           </div>
 
+          {/* Spacer + status */}
+          <div className="flex-1" />
           {status && (
-            <Badge variant="success" className="text-[10px] font-mono">
+            <Badge variant="success" className="text-[10px] font-mono shrink-0">
               {status}
             </Badge>
           )}
