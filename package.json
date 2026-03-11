@@ -22,6 +22,10 @@
     "./base64": {
       "types": "./dist/base64.d.ts",
       "default": "./dist/base64.js"
+    },
+    "./dom-exception": {
+      "types": "./dist/dom-exception.d.ts",
+      "default": "./dist/dom-exception.js"
     }
   },
   "files": [
@@ -29,7 +33,8 @@
     "quickjs.wasm",
     "extensions/url/url.so",
     "extensions/encoding/encoding.so",
-    "extensions/base64/base64.so"
+    "extensions/base64/base64.so",
+    "extensions/dom-exception/dom-exception.so"
   ],
   "publishConfig": {
     "access": "public"
