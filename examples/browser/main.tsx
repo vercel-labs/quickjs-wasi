@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ObjectInspector, chromeDark } from 'react-inspector';
-import { QuickJS, type JSValueHandle } from 'quickjs-wasi';
+import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 
 import './fonts.css';
 
@@ -59,7 +59,9 @@ function App() {
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState<OutputEntry[]>([]);
   const [wasmReady, setWasmReady] = useState(false);
+  const [urlExtEnabled, setUrlExtEnabled] = useState(false);
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
+  const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const codeRef = useRef<HTMLTextAreaElement | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
@@ -88,6 +90,21 @@ function App() {
     init();
   }, []);
 
+  // Lazily fetch the URL extension binary on first enable
+  const handleUrlExtToggle = useCallback(async (checked: boolean) => {
+    setUrlExtEnabled(checked);
+    if (checked && !urlExtBytesRef.current) {
+      try {
+        const response = await fetch('/url.so');
+        urlExtBytesRef.current = await response.arrayBuffer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setOutput([{ type: 'error', text: `Failed to load URL extension: ${message}` }]);
+        setUrlExtEnabled(false);
+      }
+    }
+  }, []);
+
   const run = useCallback(async () => {
     const code = codeRef.current?.value;
     if (!code) return;
@@ -99,10 +116,14 @@ function App() {
 
     try {
       const execStart = Date.now();
+      const extensions = urlExtEnabled && urlExtBytesRef.current
+        ? [{ name: 'url', wasm: new Uint8Array(urlExtBytesRef.current) }]
+        : [];
       const vm = await QuickJS.create({
         wasm: wasmModuleRef.current!,
         memoryLimit: 8 * 1024 * 1024,
         interruptHandler: () => Date.now() - execStart > 5000,
+        extensions,
       });
 
       // Provide console.log / console.error via host functions
@@ -127,26 +148,27 @@ function App() {
       }
 
       // Evaluate the user's code
-      const result = vm.evalCode(code);
-
-      if (result.isException) {
-        const exc = vm.getException();
-        const dumped = vm.dump(exc);
-        exc.dispose();
-        if (dumped instanceof Error) {
-          entries.push({ type: 'error', text: `${dumped.name}: ${dumped.message}` });
-          if (dumped.stack) entries.push({ type: 'error', text: dumped.stack });
-        } else {
-          entries.push({ type: 'error', text: String(dumped) });
-        }
-      } else {
+      try {
+        const result = vm.evalCode(code);
         const value = vm.dump(result);
         if (value !== undefined) {
           entries.push({ type: 'result', value });
         }
+        result.dispose();
+      } catch (evalErr) {
+        if (evalErr instanceof JSException) {
+          const dumped = vm.dump(evalErr.handle);
+          evalErr.handle.dispose();
+          if (dumped instanceof Error) {
+            entries.push({ type: 'error', text: `${dumped.name}: ${dumped.message}` });
+            if (dumped.stack) entries.push({ type: 'error', text: dumped.stack });
+          } else {
+            entries.push({ type: 'error', text: String(dumped) });
+          }
+        } else {
+          throw evalErr;
+        }
       }
-
-      result.dispose();
 
       const elapsed = (performance.now() - start).toFixed(1);
       setStatus(`Executed in ${elapsed}ms`);
@@ -194,9 +216,19 @@ obj;`}
         onKeyDown={handleKeyDown}
       />
 
-      <button id="run" disabled={!wasmReady || running} onClick={run}>
-        {wasmReady ? 'Run' : 'Loading WASM...'}
-      </button>
+      <div className="toolbar">
+        <button id="run" disabled={!wasmReady || running} onClick={run}>
+          {wasmReady ? 'Run' : 'Loading WASM...'}
+        </button>
+        <label className="ext-toggle">
+          <input
+            type="checkbox"
+            checked={urlExtEnabled}
+            onChange={(e) => handleUrlExtToggle(e.target.checked)}
+          />
+          URL extension
+        </label>
+      </div>
 
       <div id="output" ref={outputRef}>
         {output.map((entry, i) => (

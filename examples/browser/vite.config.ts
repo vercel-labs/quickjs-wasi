@@ -1,14 +1,20 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { copyFileSync, mkdirSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 
-// Copy quickjs.wasm to public/ so Vite serves it as a static asset.
-// The WASM file should have been built by the build script before Vite runs.
-const wasmSrc = resolve(import.meta.dirname, '../../quickjs.wasm');
+// Copy WASM/extension binaries to public/ so Vite serves them as static assets.
+// These should have been built by the build script before Vite runs.
+const repoRoot = resolve(import.meta.dirname, '../..');
 const publicDir = resolve(import.meta.dirname, 'public');
 mkdirSync(publicDir, { recursive: true });
-copyFileSync(wasmSrc, resolve(publicDir, 'quickjs.wasm'));
+
+copyFileSync(resolve(repoRoot, 'quickjs.wasm'), resolve(publicDir, 'quickjs.wasm'));
+
+const urlExtSrc = resolve(repoRoot, 'extensions/url/url.so');
+if (existsSync(urlExtSrc)) {
+  copyFileSync(urlExtSrc, resolve(publicDir, 'url.so'));
+}
 
 export default defineConfig({
   plugins: [react()],

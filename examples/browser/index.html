@@ -30,8 +30,13 @@
       resize: vertical;
     }
     textarea:focus { outline: none; border-color: #555; }
-    button {
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
       margin-top: 0.75rem;
+    }
+    button {
       padding: 0.5rem 1.25rem;
       background: #2563eb;
       color: white;
@@ -42,6 +47,20 @@
     }
     button:hover { background: #1d4ed8; }
     button:disabled { background: #333; color: #666; cursor: not-allowed; }
+    .ext-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      color: #999;
+      cursor: pointer;
+      user-select: none;
+    }
+    .ext-toggle:hover { color: #ccc; }
+    .ext-toggle input[type="checkbox"] {
+      accent-color: #2563eb;
+      cursor: pointer;
+    }
     #output {
       margin-top: 1.5rem;
       background: #111;
