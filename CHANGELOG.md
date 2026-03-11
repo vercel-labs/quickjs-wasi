@@ -1,5 +1,43 @@
 # quickjs-wasi
 
+## 1.1.0
+
+### Minor Changes
+
+- [`c1e7074`](https://github.com/vercel-labs/quickjs-wasi/commit/c1e7074f53eadd1953887b87578d70d3838ee700) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `quickjs-wasi/base64` sub-export with WHATWG-compliant atob and btoa
+
+  - Native WASM extension implementing the HTML Standard's Base64 utility methods
+  - `btoa(data)`: encode binary string to base64, throws for characters > U+00FF
+  - `atob(data)`: forgiving-base64 decode (strips whitespace, allows missing padding)
+  - Throws `InvalidCharacterError` DOMException (built into QuickJS-ng)
+  - ~85x faster than core-js-pure polyfill, +41 bytes snapshot vs +512KB
+
+- [`b79b714`](https://github.com/vercel-labs/quickjs-wasi/commit/b79b714d360859c57cf866e3e081cf46bf27d980) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `quickjs-wasi/encoding` sub-export with WHATWG-compliant TextEncoder and TextDecoder
+
+  - Native WASM extension implementing the Encoding Standard (pure C, no C++ dependencies)
+  - TextEncoder: `encode()`, `encodeInto()`, USVString semantics (lone surrogates → U+FFFD)
+  - TextDecoder: UTF-8, UTF-16LE, UTF-16BE decoding with streaming, BOM handling, fatal mode
+  - Accepts ArrayBuffer, TypedArray, and DataView inputs
+  - `quickjs-wasi/encoding` package sub-export for ergonomic opt-in
+  - 231 tests passing (67 unit + 164 WPT-based compliance tests)
+  - ~20x faster than fast-text-encoding JS polyfill, +45 bytes snapshot overhead vs +64KB
+
+- [`e5d4ec8`](https://github.com/vercel-labs/quickjs-wasi/commit/e5d4ec8bfc124c3245aa4ad9c4a9b60ef1598fd8) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `quickjs-wasi/structured-clone` sub-export with WHATWG-compliant structuredClone
+
+  - Native WASM extension implementing the Structured Clone algorithm
+  - Deep clones: primitives, Date, RegExp, ArrayBuffer, TypedArrays, DataView, Map, Set, Array, Error, plain objects
+  - Circular reference detection and preservation of shared references
+  - Throws DataCloneError for non-cloneable types (functions, symbols, proxies, promises)
+
+- [`29de279`](https://github.com/vercel-labs/quickjs-wasi/commit/29de27994e3f34754f500ee31361688949b69d47) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `quickjs-wasi/url` sub-export with WHATWG-compliant URL and URLSearchParams backed by ada-url
+
+  - Replace hand-written URL parser with [ada-url](https://github.com/ada-url/ada) v3.4.3 for full WHATWG URL Standard compliance
+  - Add `quickjs-wasi/url` package sub-export for ergonomic opt-in: `import { urlExtension } from 'quickjs-wasi/url'`
+  - URL class: constructor with base URL support, all property getters/setters, `toString()`, `toJSON()`, static `URL.canParse()`
+  - URLSearchParams class: `get()`, `getAll()`, `set()`, `has()`, `delete()`, `append()`, `sort()`, `toString()`, `forEach()`, `entries()`, `keys()`, `values()`, `size`
+  - Extension loader: support C++ shared library self-resolution and graceful handling of unresolved symbols
+  - 100% pass rate on 877 Web Platform Tests (urltestdata.json)
+
 ## 1.0.0
 
 ### Major Changes
