@@ -34,15 +34,22 @@
     "build:ts": "tsc",
     "build": "pnpm run build:wasm && pnpm run build:ts",
     "test": "vitest run",
+    "bench": "bun run bench/url-benchmark.ts",
     "changeset": "changeset",
     "ci:version": "changeset version",
     "ci:publish": "pnpm run build && changeset publish"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["bun", "esbuild"]
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
     "@types/node": "^22.0.0",
+    "bun": "^1.3.10",
+    "core-js-pure": "^3.48.0",
     "degenerator": "^5.0.1",
+    "esbuild": "^0.27.3",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
   }
