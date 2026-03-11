@@ -387,7 +387,7 @@ const vm = await QuickJS.create({
 });
 ```
 
-**`btoa(data)`**: Encodes a binary string (each char code 0-255) to base64. Throws `InvalidCharacterError` DOMException (or RangeError if DOMException extension not loaded) for characters > U+00FF.
+**`btoa(data)`**: Encodes a binary string (each char code 0-255) to base64. Throws `InvalidCharacterError` DOMException for characters > U+00FF.
 
 **`atob(data)`**: Decodes a base64 string to a binary string. Supports forgiving decode (strips ASCII whitespace, allows missing padding). Throws `InvalidCharacterError` for invalid input.
 
@@ -413,7 +413,7 @@ const vm = await QuickJS.create({
 - Plain objects
 - Circular references and shared references (preserved in the clone graph)
 
-Throws `DataCloneError` DOMException (or TypeError if DOMException not loaded) for:
+Throws `DataCloneError` DOMException for:
 - Functions, Symbols, Proxies, Promises, WeakMap, WeakSet
 
 **Note**: Transfer semantics (`options.transfer`) are not supported.
