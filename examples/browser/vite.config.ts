@@ -33,4 +33,9 @@ if (existsSync(structuredCloneExtSrc)) {
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],
+  resolve: {
+    alias: {
+      '@': resolve(import.meta.dirname, './src'),
+    },
+  },
 });

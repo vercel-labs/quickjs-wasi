@@ -5,12 +5,12 @@ import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
 import { Play, Loader2, Globe, Terminal, Type, Binary, Copy, Github } from 'lucide-react';
-import { Button } from './src/components/ui/button';
-import { Switch } from './src/components/ui/switch';
-import { Badge } from './src/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './src/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-import './src/index.css';
+import '@/index.css';
 
 // ─── localStorage helpers ────────────────────────────────────────────────────
 
@@ -618,7 +618,7 @@ function App() {
   const savedCode = loadString(STORAGE_KEYS.code, DEFAULT_CODE);
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider delay={300}>
     <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
       {/* Header */}
       <div className="mb-8">
@@ -654,7 +654,7 @@ function App() {
           <div className="flex items-center gap-4">
             {/* Vim Toggle */}
             <Tooltip>
-              <TooltipTrigger asChild>
+              <TooltipTrigger>
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={vimEnabled}
@@ -666,7 +666,7 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Enable Vim keybindings in the editor</TooltipContent>
+              <TooltipContent>Enable Vim keybindings</TooltipContent>
             </Tooltip>
             <span className="text-xs text-muted-foreground/60 hidden sm:inline">
               {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to run
@@ -733,7 +733,7 @@ function App() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {/* URL Extension Toggle */}
             <Tooltip>
-              <TooltipTrigger asChild>
+              <TooltipTrigger>
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={urlExtEnabled}
@@ -746,12 +746,12 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds URL and URLSearchParams (native WASM)</TooltipContent>
+              <TooltipContent>Adds <code>URL</code> and <code>URLSearchParams</code></TooltipContent>
             </Tooltip>
 
             {/* Encoding Extension Toggle */}
             <Tooltip>
-              <TooltipTrigger asChild>
+              <TooltipTrigger>
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={encodingExtEnabled}
@@ -764,12 +764,12 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds TextEncoder and TextDecoder (native WASM)</TooltipContent>
+              <TooltipContent>Adds <code>TextEncoder</code> and <code>TextDecoder</code></TooltipContent>
             </Tooltip>
 
             {/* Base64 Extension Toggle */}
             <Tooltip>
-              <TooltipTrigger asChild>
+              <TooltipTrigger>
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={base64ExtEnabled}
@@ -782,12 +782,12 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds atob() and btoa() (native WASM)</TooltipContent>
+              <TooltipContent>Adds <code>atob()</code> and <code>btoa()</code></TooltipContent>
             </Tooltip>
 
             {/* structuredClone Extension Toggle */}
             <Tooltip>
-              <TooltipTrigger asChild>
+              <TooltipTrigger>
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={structuredCloneExtEnabled}
@@ -800,14 +800,14 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds structuredClone() (native WASM)</TooltipContent>
+              <TooltipContent>Adds <code>structuredClone()</code></TooltipContent>
             </Tooltip>
           </div>
 
           {/* Spacer + status */}
           <div className="flex-1" />
           {status && (
-            <Badge variant="success" className="text-[10px] font-mono shrink-0">
+            <Badge variant="secondary" className="text-[10px] font-mono shrink-0">
               {status}
             </Badge>
           )}
