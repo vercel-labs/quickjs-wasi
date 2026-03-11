@@ -30,6 +30,10 @@
     "./queue-microtask": {
       "types": "./dist/queue-microtask.d.ts",
       "default": "./dist/queue-microtask.js"
+    },
+    "./structured-clone": {
+      "types": "./dist/structured-clone.d.ts",
+      "default": "./dist/structured-clone.js"
     }
   },
   "files": [
@@ -39,7 +43,8 @@
     "extensions/encoding/encoding.so",
     "extensions/base64/base64.so",
     "extensions/dom-exception/dom-exception.so",
-    "extensions/queue-microtask/queue-microtask.so"
+    "extensions/queue-microtask/queue-microtask.so",
+    "extensions/structured-clone/structured-clone.so"
   ],
   "publishConfig": {
     "access": "public"

@@ -36,6 +36,11 @@ if (existsSync(queueMicrotaskExtSrc)) {
   copyFileSync(queueMicrotaskExtSrc, resolve(publicDir, 'queue-microtask.so'));
 }
 
+const structuredCloneExtSrc = resolve(repoRoot, 'extensions/structured-clone/structured-clone.so');
+if (existsSync(structuredCloneExtSrc)) {
+  copyFileSync(structuredCloneExtSrc, resolve(publicDir, 'structured-clone.so'));
+}
+
 export default defineConfig({
   plugins: [tailwindcss(), react()],
 });

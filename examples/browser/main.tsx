@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, AlertTriangle, Timer } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary, AlertTriangle, Timer, Copy } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
@@ -20,6 +20,7 @@ const STORAGE_KEYS = {
   base64Ext: 'qjs-playground:base64Ext',
   domExceptionExt: 'qjs-playground:domExceptionExt',
   queueMicrotaskExt: 'qjs-playground:queueMicrotaskExt',
+  structuredCloneExt: 'qjs-playground:structuredCloneExt',
   vim: 'qjs-playground:vim',
 } as const;
 
@@ -153,6 +154,13 @@ const QUEUEMICROTASK_TYPE_DEFS = `
 declare function queueMicrotask(callback: () => void): void;
 `;
 
+// ─── structuredClone type definitions ─────────────────────────────────────────
+
+const STRUCTUREDCLONE_TYPE_DEFS = `
+/** Creates a deep clone of a value using the structured clone algorithm. */
+declare function structuredClone<T>(value: T): T;
+`;
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const inspectorTheme = {
@@ -233,6 +241,7 @@ const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
 const DOMEXCEPTION_TYPES_URI = 'ts:dom-exception-extension/dom-exception.d.ts';
 const QUEUEMICROTASK_TYPES_URI = 'ts:queue-microtask-extension/queue-microtask.d.ts';
+const STRUCTUREDCLONE_TYPES_URI = 'ts:structured-clone-extension/structured-clone.d.ts';
 
 function App() {
   const [status, setStatus] = useState('');
@@ -244,6 +253,7 @@ function App() {
   const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
   const [domExceptionExtEnabled, setDomExceptionExtEnabled] = useState(() => loadBool(STORAGE_KEYS.domExceptionExt, false));
   const [queueMicrotaskExtEnabled, setQueueMicrotaskExtEnabled] = useState(() => loadBool(STORAGE_KEYS.queueMicrotaskExt, false));
+  const [structuredCloneExtEnabled, setStructuredCloneExtEnabled] = useState(() => loadBool(STORAGE_KEYS.structuredCloneExt, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
@@ -251,6 +261,7 @@ function App() {
   const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
   const domExceptionExtBytesRef = useRef<ArrayBuffer | null>(null);
   const queueMicrotaskExtBytesRef = useRef<ArrayBuffer | null>(null);
+  const structuredCloneExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const vimModeRef = useRef<ReturnType<typeof initVimMode> | null>(null);
@@ -260,6 +271,7 @@ function App() {
   const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const domExceptionTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const queueMicrotaskTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
   // Persist checkbox states
@@ -268,6 +280,7 @@ function App() {
   useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.domExceptionExt, domExceptionExtEnabled); }, [domExceptionExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.queueMicrotaskExt, queueMicrotaskExtEnabled); }, [queueMicrotaskExtEnabled]);
+  useEffect(() => { save(STORAGE_KEYS.structuredCloneExt, structuredCloneExtEnabled); }, [structuredCloneExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
   // Auto-scroll output to bottom
@@ -300,6 +313,9 @@ function App() {
         if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current) {
           fetches.push(fetch('/queue-microtask.so').then((r) => r.arrayBuffer()));
         }
+        if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current) {
+          fetches.push(fetch('/structured-clone.so').then((r) => r.arrayBuffer()));
+        }
         const [wasmBytes, ...extBytes] = await Promise.all(fetches);
         wasmModuleRef.current = await WebAssembly.compile(wasmBytes);
         let extIdx = 0;
@@ -317,6 +333,9 @@ function App() {
         }
         if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current && extBytes[extIdx]) {
           queueMicrotaskExtBytesRef.current = extBytes[extIdx++];
+        }
+        if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current && extBytes[extIdx]) {
+          structuredCloneExtBytesRef.current = extBytes[extIdx++];
         }
         setWasmReady(true);
         setStatus(`WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`);
@@ -453,6 +472,27 @@ function App() {
     };
   }, [queueMicrotaskExtEnabled]);
 
+  // structuredClone extension types
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (structuredCloneExtEnabled) {
+      structuredCloneTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        STRUCTUREDCLONE_TYPE_DEFS,
+        STRUCTUREDCLONE_TYPES_URI,
+      );
+    } else {
+      structuredCloneTypesDisposableRef.current?.dispose();
+      structuredCloneTypesDisposableRef.current = null;
+    }
+
+    return () => {
+      structuredCloneTypesDisposableRef.current?.dispose();
+      structuredCloneTypesDisposableRef.current = null;
+    };
+  }, [structuredCloneExtEnabled]);
+
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
     setUrlExtEnabled(checked);
@@ -513,6 +553,21 @@ function App() {
     }
   }, []);
 
+  // Lazily fetch the structuredClone extension binary on first enable
+  const handleStructuredCloneExtToggle = useCallback(async (checked: boolean) => {
+    setStructuredCloneExtEnabled(checked);
+    if (checked && !structuredCloneExtBytesRef.current) {
+      try {
+        const response = await fetch('/structured-clone.so');
+        structuredCloneExtBytesRef.current = await response.arrayBuffer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setOutput([{ type: 'error', text: `Failed to load structuredClone extension: ${message}` }]);
+        setStructuredCloneExtEnabled(false);
+      }
+    }
+  }, []);
+
   // Lazily fetch the DOMException extension binary on first enable
   const handleDomExceptionExtToggle = useCallback(async (checked: boolean) => {
     setDomExceptionExtEnabled(checked);
@@ -558,6 +613,9 @@ function App() {
       }
       if (queueMicrotaskExtEnabled && queueMicrotaskExtBytesRef.current) {
         extensions.push({ name: 'queue-microtask', wasm: new Uint8Array(queueMicrotaskExtBytesRef.current), initFn: 'qjs_ext_queue_microtask_init' });
+      }
+      if (structuredCloneExtEnabled && structuredCloneExtBytesRef.current) {
+        extensions.push({ name: 'structured-clone', wasm: new Uint8Array(structuredCloneExtBytesRef.current), initFn: 'qjs_ext_structured_clone_init' });
       }
       const vm = await QuickJS.create({
         wasm: wasmModuleRef.current!,
@@ -624,7 +682,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, domExceptionExtEnabled, queueMicrotaskExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, domExceptionExtEnabled, queueMicrotaskExtEnabled, structuredCloneExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -671,6 +729,9 @@ function App() {
     }
     if (loadBool(STORAGE_KEYS.queueMicrotaskExt, false)) {
       queueMicrotaskTypesDisposableRef.current = jsDefaults.addExtraLib(QUEUEMICROTASK_TYPE_DEFS, QUEUEMICROTASK_TYPES_URI);
+    }
+    if (loadBool(STORAGE_KEYS.structuredCloneExt, false)) {
+      structuredCloneTypesDisposableRef.current = jsDefaults.addExtraLib(STRUCTUREDCLONE_TYPE_DEFS, STRUCTUREDCLONE_TYPES_URI);
     }
 
     // Disable validation noise for a playground
@@ -857,6 +918,19 @@ function App() {
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleQueueMicrotaskExtToggle(!queueMicrotaskExtEnabled)}>
                 <Timer className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Microtask</span>
+              </label>
+            </div>
+
+            {/* structuredClone Extension Toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={structuredCloneExtEnabled}
+                onCheckedChange={handleStructuredCloneExtToggle}
+                aria-label="Enable structuredClone extension"
+              />
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleStructuredCloneExtToggle(!structuredCloneExtEnabled)}>
+                <Copy className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Clone</span>
               </label>
             </div>
 
