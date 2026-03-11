@@ -107,6 +107,29 @@ describe('native WASM extensions', () => {
     result.dispose();
   });
 
+  it('should have correct constructor.name on URL and URLSearchParams instances', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      JSON.stringify({
+        urlCtorName: new URL('https://example.com').constructor.name,
+        urlInstanceOf: new URL('https://example.com') instanceof URL,
+        spCtorName: new URLSearchParams('a=1').constructor.name,
+        spInstanceOf: new URLSearchParams('a=1') instanceof URLSearchParams,
+      })
+    `);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(parsed.urlCtorName).toBe('URL');
+    expect(parsed.urlInstanceOf).toBe(true);
+    expect(parsed.spCtorName).toBe('URLSearchParams');
+    expect(parsed.spInstanceOf).toBe(true);
+  });
+
   it('should support URLSearchParams.set and delete', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,

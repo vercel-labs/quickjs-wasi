@@ -705,13 +705,16 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
     JS_NewClassID(rt, &js_url_class_id);
     JS_NewClass(rt, js_url_class_id, &js_url_class);
 
+    JSValue url_ctor = JS_NewCFunction2(ctx, js_url_constructor, "URL", 1,
+                                         JS_CFUNC_constructor, 0);
+
     JSValue url_proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, url_proto, js_url_proto_funcs,
                                sizeof(js_url_proto_funcs) / sizeof(js_url_proto_funcs[0]));
+    /* Set prototype.constructor so that `new URL(...).constructor.name === "URL"` */
+    JS_SetPropertyStr(ctx, url_proto, "constructor", JS_DupValue(ctx, url_ctor));
     JS_SetClassProto(ctx, js_url_class_id, url_proto);
 
-    JSValue url_ctor = JS_NewCFunction2(ctx, js_url_constructor, "URL", 1,
-                                         JS_CFUNC_constructor, 0);
     JSValue url_proto_ref = JS_GetClassProto(ctx, js_url_class_id);
     JS_SetPropertyStr(ctx, url_ctor, "prototype", url_proto_ref);
 
@@ -725,13 +728,15 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
     JS_NewClassID(rt, &js_search_params_class_id);
     JS_NewClass(rt, js_search_params_class_id, &js_search_params_class);
 
+    JSValue sp_ctor = JS_NewCFunction2(ctx, js_search_params_constructor, "URLSearchParams", 0,
+                                        JS_CFUNC_constructor, 0);
+
     JSValue sp_proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, sp_proto, js_search_params_proto_funcs,
                                sizeof(js_search_params_proto_funcs) / sizeof(js_search_params_proto_funcs[0]));
+    JS_SetPropertyStr(ctx, sp_proto, "constructor", JS_DupValue(ctx, sp_ctor));
     JS_SetClassProto(ctx, js_search_params_class_id, sp_proto);
 
-    JSValue sp_ctor = JS_NewCFunction2(ctx, js_search_params_constructor, "URLSearchParams", 0,
-                                        JS_CFUNC_constructor, 0);
     JSValue sp_proto_ref = JS_GetClassProto(ctx, js_search_params_class_id);
     JS_SetPropertyStr(ctx, sp_ctor, "prototype", sp_proto_ref);
 
