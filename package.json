@@ -18,13 +18,18 @@
     "./encoding": {
       "types": "./dist/encoding.d.ts",
       "default": "./dist/encoding.js"
+    },
+    "./base64": {
+      "types": "./dist/base64.d.ts",
+      "default": "./dist/base64.js"
     }
   },
   "files": [
     "dist",
     "quickjs.wasm",
     "extensions/url/url.so",
-    "extensions/encoding/encoding.so"
+    "extensions/encoding/encoding.so",
+    "extensions/base64/base64.so"
   ],
   "publishConfig": {
     "access": "public"
@@ -41,6 +46,7 @@
     "test": "vitest run",
     "bench": "bun run bench/url-benchmark.ts",
     "bench:encoding": "bun run bench/encoding-benchmark.ts",
+    "bench:base64": "bun run bench/base64-benchmark.ts",
     "changeset": "changeset",
     "ci:version": "changeset version",
     "ci:publish": "pnpm run build && changeset publish"

@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   code: 'qjs-playground:code',
   urlExt: 'qjs-playground:urlExt',
   encodingExt: 'qjs-playground:encodingExt',
+  base64Ext: 'qjs-playground:base64Ext',
   vim: 'qjs-playground:vim',
 } as const;
 
@@ -97,6 +98,15 @@ declare class TextDecoder {
 }
 `;
 
+// ─── atob / btoa type definitions ────────────────────────────────────────────
+
+const BASE64_TYPE_DEFS = `
+/** Encodes a binary string (each char code 0-255) to base64. */
+declare function btoa(data: string): string;
+/** Decodes a base64-encoded string to a binary string. */
+declare function atob(data: string): string;
+`;
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const inspectorTheme = {
@@ -174,6 +184,7 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
 
 const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
 const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
+const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
 
 function App() {
   const [status, setStatus] = useState('');
@@ -182,21 +193,25 @@ function App() {
   const [wasmReady, setWasmReady] = useState(false);
   const [urlExtEnabled, setUrlExtEnabled] = useState(() => loadBool(STORAGE_KEYS.urlExt, false));
   const [encodingExtEnabled, setEncodingExtEnabled] = useState(() => loadBool(STORAGE_KEYS.encodingExt, false));
+  const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
+  const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const vimModeRef = useRef<ReturnType<typeof initVimMode> | null>(null);
   const vimStatusRef = useRef<HTMLDivElement | null>(null);
   const urlTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
   // Persist checkbox states
   useEffect(() => { save(STORAGE_KEYS.urlExt, urlExtEnabled); }, [urlExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.encodingExt, encodingExtEnabled); }, [encodingExtEnabled]);
+  useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
   // Auto-scroll output to bottom
@@ -220,6 +235,9 @@ function App() {
         if (encodingExtEnabled && !encodingExtBytesRef.current) {
           fetches.push(fetch('/encoding.so').then((r) => r.arrayBuffer()));
         }
+        if (base64ExtEnabled && !base64ExtBytesRef.current) {
+          fetches.push(fetch('/base64.so').then((r) => r.arrayBuffer()));
+        }
         const [wasmBytes, ...extBytes] = await Promise.all(fetches);
         wasmModuleRef.current = await WebAssembly.compile(wasmBytes);
         let extIdx = 0;
@@ -228,6 +246,9 @@ function App() {
         }
         if (encodingExtEnabled && !encodingExtBytesRef.current && extBytes[extIdx]) {
           encodingExtBytesRef.current = extBytes[extIdx++];
+        }
+        if (base64ExtEnabled && !base64ExtBytesRef.current && extBytes[extIdx]) {
+          base64ExtBytesRef.current = extBytes[extIdx++];
         }
         setWasmReady(true);
         setStatus(`WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`);
@@ -301,6 +322,27 @@ function App() {
     };
   }, [encodingExtEnabled]);
 
+  // Base64 extension types: add/remove type definitions in Monaco
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (base64ExtEnabled) {
+      base64TypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        BASE64_TYPE_DEFS,
+        BASE64_TYPES_URI,
+      );
+    } else {
+      base64TypesDisposableRef.current?.dispose();
+      base64TypesDisposableRef.current = null;
+    }
+
+    return () => {
+      base64TypesDisposableRef.current?.dispose();
+      base64TypesDisposableRef.current = null;
+    };
+  }, [base64ExtEnabled]);
+
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
     setUrlExtEnabled(checked);
@@ -331,6 +373,21 @@ function App() {
     }
   }, []);
 
+  // Lazily fetch the Base64 extension binary on first enable
+  const handleBase64ExtToggle = useCallback(async (checked: boolean) => {
+    setBase64ExtEnabled(checked);
+    if (checked && !base64ExtBytesRef.current) {
+      try {
+        const response = await fetch('/base64.so');
+        base64ExtBytesRef.current = await response.arrayBuffer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setOutput([{ type: 'error', text: `Failed to load Base64 extension: ${message}` }]);
+        setBase64ExtEnabled(false);
+      }
+    }
+  }, []);
+
   // Use a ref so that the Monaco keybinding action always calls the latest
   // version of run() without needing to re-register the action on every render.
   const runRef = useRef<() => void>(() => {});
@@ -352,6 +409,9 @@ function App() {
       }
       if (encodingExtEnabled && encodingExtBytesRef.current) {
         extensions.push({ name: 'encoding', wasm: new Uint8Array(encodingExtBytesRef.current) });
+      }
+      if (base64ExtEnabled && base64ExtBytesRef.current) {
+        extensions.push({ name: 'base64', wasm: new Uint8Array(base64ExtBytesRef.current) });
       }
       const vm = await QuickJS.create({
         wasm: wasmModuleRef.current!,
@@ -416,7 +476,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -454,6 +514,9 @@ function App() {
     }
     if (loadBool(STORAGE_KEYS.encodingExt, false)) {
       encodingTypesDisposableRef.current = jsDefaults.addExtraLib(ENCODING_TYPE_DEFS, ENCODING_TYPES_URI);
+    }
+    if (loadBool(STORAGE_KEYS.base64Ext, false)) {
+      base64TypesDisposableRef.current = jsDefaults.addExtraLib(BASE64_TYPE_DEFS, BASE64_TYPES_URI);
     }
 
     // Disable validation noise for a playground
@@ -601,6 +664,19 @@ function App() {
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleEncodingExtToggle(!encodingExtEnabled)}>
                 <Type className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Encoding</span>
+              </label>
+            </div>
+
+            {/* Base64 Extension Toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={base64ExtEnabled}
+                onCheckedChange={handleBase64ExtToggle}
+                aria-label="Enable Base64 extension"
+              />
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleBase64ExtToggle(!base64ExtEnabled)}>
+                <Binary className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Base64</span>
               </label>
             </div>
 

@@ -21,6 +21,11 @@ if (existsSync(encodingExtSrc)) {
   copyFileSync(encodingExtSrc, resolve(publicDir, 'encoding.so'));
 }
 
+const base64ExtSrc = resolve(repoRoot, 'extensions/base64/base64.so');
+if (existsSync(base64ExtSrc)) {
+  copyFileSync(base64ExtSrc, resolve(publicDir, 'base64.so'));
+}
+
 export default defineConfig({
   plugins: [tailwindcss(), react()],
 });
