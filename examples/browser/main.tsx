@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, AlertTriangle } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary, AlertTriangle, Timer } from 'lucide-react';
 import { Button } from './src/components/ui/button';
 import { Switch } from './src/components/ui/switch';
 import { Badge } from './src/components/ui/badge';
@@ -19,6 +19,7 @@ const STORAGE_KEYS = {
   encodingExt: 'qjs-playground:encodingExt',
   base64Ext: 'qjs-playground:base64Ext',
   domExceptionExt: 'qjs-playground:domExceptionExt',
+  queueMicrotaskExt: 'qjs-playground:queueMicrotaskExt',
   vim: 'qjs-playground:vim',
 } as const;
 
@@ -145,6 +146,13 @@ declare class DOMException extends Error {
 }
 `;
 
+// ─── queueMicrotask type definitions ─────────────────────────────────────────
+
+const QUEUEMICROTASK_TYPE_DEFS = `
+/** Queues a function to be called during the microtask checkpoint. */
+declare function queueMicrotask(callback: () => void): void;
+`;
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const inspectorTheme = {
@@ -224,6 +232,7 @@ const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
 const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
 const DOMEXCEPTION_TYPES_URI = 'ts:dom-exception-extension/dom-exception.d.ts';
+const QUEUEMICROTASK_TYPES_URI = 'ts:queue-microtask-extension/queue-microtask.d.ts';
 
 function App() {
   const [status, setStatus] = useState('');
@@ -234,12 +243,14 @@ function App() {
   const [encodingExtEnabled, setEncodingExtEnabled] = useState(() => loadBool(STORAGE_KEYS.encodingExt, false));
   const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
   const [domExceptionExtEnabled, setDomExceptionExtEnabled] = useState(() => loadBool(STORAGE_KEYS.domExceptionExt, false));
+  const [queueMicrotaskExtEnabled, setQueueMicrotaskExtEnabled] = useState(() => loadBool(STORAGE_KEYS.queueMicrotaskExt, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
   const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
   const domExceptionExtBytesRef = useRef<ArrayBuffer | null>(null);
+  const queueMicrotaskExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const vimModeRef = useRef<ReturnType<typeof initVimMode> | null>(null);
@@ -248,6 +259,7 @@ function App() {
   const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const domExceptionTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const queueMicrotaskTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
   // Persist checkbox states
@@ -255,6 +267,7 @@ function App() {
   useEffect(() => { save(STORAGE_KEYS.encodingExt, encodingExtEnabled); }, [encodingExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.domExceptionExt, domExceptionExtEnabled); }, [domExceptionExtEnabled]);
+  useEffect(() => { save(STORAGE_KEYS.queueMicrotaskExt, queueMicrotaskExtEnabled); }, [queueMicrotaskExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
   // Auto-scroll output to bottom
@@ -284,6 +297,9 @@ function App() {
         if (domExceptionExtEnabled && !domExceptionExtBytesRef.current) {
           fetches.push(fetch('/dom-exception.so').then((r) => r.arrayBuffer()));
         }
+        if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current) {
+          fetches.push(fetch('/queue-microtask.so').then((r) => r.arrayBuffer()));
+        }
         const [wasmBytes, ...extBytes] = await Promise.all(fetches);
         wasmModuleRef.current = await WebAssembly.compile(wasmBytes);
         let extIdx = 0;
@@ -298,6 +314,9 @@ function App() {
         }
         if (domExceptionExtEnabled && !domExceptionExtBytesRef.current && extBytes[extIdx]) {
           domExceptionExtBytesRef.current = extBytes[extIdx++];
+        }
+        if (queueMicrotaskExtEnabled && !queueMicrotaskExtBytesRef.current && extBytes[extIdx]) {
+          queueMicrotaskExtBytesRef.current = extBytes[extIdx++];
         }
         setWasmReady(true);
         setStatus(`WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`);
@@ -413,6 +432,27 @@ function App() {
     };
   }, [domExceptionExtEnabled]);
 
+  // queueMicrotask extension types: add/remove type definitions in Monaco
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (queueMicrotaskExtEnabled) {
+      queueMicrotaskTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        QUEUEMICROTASK_TYPE_DEFS,
+        QUEUEMICROTASK_TYPES_URI,
+      );
+    } else {
+      queueMicrotaskTypesDisposableRef.current?.dispose();
+      queueMicrotaskTypesDisposableRef.current = null;
+    }
+
+    return () => {
+      queueMicrotaskTypesDisposableRef.current?.dispose();
+      queueMicrotaskTypesDisposableRef.current = null;
+    };
+  }, [queueMicrotaskExtEnabled]);
+
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
     setUrlExtEnabled(checked);
@@ -454,6 +494,21 @@ function App() {
         const message = err instanceof Error ? err.message : String(err);
         setOutput([{ type: 'error', text: `Failed to load Base64 extension: ${message}` }]);
         setBase64ExtEnabled(false);
+      }
+    }
+  }, []);
+
+  // Lazily fetch the queueMicrotask extension binary on first enable
+  const handleQueueMicrotaskExtToggle = useCallback(async (checked: boolean) => {
+    setQueueMicrotaskExtEnabled(checked);
+    if (checked && !queueMicrotaskExtBytesRef.current) {
+      try {
+        const response = await fetch('/queue-microtask.so');
+        queueMicrotaskExtBytesRef.current = await response.arrayBuffer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setOutput([{ type: 'error', text: `Failed to load queueMicrotask extension: ${message}` }]);
+        setQueueMicrotaskExtEnabled(false);
       }
     }
   }, []);
@@ -501,6 +556,9 @@ function App() {
       if (base64ExtEnabled && base64ExtBytesRef.current) {
         extensions.push({ name: 'base64', wasm: new Uint8Array(base64ExtBytesRef.current) });
       }
+      if (queueMicrotaskExtEnabled && queueMicrotaskExtBytesRef.current) {
+        extensions.push({ name: 'queue-microtask', wasm: new Uint8Array(queueMicrotaskExtBytesRef.current), initFn: 'qjs_ext_queue_microtask_init' });
+      }
       const vm = await QuickJS.create({
         wasm: wasmModuleRef.current!,
         memoryLimit: 8 * 1024 * 1024,
@@ -532,6 +590,8 @@ function App() {
       // Evaluate
       try {
         const result = vm.evalCode(code);
+        // Execute any pending microtasks (queueMicrotask, promise reactions)
+        vm.executePendingJobs();
         const value = vm.dump(result);
         if (value !== undefined) {
           entries.push({ type: 'result', value });
@@ -564,7 +624,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, domExceptionExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, domExceptionExtEnabled, queueMicrotaskExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -608,6 +668,9 @@ function App() {
     }
     if (loadBool(STORAGE_KEYS.domExceptionExt, false)) {
       domExceptionTypesDisposableRef.current = jsDefaults.addExtraLib(DOMEXCEPTION_TYPE_DEFS, DOMEXCEPTION_TYPES_URI);
+    }
+    if (loadBool(STORAGE_KEYS.queueMicrotaskExt, false)) {
+      queueMicrotaskTypesDisposableRef.current = jsDefaults.addExtraLib(QUEUEMICROTASK_TYPE_DEFS, QUEUEMICROTASK_TYPES_URI);
     }
 
     // Disable validation noise for a playground
@@ -781,6 +844,19 @@ function App() {
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleDomExceptionExtToggle(!domExceptionExtEnabled)}>
                 <AlertTriangle className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">DOMException</span>
+              </label>
+            </div>
+
+            {/* queueMicrotask Extension Toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={queueMicrotaskExtEnabled}
+                onCheckedChange={handleQueueMicrotaskExtToggle}
+                aria-label="Enable queueMicrotask extension"
+              />
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleQueueMicrotaskExtToggle(!queueMicrotaskExtEnabled)}>
+                <Timer className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Microtask</span>
               </label>
             </div>
 

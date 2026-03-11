@@ -26,6 +26,10 @@
     "./dom-exception": {
       "types": "./dist/dom-exception.d.ts",
       "default": "./dist/dom-exception.js"
+    },
+    "./queue-microtask": {
+      "types": "./dist/queue-microtask.d.ts",
+      "default": "./dist/queue-microtask.js"
     }
   },
   "files": [
@@ -34,7 +38,8 @@
     "extensions/url/url.so",
     "extensions/encoding/encoding.so",
     "extensions/base64/base64.so",
-    "extensions/dom-exception/dom-exception.so"
+    "extensions/dom-exception/dom-exception.so",
+    "extensions/queue-microtask/queue-microtask.so"
   ],
   "publishConfig": {
     "access": "public"

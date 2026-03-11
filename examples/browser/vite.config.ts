@@ -31,6 +31,11 @@ if (existsSync(domExceptionExtSrc)) {
   copyFileSync(domExceptionExtSrc, resolve(publicDir, 'dom-exception.so'));
 }
 
+const queueMicrotaskExtSrc = resolve(repoRoot, 'extensions/queue-microtask/queue-microtask.so');
+if (existsSync(queueMicrotaskExtSrc)) {
+  copyFileSync(queueMicrotaskExtSrc, resolve(publicDir, 'queue-microtask.so'));
+}
+
 export default defineConfig({
   plugins: [tailwindcss(), react()],
 });

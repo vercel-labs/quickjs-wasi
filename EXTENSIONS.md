@@ -412,6 +412,22 @@ const vm = await QuickJS.create({
 - Prototype inherits from `Error.prototype` (`instanceof Error` is true)
 - When loaded alongside the base64 extension, `btoa`/`atob` throw proper `DOMException` with `InvalidCharacterError` name
 
+### `quickjs-wasi/queue-microtask`
+
+WHATWG HTML Standard compliant `queueMicrotask()` global function. Uses QuickJS's `JS_EnqueueJob` internally to schedule callbacks on the microtask queue.
+
+```typescript
+import { queueMicrotaskExtension } from 'quickjs-wasi/queue-microtask';
+
+const vm = await QuickJS.create({
+  extensions: [queueMicrotaskExtension],
+});
+```
+
+**`queueMicrotask(callback)`**: Queues a function to be executed as a microtask. Throws `TypeError` if the argument is not callable. Microtasks execute when the host calls `vm.executePendingJobs()`.
+
+**Note**: After `vm.evalCode()`, queued microtasks are NOT automatically executed. The host must call `vm.executePendingJobs()` to drain the microtask queue (this is the same as promise reactions).
+
 ## Known Limitations
 
 ### Unstable ABI
