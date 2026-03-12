@@ -165,7 +165,7 @@ function ExtensionToggle({ checked, onToggle, icon: Icon, label, tooltip }: {
 
 /** Helper: renders an MDN link with <code> styling. */
 function MdnLink({ path, children }: { path: string; children: React.ReactNode }) {
-  return <a href={`https://developer.mozilla.org/en-US/docs/Web/API/${path}`} target="_blank" rel="noopener noreferrer"><code>{children}</code></a>;
+  return <a href={`https://developer.mozilla.org/en-US/docs/Web/API/${path}`} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:decoration-solid"><code>{children}</code></a>;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
