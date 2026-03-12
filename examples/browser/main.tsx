@@ -506,9 +506,7 @@ function App() {
         // Execute any pending microtasks (queueMicrotask, promise reactions)
         vm.executePendingJobs();
         const value = vm.dump(result);
-        if (value !== undefined) {
-          entries.push({ type: 'result', value });
-        }
+        entries.push({ type: 'result', value });
         result.dispose();
       } catch (evalErr) {
         if (evalErr instanceof JSException) {
