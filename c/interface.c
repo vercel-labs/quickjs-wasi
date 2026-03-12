@@ -395,6 +395,24 @@ int qjs_set_prop_string(JSValue *obj, const char *name, JSValue *val) {
     return JS_SetPropertyStr(ctx, *obj, name, JS_DupValue(ctx, *val));
 }
 
+__attribute__((export_name("qjs_define_prop_string")))
+int qjs_define_prop_string(JSValue *obj, const char *name, JSValue *val, int flags) {
+    /* JS_DefinePropertyValueStr takes ownership of val, so we dup it first
+       since the caller still owns their handle */
+    return JS_DefinePropertyValueStr(ctx, *obj, name, JS_DupValue(ctx, *val), flags);
+}
+
+__attribute__((export_name("qjs_define_prop_value")))
+int qjs_define_prop_value(JSValue *obj, JSValue *key, JSValue *val, int flags) {
+    JSAtom atom = JS_ValueToAtom(ctx, *key);
+    if (atom == JS_ATOM_NULL) return -1;
+    /* JS_DefinePropertyValue takes ownership of val, so we dup it first
+       since the caller still owns their handle */
+    int ret = JS_DefinePropertyValue(ctx, *obj, atom, JS_DupValue(ctx, *val), flags);
+    JS_FreeAtom(ctx, atom);
+    return ret;
+}
+
 /*
  * Get/set a property using a JSValue as the key (works for symbol keys).
  * The key is converted to an atom via JS_ValueToAtom.

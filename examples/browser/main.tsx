@@ -494,7 +494,8 @@ function App() {
         const consoleObj = vm.newObject();
         consoleObj.setProp('log', log);
         consoleObj.setProp('error', error);
-        vm.setProp(vm.global, 'console', consoleObj);
+        // Match browser: console is writable + configurable, but NOT enumerable
+        vm.defineProp(vm.global, 'console', consoleObj, { writable: true, configurable: true });
         log.dispose();
         error.dispose();
         consoleObj.dispose();

@@ -20,6 +20,13 @@ import {
 
 export type HostFunction = (this: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
 
+/** Property descriptor flags for `defineProp()`. */
+export interface JSPropertyDescriptor {
+  writable?: boolean;
+  enumerable?: boolean;
+  configurable?: boolean;
+}
+
 export type { WasiOptions };
 export type { ExtensionDescriptor, LoadedExtension, DylinkInfo } from './extensions.js';
 
@@ -126,6 +133,8 @@ interface QuickJSExports {
   qjs_get_global(): number;
   qjs_get_prop_string(objPtr: number, namePtr: number): number;
   qjs_set_prop_string(objPtr: number, namePtr: number, valPtr: number): number;
+  qjs_define_prop_string(objPtr: number, namePtr: number, valPtr: number, flags: number): number;
+  qjs_define_prop_value(objPtr: number, keyPtr: number, valPtr: number, flags: number): number;
   qjs_get_prop_uint32(objPtr: number, idx: number): number;
   qjs_set_prop_uint32(objPtr: number, idx: number, valPtr: number): number;
   qjs_get_own_property_names(objPtr: number): number;
@@ -1033,6 +1042,29 @@ export class QuickJS {
   }
 
   /**
+   * Define a property on an object with explicit property descriptor flags.
+   * Unlike `setProp`, this allows controlling `writable`, `enumerable`, and
+   * `configurable` attributes, matching `Object.defineProperty()` semantics.
+   * Accepts string or JSValueHandle as key (JSValueHandle keys support symbols).
+   *
+   * All flags default to `false` when not specified.
+   */
+  defineProp(obj: JSValueHandle, key: string | JSValueHandle, value: JSValueHandle, descriptor?: JSPropertyDescriptor): void {
+    this.assertNotDisposed();
+    let flags = 0;
+    if (descriptor?.configurable) flags |= 1; // JS_PROP_CONFIGURABLE
+    if (descriptor?.writable) flags |= 2;     // JS_PROP_WRITABLE
+    if (descriptor?.enumerable) flags |= 4;   // JS_PROP_ENUMERABLE
+    if (typeof key === 'string') {
+      const { ptr: namePtr } = this.writeString(key);
+      this.exports.qjs_define_prop_string(obj.ptr, namePtr, value.ptr, flags);
+      this.exports.wasm_free(namePtr);
+    } else {
+      this.exports.qjs_define_prop_value(obj.ptr, key.ptr, value.ptr, flags);
+    }
+  }
+
+  /**
    * Get a property from an object using a JSValueHandle key.
    * Supports symbol keys (including `Symbol.for()`).
    */
@@ -1576,6 +1608,28 @@ export class JSValueHandle {
     const { ptr: namePtr } = this.vm._writeString(name);
     this.vm._getExports().qjs_set_prop_string(this.ptr, namePtr, value.ptr);
     this.vm._getExports().wasm_free(namePtr);
+  }
+
+  /**
+   * Define a property with explicit property descriptor flags.
+   * Unlike `setProp`, this allows controlling `writable`, `enumerable`, and
+   * `configurable` attributes, matching `Object.defineProperty()` semantics.
+   * Accepts string or JSValueHandle as key (JSValueHandle keys support symbols).
+   *
+   * All flags default to `false` when not specified.
+   */
+  defineProp(key: string | JSValueHandle, value: JSValueHandle, descriptor?: JSPropertyDescriptor): void {
+    let flags = 0;
+    if (descriptor?.configurable) flags |= 1; // JS_PROP_CONFIGURABLE
+    if (descriptor?.writable) flags |= 2;     // JS_PROP_WRITABLE
+    if (descriptor?.enumerable) flags |= 4;   // JS_PROP_ENUMERABLE
+    if (typeof key === 'string') {
+      const { ptr: namePtr } = this.vm._writeString(key);
+      this.vm._getExports().qjs_define_prop_string(this.ptr, namePtr, value.ptr, flags);
+      this.vm._getExports().wasm_free(namePtr);
+    } else {
+      this.vm._getExports().qjs_define_prop_value(this.ptr, key.ptr, value.ptr, flags);
+    }
   }
 
   /**

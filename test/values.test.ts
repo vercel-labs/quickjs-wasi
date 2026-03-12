@@ -84,6 +84,117 @@ describe('setProp', () => {
   });
 });
 
+describe('defineProp', () => {
+  it('should define a writable, configurable, non-enumerable property by default', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using val = vm.newNumber(42);
+    vm.defineProp(vm.global, 'x', val);
+    const desc = vm.evalCode(`JSON.stringify(Object.getOwnPropertyDescriptor(globalThis, 'x'))`).consume(h => JSON.parse(h.toString()));
+    expect(desc.value).toBe(42);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
+  });
+
+  it('should define a writable + configurable property (non-enumerable)', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using val = vm.newString('hello');
+    vm.defineProp(vm.global, 'msg', val, { writable: true, configurable: true });
+    const desc = vm.evalCode(`JSON.stringify(Object.getOwnPropertyDescriptor(globalThis, 'msg'))`).consume(h => JSON.parse(h.toString()));
+    expect(desc.value).toBe('hello');
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
+  it('should define a fully enumerable property', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using val = vm.newNumber(99);
+    vm.defineProp(vm.global, 'visible', val, { writable: true, enumerable: true, configurable: true });
+    const desc = vm.evalCode(`JSON.stringify(Object.getOwnPropertyDescriptor(globalThis, 'visible'))`).consume(h => JSON.parse(h.toString()));
+    expect(desc.value).toBe(99);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(true);
+    expect(desc.configurable).toBe(true);
+  });
+
+  it('should define a read-only non-configurable property', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using val = vm.newString('frozen');
+    vm.defineProp(vm.global, 'locked', val);
+    // Should not be writable
+    const result = vm.evalCode(`
+      try { globalThis.locked = 'changed'; } catch(e) {}
+      globalThis.locked
+    `).consume(h => h.toString());
+    expect(result).toBe('frozen');
+  });
+
+  it('should accept a JSValueHandle key (symbol)', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using sym = vm.evalCode(`Symbol.for('myKey')`);
+    using val = vm.newNumber(123);
+    vm.defineProp(vm.global, sym, val, { writable: true, configurable: true });
+    const result = vm.evalCode(`globalThis[Symbol.for('myKey')]`).consume(h => h.toNumber());
+    expect(result).toBe(123);
+  });
+
+  it('should accept a JSValueHandle string key', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using key = vm.newString('dynKey');
+    using val = vm.newNumber(456);
+    vm.defineProp(vm.global, key, val, { writable: true, enumerable: true, configurable: true });
+    const desc = vm.evalCode(`JSON.stringify(Object.getOwnPropertyDescriptor(globalThis, 'dynKey'))`).consume(h => JSON.parse(h.toString()));
+    expect(desc.value).toBe(456);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(true);
+    expect(desc.configurable).toBe(true);
+  });
+
+  it('should work via JSValueHandle.defineProp with string key', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using obj = vm.newObject();
+    using val = vm.newNumber(7);
+    obj.defineProp('count', val, { writable: true, configurable: true });
+    vm.setProp(vm.global, 'obj', obj);
+    const desc = vm.evalCode(`JSON.stringify(Object.getOwnPropertyDescriptor(obj, 'count'))`).consume(h => JSON.parse(h.toString()));
+    expect(desc.value).toBe(7);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
+  it('should work via JSValueHandle.defineProp with symbol key', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using obj = vm.newObject();
+    using sym = vm.evalCode(`Symbol.for('test')`);
+    using val = vm.newString('symVal');
+    obj.defineProp(sym, val, { writable: true, enumerable: true, configurable: true });
+    vm.setProp(vm.global, 'obj', obj);
+    const result = vm.evalCode(`obj[Symbol.for('test')]`).consume(h => h.toString());
+    expect(result).toBe('symVal');
+  });
+
+  it('should not appear in for...in when non-enumerable', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using obj = vm.newObject();
+    using v1 = vm.newNumber(1);
+    using v2 = vm.newNumber(2);
+    obj.setProp('visible', v1);
+    obj.defineProp('hidden', v2, { writable: true, configurable: true });
+    vm.setProp(vm.global, 'obj', obj);
+    const keys = vm.evalCode(`
+      const keys = [];
+      for (const k in obj) keys.push(k);
+      JSON.stringify(keys);
+    `).consume(h => JSON.parse(h.toString()));
+    expect(keys).toEqual(['visible']);
+    // But the property should still exist
+    const val = vm.evalCode('obj.hidden').consume(h => h.toNumber());
+    expect(val).toBe(2);
+  });
+});
+
 describe('dump', () => {
   it('should dump primitives', async () => {
     using vm = await QuickJS.create(wasmBytes);
