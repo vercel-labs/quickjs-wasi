@@ -1,5 +1,17 @@
 # quickjs-wasi
 
+## 1.2.0
+
+### Minor Changes
+
+- [`79d04f1`](https://github.com/vercel-labs/quickjs-wasi/commit/79d04f1c7cede01d3e5326898b4c210d8de40469) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `defineProp()` method on both `QuickJS` and `JSValueHandle` for defining properties with explicit descriptor flags (`writable`, `enumerable`, `configurable`), similar to `Object.defineProperty()`. Accepts string or `JSValueHandle` keys, supporting symbols.
+
+- [`13f0b33`](https://github.com/vercel-labs/quickjs-wasi/commit/13f0b3310e2c4520c4fc1b11f90113e42b469807) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add native WASM `Headers` extension implementing the WHATWG Fetch Standard Headers API. Supports constructor (record, sequence, or Headers init), `append`, `delete`, `get`, `getSetCookie`, `has`, `set`, `entries`, `keys`, `values`, `forEach`, and `Symbol.iterator` with spec-compliant case-insensitive name matching, value normalization, sorted iteration, and Set-Cookie handling.
+
+### Patch Changes
+
+- [`c2c8009`](https://github.com/vercel-labs/quickjs-wasi/commit/c2c80098dfaeb45250024e62f38141320e3a08d9) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Fix native extension global property descriptors to match web browser behavior. `TextEncoder`, `TextDecoder`, `URL`, and `URLSearchParams` are now defined as writable and configurable but not enumerable on `globalThis`, matching how browsers define them. `btoa`, `atob`, and `structuredClone` were already correct.
+
 ## 1.1.0
 
 ### Minor Changes
