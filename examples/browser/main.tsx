@@ -835,16 +835,16 @@ function App() {
 
           {/* Extension toggles */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <ExtensionToggle checked={urlExtEnabled} onToggle={handleUrlExtToggle} icon={Globe} label="URL"
-              tooltip={<>Adds <MdnLink path="URL">URL</MdnLink> and <MdnLink path="URLSearchParams">URLSearchParams</MdnLink></>} />
-            <ExtensionToggle checked={encodingExtEnabled} onToggle={handleEncodingExtToggle} icon={Type} label="Encoding"
-              tooltip={<>Adds <MdnLink path="TextEncoder">TextEncoder</MdnLink> and <MdnLink path="TextDecoder">TextDecoder</MdnLink></>} />
             <ExtensionToggle checked={base64ExtEnabled} onToggle={handleBase64ExtToggle} icon={Binary} label="Base64"
               tooltip={<>Adds <MdnLink path="Window/atob">atob()</MdnLink> and <MdnLink path="Window/btoa">btoa()</MdnLink></>} />
-            <ExtensionToggle checked={headersExtEnabled} onToggle={handleHeadersExtToggle} icon={FileText} label="Headers"
-              tooltip={<>Adds the <MdnLink path="Headers">Headers</MdnLink> class</>} />
             <ExtensionToggle checked={structuredCloneExtEnabled} onToggle={handleStructuredCloneExtToggle} icon={Copy} label="Clone"
               tooltip={<>Adds <MdnLink path="Window/structuredClone">structuredClone()</MdnLink></>} />
+            <ExtensionToggle checked={encodingExtEnabled} onToggle={handleEncodingExtToggle} icon={Type} label="Encoding"
+              tooltip={<>Adds <MdnLink path="TextEncoder">TextEncoder</MdnLink> and <MdnLink path="TextDecoder">TextDecoder</MdnLink></>} />
+            <ExtensionToggle checked={headersExtEnabled} onToggle={handleHeadersExtToggle} icon={FileText} label="Headers"
+              tooltip={<>Adds the <MdnLink path="Headers">Headers</MdnLink> class</>} />
+            <ExtensionToggle checked={urlExtEnabled} onToggle={handleUrlExtToggle} icon={Globe} label="URL"
+              tooltip={<>Adds <MdnLink path="URL">URL</MdnLink> and <MdnLink path="URLSearchParams">URLSearchParams</MdnLink></>} />
           </div>
 
           {/* Spacer + status */}
