@@ -35,6 +35,13 @@ async function evalStr(code: string) {
 }
 
 describe('TextEncoder', () => {
+  it('should define TextEncoder on globalThis as writable, configurable, non-enumerable', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(globalThis, 'TextEncoder')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
   it('should be available as a global constructor', async () => {
     expect(await evalStr('typeof TextEncoder')).toBe('function');
   });
@@ -192,6 +199,13 @@ describe('TextEncoder.encodeInto', () => {
 });
 
 describe('TextDecoder', () => {
+  it('should define TextDecoder on globalThis as writable, configurable, non-enumerable', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(globalThis, 'TextDecoder')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
   it('should be available as a global constructor', async () => {
     expect(await evalStr('typeof TextDecoder')).toBe('function');
   });

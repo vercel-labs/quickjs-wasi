@@ -349,6 +349,40 @@ describe('native WASM extensions', () => {
     result.dispose();
   });
 
+  it('should define URL on globalThis as writable, configurable, non-enumerable', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      JSON.stringify(Object.getOwnPropertyDescriptor(globalThis, 'URL'))
+    `);
+    const desc = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
+  it('should define URLSearchParams on globalThis as writable, configurable, non-enumerable', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+
+    const result = vm.evalCode(`
+      JSON.stringify(Object.getOwnPropertyDescriptor(globalThis, 'URLSearchParams'))
+    `);
+    const desc = JSON.parse(result.toString());
+    result.dispose();
+
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
   it('should normalize hostnames to lowercase', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,

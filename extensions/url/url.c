@@ -722,7 +722,8 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
         JS_NewCFunction(ctx, js_url_canParse, "canParse", 1));
 
     JSValue global = JS_GetGlobalObject(ctx);
-    JS_SetPropertyStr(ctx, global, "URL", url_ctor);
+    JS_DefinePropertyValueStr(ctx, global, "URL", url_ctor,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
     /* Register URLSearchParams class */
     JS_NewClassID(rt, &js_search_params_class_id);
@@ -740,7 +741,8 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
     JSValue sp_proto_ref = JS_GetClassProto(ctx, js_search_params_class_id);
     JS_SetPropertyStr(ctx, sp_ctor, "prototype", sp_proto_ref);
 
-    JS_SetPropertyStr(ctx, global, "URLSearchParams", sp_ctor);
+    JS_DefinePropertyValueStr(ctx, global, "URLSearchParams", sp_ctor,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
     JS_FreeValue(ctx, global);
 
