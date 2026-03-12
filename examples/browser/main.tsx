@@ -820,7 +820,7 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds <code>URL</code> and <code>URLSearchParams</code></TooltipContent>
+              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/URL" target="_blank" rel="noopener noreferrer"><code>URL</code></a> and <a href="https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams" target="_blank" rel="noopener noreferrer"><code>URLSearchParams</code></a></TooltipContent>
             </Tooltip>
 
             {/* Encoding Extension Toggle */}
@@ -838,7 +838,7 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds <code>TextEncoder</code> and <code>TextDecoder</code></TooltipContent>
+              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/TextEncoder" target="_blank" rel="noopener noreferrer"><code>TextEncoder</code></a> and <a href="https://developer.mozilla.org/en-US/docs/Web/API/TextDecoder" target="_blank" rel="noopener noreferrer"><code>TextDecoder</code></a></TooltipContent>
             </Tooltip>
 
             {/* Base64 Extension Toggle */}
@@ -856,7 +856,7 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds <code>atob()</code> and <code>btoa()</code></TooltipContent>
+              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/atob" target="_blank" rel="noopener noreferrer"><code>atob()</code></a> and <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/btoa" target="_blank" rel="noopener noreferrer"><code>btoa()</code></a></TooltipContent>
             </Tooltip>
 
             {/* Headers Extension Toggle */}
@@ -874,7 +874,7 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds the <code>Headers</code> class</TooltipContent>
+              <TooltipContent>Adds the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Headers" target="_blank" rel="noopener noreferrer"><code>Headers</code></a> class</TooltipContent>
             </Tooltip>
 
             {/* structuredClone Extension Toggle */}
@@ -892,7 +892,7 @@ function App() {
                   </label>
                 </div>
               </TooltipTrigger>
-              <TooltipContent>Adds <code>structuredClone()</code></TooltipContent>
+              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/structuredClone" target="_blank" rel="noopener noreferrer"><code>structuredClone()</code></a></TooltipContent>
             </Tooltip>
           </div>
 
