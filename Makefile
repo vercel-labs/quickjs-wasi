@@ -181,13 +181,17 @@ EXT_ENC_SO = $(EXT_ENC_DIR)/encoding.so
 EXT_B64_DIR = extensions/base64
 EXT_B64_SO = $(EXT_B64_DIR)/base64.so
 
+# Extensions: Headers
+EXT_HDR_DIR = extensions/headers
+EXT_HDR_SO = $(EXT_HDR_DIR)/headers.so
+
 # Extensions: structuredClone
 EXT_SC_DIR = extensions/structured-clone
 EXT_SC_SO = $(EXT_SC_DIR)/structured-clone.so
 
 .PHONY: all clean
 
-all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_SC_SO)
+all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_HDR_SO) $(EXT_SC_SO)
 
 $(OUTPUT): $(ALL_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -242,6 +246,15 @@ $(EXT_B64_SO): $(EXT_B64_DIR)/base64.o
 		--shared --no-entry --export-dynamic --allow-undefined \
 		-o $@ $<
 
+# Headers extension: compile and link
+$(EXT_HDR_DIR)/headers.o: $(EXT_HDR_DIR)/headers.c
+	$(CC) $(EXT_CFLAGS) -c -o $@ $<
+
+$(EXT_HDR_SO): $(EXT_HDR_DIR)/headers.o
+	$(WASI_SDK)/bin/wasm-ld \
+		--shared --no-entry --export-dynamic --allow-undefined \
+		-o $@ $<
+
 # structuredClone extension: compile and link
 $(EXT_SC_DIR)/structured-clone.o: $(EXT_SC_DIR)/structured-clone.c
 	$(CC) $(EXT_CFLAGS) -c -o $@ $<
@@ -261,4 +274,5 @@ clean:
 		$(EXT_URL_SO) \
 		$(EXT_ENC_DIR)/encoding.o $(EXT_ENC_SO) \
 		$(EXT_B64_DIR)/base64.o $(EXT_B64_SO) \
+		$(EXT_HDR_DIR)/headers.o $(EXT_HDR_SO) \
 		$(EXT_SC_DIR)/structured-clone.o $(EXT_SC_SO)

@@ -26,6 +26,11 @@ if (existsSync(base64ExtSrc)) {
   copyFileSync(base64ExtSrc, resolve(publicDir, 'base64.so'));
 }
 
+const headersExtSrc = resolve(repoRoot, 'extensions/headers/headers.so');
+if (existsSync(headersExtSrc)) {
+  copyFileSync(headersExtSrc, resolve(publicDir, 'headers.so'));
+}
+
 const structuredCloneExtSrc = resolve(repoRoot, 'extensions/structured-clone/structured-clone.so');
 if (existsSync(structuredCloneExtSrc)) {
   copyFileSync(structuredCloneExtSrc, resolve(publicDir, 'structured-clone.so'));

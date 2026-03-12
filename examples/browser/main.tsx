@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, Copy, Github } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary, FileText, Copy, Github } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +19,7 @@ const STORAGE_KEYS = {
   urlExt: 'qjs-playground:urlExt',
   encodingExt: 'qjs-playground:encodingExt',
   base64Ext: 'qjs-playground:base64Ext',
+  headersExt: 'qjs-playground:headersExt',
   structuredCloneExt: 'qjs-playground:structuredCloneExt',
   vim: 'qjs-playground:vim',
 } as const;
@@ -109,6 +110,27 @@ declare function btoa(data: string): string;
 declare function atob(data: string): string;
 `;
 
+// ─── Headers type definitions ─────────────────────────────────────────────────
+
+const HEADERS_TYPE_DEFS = `
+/** The Headers interface of the Fetch API allows you to perform various actions on HTTP request and response headers. */
+declare class Headers {
+  constructor(init?: HeadersInit);
+  append(name: string, value: string): void;
+  delete(name: string): void;
+  get(name: string): string | null;
+  getSetCookie(): string[];
+  has(name: string): boolean;
+  set(name: string, value: string): void;
+  entries(): IterableIterator<[string, string]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<string>;
+  forEach(callbackfn: (value: string, key: string, parent: Headers) => void, thisArg?: any): void;
+  [Symbol.iterator](): IterableIterator<[string, string]>;
+}
+type HeadersInit = Headers | Record<string, string> | [string, string][];
+`;
+
 // ─── structuredClone type definitions ─────────────────────────────────────────
 
 const STRUCTUREDCLONE_TYPE_DEFS = `
@@ -194,6 +216,7 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
 const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
 const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
+const HEADERS_TYPES_URI = 'ts:headers-extension/headers.d.ts';
 const STRUCTUREDCLONE_TYPES_URI = 'ts:structured-clone-extension/structured-clone.d.ts';
 
 function App() {
@@ -204,12 +227,14 @@ function App() {
   const [urlExtEnabled, setUrlExtEnabled] = useState(() => loadBool(STORAGE_KEYS.urlExt, false));
   const [encodingExtEnabled, setEncodingExtEnabled] = useState(() => loadBool(STORAGE_KEYS.encodingExt, false));
   const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
+  const [headersExtEnabled, setHeadersExtEnabled] = useState(() => loadBool(STORAGE_KEYS.headersExt, false));
   const [structuredCloneExtEnabled, setStructuredCloneExtEnabled] = useState(() => loadBool(STORAGE_KEYS.structuredCloneExt, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
   const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
+  const headersExtBytesRef = useRef<ArrayBuffer | null>(null);
   const structuredCloneExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
@@ -218,6 +243,7 @@ function App() {
   const urlTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const headersTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
@@ -225,6 +251,7 @@ function App() {
   useEffect(() => { save(STORAGE_KEYS.urlExt, urlExtEnabled); }, [urlExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.encodingExt, encodingExtEnabled); }, [encodingExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
+  useEffect(() => { save(STORAGE_KEYS.headersExt, headersExtEnabled); }, [headersExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.structuredCloneExt, structuredCloneExtEnabled); }, [structuredCloneExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
@@ -252,6 +279,9 @@ function App() {
         if (base64ExtEnabled && !base64ExtBytesRef.current) {
           fetches.push(fetch('/base64.so').then((r) => r.arrayBuffer()));
         }
+        if (headersExtEnabled && !headersExtBytesRef.current) {
+          fetches.push(fetch('/headers.so').then((r) => r.arrayBuffer()));
+        }
         if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current) {
           fetches.push(fetch('/structured-clone.so').then((r) => r.arrayBuffer()));
         }
@@ -266,6 +296,9 @@ function App() {
         }
         if (base64ExtEnabled && !base64ExtBytesRef.current && extBytes[extIdx]) {
           base64ExtBytesRef.current = extBytes[extIdx++];
+        }
+        if (headersExtEnabled && !headersExtBytesRef.current && extBytes[extIdx]) {
+          headersExtBytesRef.current = extBytes[extIdx++];
         }
         if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current && extBytes[extIdx]) {
           structuredCloneExtBytesRef.current = extBytes[extIdx++];
@@ -363,6 +396,27 @@ function App() {
     };
   }, [base64ExtEnabled]);
 
+  // Headers extension types: add/remove type definitions in Monaco
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (headersExtEnabled) {
+      headersTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        HEADERS_TYPE_DEFS,
+        HEADERS_TYPES_URI,
+      );
+    } else {
+      headersTypesDisposableRef.current?.dispose();
+      headersTypesDisposableRef.current = null;
+    }
+
+    return () => {
+      headersTypesDisposableRef.current?.dispose();
+      headersTypesDisposableRef.current = null;
+    };
+  }, [headersExtEnabled]);
+
   // structuredClone extension types: add/remove type definitions in Monaco
   useEffect(() => {
     const monaco = monacoRef.current;
@@ -429,6 +483,21 @@ function App() {
     }
   }, []);
 
+  // Lazily fetch the Headers extension binary on first enable
+  const handleHeadersExtToggle = useCallback(async (checked: boolean) => {
+    setHeadersExtEnabled(checked);
+    if (checked && !headersExtBytesRef.current) {
+      try {
+        const response = await fetch('/headers.so');
+        headersExtBytesRef.current = await response.arrayBuffer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setOutput([{ type: 'error', text: `Failed to load Headers extension: ${message}` }]);
+        setHeadersExtEnabled(false);
+      }
+    }
+  }, []);
+
   // Lazily fetch the structuredClone extension binary on first enable
   const handleStructuredCloneExtToggle = useCallback(async (checked: boolean) => {
     setStructuredCloneExtEnabled(checked);
@@ -468,6 +537,9 @@ function App() {
       }
       if (base64ExtEnabled && base64ExtBytesRef.current) {
         extensions.push({ name: 'base64', wasm: new Uint8Array(base64ExtBytesRef.current) });
+      }
+      if (headersExtEnabled && headersExtBytesRef.current) {
+        extensions.push({ name: 'headers', wasm: new Uint8Array(headersExtBytesRef.current) });
       }
       if (structuredCloneExtEnabled && structuredCloneExtBytesRef.current) {
         extensions.push({ name: 'structured-clone', wasm: new Uint8Array(structuredCloneExtBytesRef.current), initFn: 'qjs_ext_structured_clone_init' });
@@ -536,7 +608,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, structuredCloneExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, headersExtEnabled, structuredCloneExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -577,6 +649,9 @@ function App() {
     }
     if (loadBool(STORAGE_KEYS.base64Ext, false)) {
       base64TypesDisposableRef.current = jsDefaults.addExtraLib(BASE64_TYPE_DEFS, BASE64_TYPES_URI);
+    }
+    if (loadBool(STORAGE_KEYS.headersExt, false)) {
+      headersTypesDisposableRef.current = jsDefaults.addExtraLib(HEADERS_TYPE_DEFS, HEADERS_TYPES_URI);
     }
     if (loadBool(STORAGE_KEYS.structuredCloneExt, false)) {
       structuredCloneTypesDisposableRef.current = jsDefaults.addExtraLib(STRUCTUREDCLONE_TYPE_DEFS, STRUCTUREDCLONE_TYPES_URI);
@@ -782,6 +857,24 @@ function App() {
                 </div>
               </TooltipTrigger>
               <TooltipContent>Adds <code>atob()</code> and <code>btoa()</code></TooltipContent>
+            </Tooltip>
+
+            {/* Headers Extension Toggle */}
+            <Tooltip>
+              <TooltipTrigger>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={headersExtEnabled}
+                    onCheckedChange={handleHeadersExtToggle}
+                    aria-label="Enable Headers extension"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleHeadersExtToggle(!headersExtEnabled)}>
+                    <FileText className="w-3.5 h-3.5" />
+                    Headers
+                  </label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>Adds the <code>Headers</code> class</TooltipContent>
             </Tooltip>
 
             {/* structuredClone Extension Toggle */}

@@ -26,15 +26,16 @@
     "./structured-clone": {
       "types": "./dist/structured-clone.d.ts",
       "default": "./dist/structured-clone.js"
+    },
+    "./headers": {
+      "types": "./dist/headers.d.ts",
+      "default": "./dist/headers.js"
     }
   },
   "files": [
     "dist",
     "quickjs.wasm",
-    "extensions/url/url.so",
-    "extensions/encoding/encoding.so",
-    "extensions/base64/base64.so",
-    "extensions/structured-clone/structured-clone.so"
+    "extensions/*/*.so"
   ],
   "publishConfig": {
     "access": "public"
@@ -52,6 +53,7 @@
     "bench": "bun run bench/url-benchmark.ts",
     "bench:encoding": "bun run bench/encoding-benchmark.ts",
     "bench:base64": "bun run bench/base64-benchmark.ts",
+    "bench:headers": "bun run bench/headers-benchmark.ts",
     "changeset": "changeset",
     "ci:version": "changeset version",
     "ci:publish": "pnpm run build && changeset publish"
@@ -72,6 +74,7 @@
     "esbuild": "^0.27.3",
     "fast-text-encoding": "^1.0.6",
     "typescript": "^5.7.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "whatwg-fetch": "^3.6.20"
   }
 }
