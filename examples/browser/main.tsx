@@ -138,6 +138,36 @@ const STRUCTUREDCLONE_TYPE_DEFS = `
 declare function structuredClone<T>(value: T): T;
 `;
 
+// ─── Extension Toggle component ──────────────────────────────────────────────
+
+function ExtensionToggle({ checked, onToggle, icon: Icon, label, tooltip }: {
+  checked: boolean;
+  onToggle: (checked: boolean) => void;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  tooltip: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger>
+        <div className="flex items-center gap-2">
+          <Switch checked={checked} onCheckedChange={onToggle} aria-label={`Enable ${label} extension`} />
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => onToggle(!checked)}>
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+          </label>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Helper: renders an MDN link with <code> styling. */
+function MdnLink({ path, children }: { path: string; children: React.ReactNode }) {
+  return <a href={`https://developer.mozilla.org/en-US/docs/Web/API/${path}`} target="_blank" rel="noopener noreferrer"><code>{children}</code></a>;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const inspectorTheme = {
@@ -805,95 +835,16 @@ function App() {
 
           {/* Extension toggles */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {/* URL Extension Toggle */}
-            <Tooltip>
-              <TooltipTrigger>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={urlExtEnabled}
-                    onCheckedChange={handleUrlExtToggle}
-                    aria-label="Enable URL extension"
-                  />
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleUrlExtToggle(!urlExtEnabled)}>
-                    <Globe className="w-3.5 h-3.5" />
-                    URL
-                  </label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/URL" target="_blank" rel="noopener noreferrer"><code>URL</code></a> and <a href="https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams" target="_blank" rel="noopener noreferrer"><code>URLSearchParams</code></a></TooltipContent>
-            </Tooltip>
-
-            {/* Encoding Extension Toggle */}
-            <Tooltip>
-              <TooltipTrigger>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={encodingExtEnabled}
-                    onCheckedChange={handleEncodingExtToggle}
-                    aria-label="Enable Encoding extension"
-                  />
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleEncodingExtToggle(!encodingExtEnabled)}>
-                    <Type className="w-3.5 h-3.5" />
-                    Encoding
-                  </label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/TextEncoder" target="_blank" rel="noopener noreferrer"><code>TextEncoder</code></a> and <a href="https://developer.mozilla.org/en-US/docs/Web/API/TextDecoder" target="_blank" rel="noopener noreferrer"><code>TextDecoder</code></a></TooltipContent>
-            </Tooltip>
-
-            {/* Base64 Extension Toggle */}
-            <Tooltip>
-              <TooltipTrigger>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={base64ExtEnabled}
-                    onCheckedChange={handleBase64ExtToggle}
-                    aria-label="Enable Base64 extension"
-                  />
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleBase64ExtToggle(!base64ExtEnabled)}>
-                    <Binary className="w-3.5 h-3.5" />
-                    Base64
-                  </label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/atob" target="_blank" rel="noopener noreferrer"><code>atob()</code></a> and <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/btoa" target="_blank" rel="noopener noreferrer"><code>btoa()</code></a></TooltipContent>
-            </Tooltip>
-
-            {/* Headers Extension Toggle */}
-            <Tooltip>
-              <TooltipTrigger>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={headersExtEnabled}
-                    onCheckedChange={handleHeadersExtToggle}
-                    aria-label="Enable Headers extension"
-                  />
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleHeadersExtToggle(!headersExtEnabled)}>
-                    <FileText className="w-3.5 h-3.5" />
-                    Headers
-                  </label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Adds the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Headers" target="_blank" rel="noopener noreferrer"><code>Headers</code></a> class</TooltipContent>
-            </Tooltip>
-
-            {/* structuredClone Extension Toggle */}
-            <Tooltip>
-              <TooltipTrigger>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={structuredCloneExtEnabled}
-                    onCheckedChange={handleStructuredCloneExtToggle}
-                    aria-label="Enable structuredClone extension"
-                  />
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => handleStructuredCloneExtToggle(!structuredCloneExtEnabled)}>
-                    <Copy className="w-3.5 h-3.5" />
-                    Clone
-                  </label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Adds <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/structuredClone" target="_blank" rel="noopener noreferrer"><code>structuredClone()</code></a></TooltipContent>
-            </Tooltip>
+            <ExtensionToggle checked={urlExtEnabled} onToggle={handleUrlExtToggle} icon={Globe} label="URL"
+              tooltip={<>Adds <MdnLink path="URL">URL</MdnLink> and <MdnLink path="URLSearchParams">URLSearchParams</MdnLink></>} />
+            <ExtensionToggle checked={encodingExtEnabled} onToggle={handleEncodingExtToggle} icon={Type} label="Encoding"
+              tooltip={<>Adds <MdnLink path="TextEncoder">TextEncoder</MdnLink> and <MdnLink path="TextDecoder">TextDecoder</MdnLink></>} />
+            <ExtensionToggle checked={base64ExtEnabled} onToggle={handleBase64ExtToggle} icon={Binary} label="Base64"
+              tooltip={<>Adds <MdnLink path="Window/atob">atob()</MdnLink> and <MdnLink path="Window/btoa">btoa()</MdnLink></>} />
+            <ExtensionToggle checked={headersExtEnabled} onToggle={handleHeadersExtToggle} icon={FileText} label="Headers"
+              tooltip={<>Adds the <MdnLink path="Headers">Headers</MdnLink> class</>} />
+            <ExtensionToggle checked={structuredCloneExtEnabled} onToggle={handleStructuredCloneExtToggle} icon={Copy} label="Clone"
+              tooltip={<>Adds <MdnLink path="Window/structuredClone">structuredClone()</MdnLink></>} />
           </div>
 
           {/* Spacer + status */}
