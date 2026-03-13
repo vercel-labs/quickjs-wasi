@@ -8,6 +8,7 @@
  *   2. Snapshot size: raw bytes and gzip-compressed
  */
 
+import { Bench } from 'tinybench';
 import { QuickJS } from '../src/index.ts';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -18,6 +19,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmBytes = readFileSync(resolve(__dirname, '..', 'quickjs.wasm'));
 const base64ExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'base64', 'base64.so'));
 const polyfillCode = readFileSync(resolve(__dirname, 'base64-polyfill-bundle.js'), 'utf-8');
+
+// ─── Benchmark Workloads ─────────────────────────────────────────────────────
 
 const workloads: Record<string, { code: string; description: string }> = {
   'btoa short ASCII': {
@@ -77,13 +80,7 @@ const workloads: Record<string, { code: string; description: string }> = {
   },
 };
 
-function padRight(s: string, len: number): string {
-  return s + ' '.repeat(Math.max(0, len - s.length));
-}
-
-function padLeft(s: string, len: number): string {
-  return ' '.repeat(Math.max(0, len - s.length)) + s;
-}
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -91,9 +88,14 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+// ─── Main ────────────────────────────────────────────────────────────────────
+
 async function main() {
   console.log('Base64 Extension Benchmark: Native WASM vs JS Polyfill (core-js-pure)\n');
   console.log('='.repeat(85));
+
+  // ── Part 1: Performance (tinybench) ────────────────────────────────────
+
   console.log('\n## Runtime Performance\n');
 
   const vmNative = await QuickJS.create({
@@ -108,61 +110,30 @@ async function main() {
   vmNative.evalCode("btoa('warmup'); atob('d2FybXVw');").dispose();
   vmPolyfill.evalCode("btoa('warmup'); atob('d2FybXVw');").dispose();
 
-  const results: { name: string; nativeMs: number; polyfillMs: number; ops: number }[] = [];
-
   for (const [name, { code }] of Object.entries(workloads)) {
-    const nativeStart = performance.now();
-    const nativeResult = vmNative.evalCode(code);
-    const nativeMs = performance.now() - nativeStart;
-    const ops = Number(nativeResult.toString());
-    nativeResult.dispose();
+    const bench = new Bench({ name, time: 500, iterations: 1, warmupTime: 200, warmupIterations: 1 });
 
-    const polyfillStart = performance.now();
-    const polyfillResult = vmPolyfill.evalCode(code);
-    const polyfillMs = performance.now() - polyfillStart;
-    polyfillResult.dispose();
+    bench
+      .add('Native WASM', () => {
+        vmNative.evalCode(code).dispose();
+      })
+      .add('JS Polyfill (core-js)', () => {
+        vmPolyfill.evalCode(code).dispose();
+      });
 
-    results.push({ name, nativeMs, polyfillMs, ops });
+    await bench.run();
+
+    console.log(`### ${name}`);
+    console.table(bench.table());
+    console.log('');
   }
-
-  const col1 = 32;
-  const col2 = 14;
-  const col3 = 14;
-  const col4 = 12;
-
-  console.log(
-    padRight('Workload', col1) +
-    padLeft('Native', col2) +
-    padLeft('JS (core-js)', col3) +
-    padLeft('Speedup', col4)
-  );
-  console.log('-'.repeat(col1 + col2 + col3 + col4));
-
-  for (const r of results) {
-    const speedup = r.polyfillMs / r.nativeMs;
-    console.log(
-      padRight(r.name, col1) +
-      padLeft(`${r.nativeMs.toFixed(1)}ms`, col2) +
-      padLeft(`${r.polyfillMs.toFixed(1)}ms`, col3) +
-      padLeft(`${speedup.toFixed(1)}x`, col4)
-    );
-  }
-
-  console.log('');
-  const totalNative = results.reduce((s, r) => s + r.nativeMs, 0);
-  const totalPolyfill = results.reduce((s, r) => s + r.polyfillMs, 0);
-  console.log(
-    padRight('TOTAL', col1) +
-    padLeft(`${totalNative.toFixed(1)}ms`, col2) +
-    padLeft(`${totalPolyfill.toFixed(1)}ms`, col3) +
-    padLeft(`${(totalPolyfill / totalNative).toFixed(1)}x`, col4)
-  );
 
   vmNative.dispose();
   vmPolyfill.dispose();
 
-  // Snapshot size
-  console.log('\n' + '='.repeat(85));
+  // ── Part 2: Snapshot Size ──────────────────────────────────────────────
+
+  console.log('='.repeat(85));
   console.log('\n## Snapshot Size Comparison\n');
 
   const vmBase = await QuickJS.create({ wasm: wasmBytes });
@@ -181,34 +152,31 @@ async function main() {
   const snapP = QuickJS.serializeSnapshot(vmPSnap.snapshot());
   vmPSnap.dispose();
 
-  const sCol1 = 30;
-  const sCol2 = 16;
-  const sCol3 = 16;
-  const sCol4 = 16;
+  const c1 = 30, c2 = 16, c3 = 16, c4 = 16;
 
   console.log(
-    padRight('Snapshot', sCol1) + padLeft('Raw', sCol2) +
-    padLeft('Gzip', sCol3) + padLeft('Delta (raw)', sCol4)
+    'Snapshot'.padEnd(c1) + 'Raw'.padStart(c2) +
+    'Gzip'.padStart(c3) + 'Delta (raw)'.padStart(c4)
   );
-  console.log('-'.repeat(sCol1 + sCol2 + sCol3 + sCol4));
+  console.log('-'.repeat(c1 + c2 + c3 + c4));
 
   console.log(
-    padRight('Baseline', sCol1) +
-    padLeft(formatBytes(snapBase.byteLength), sCol2) +
-    padLeft(formatBytes(gzipSync(snapBase).byteLength), sCol3) +
-    padLeft('—', sCol4)
+    'Baseline'.padEnd(c1) +
+    formatBytes(snapBase.byteLength).padStart(c2) +
+    formatBytes(gzipSync(snapBase).byteLength).padStart(c3) +
+    '—'.padStart(c4)
   );
   console.log(
-    padRight('+ Native extension', sCol1) +
-    padLeft(formatBytes(snapN.byteLength), sCol2) +
-    padLeft(formatBytes(gzipSync(snapN).byteLength), sCol3) +
-    padLeft(`+${formatBytes(snapN.byteLength - snapBase.byteLength)}`, sCol4)
+    '+ Native extension'.padEnd(c1) +
+    formatBytes(snapN.byteLength).padStart(c2) +
+    formatBytes(gzipSync(snapN).byteLength).padStart(c3) +
+    `+${formatBytes(snapN.byteLength - snapBase.byteLength)}`.padStart(c4)
   );
   console.log(
-    padRight('+ JS Polyfill', sCol1) +
-    padLeft(formatBytes(snapP.byteLength), sCol2) +
-    padLeft(formatBytes(gzipSync(snapP).byteLength), sCol3) +
-    padLeft(`+${formatBytes(snapP.byteLength - snapBase.byteLength)}`, sCol4)
+    '+ JS Polyfill'.padEnd(c1) +
+    formatBytes(snapP.byteLength).padStart(c2) +
+    formatBytes(gzipSync(snapP).byteLength).padStart(c3) +
+    `+${formatBytes(snapP.byteLength - snapBase.byteLength)}`.padStart(c4)
   );
 
   console.log('\n' + '='.repeat(85));

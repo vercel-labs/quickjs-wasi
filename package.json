@@ -50,10 +50,12 @@
     "build:ts": "tsc",
     "build": "pnpm run build:wasm && pnpm run build:ts",
     "test": "vitest run",
-    "bench": "bun run bench/url-benchmark.ts",
+    "bench": "pnpm run bench:url && pnpm run bench:encoding && pnpm run bench:base64 && pnpm run bench:headers && pnpm run bench:emscripten",
+    "bench:url": "bun run bench/url-benchmark.ts",
     "bench:encoding": "bun run bench/encoding-benchmark.ts",
     "bench:base64": "bun run bench/base64-benchmark.ts",
     "bench:headers": "bun run bench/headers-benchmark.ts",
+    "bench:emscripten": "bun run bench/emscripten-benchmark.ts",
     "changeset": "changeset",
     "ci:version": "changeset version",
     "ci:publish": "pnpm run build && changeset publish"
@@ -73,6 +75,8 @@
     "degenerator": "^5.0.1",
     "esbuild": "^0.27.3",
     "fast-text-encoding": "^1.0.6",
+    "quickjs-emscripten": "^0.32.0",
+    "tinybench": "^6.0.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18",
     "whatwg-fetch": "^3.6.20"

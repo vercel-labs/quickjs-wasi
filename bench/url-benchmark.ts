@@ -8,6 +8,7 @@
  *   2. Snapshot size: raw bytes and gzip-compressed
  */
 
+import { Bench } from 'tinybench';
 import { QuickJS } from '../src/index.ts';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -115,24 +116,10 @@ const workloads: Record<string, { code: string; description: string }> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatNum(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-  return n.toFixed(0);
-}
-
 function formatBytes(n: number): string {
   if (n >= 1_048_576) return (n / 1_048_576).toFixed(2) + ' MB';
   if (n >= 1_024) return (n / 1_024).toFixed(1) + ' KB';
   return n + ' B';
-}
-
-function padRight(s: string, len: number): string {
-  return s + ' '.repeat(Math.max(0, len - s.length));
-}
-
-function padLeft(s: string, len: number): string {
-  return ' '.repeat(Math.max(0, len - s.length)) + s;
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -141,11 +128,10 @@ async function main() {
   console.log('URL Extension Benchmark: Native WASM (ada-url) vs JS Polyfill (core-js-pure)\n');
   console.log('='.repeat(85));
 
-  // ── Part 1: Performance ──────────────────────────────────────────────────
+  // ── Part 1: Performance (tinybench) ────────────────────────────────────
 
   console.log('\n## Runtime Performance\n');
 
-  // Create VMs
   const vmNative = await QuickJS.create({
     wasm: wasmBytes,
     extensions: [{ name: 'url', wasm: urlExtBytes }],
@@ -158,94 +144,51 @@ async function main() {
   vmNative.evalCode('(function(){ new URL("https://example.com"); new URLSearchParams("a=1"); })()').dispose();
   vmPolyfill.evalCode('(function(){ new URL("https://example.com"); new URLSearchParams("a=1"); })()').dispose();
 
-  const results: { name: string; nativeMs: number; polyfillMs: number; ops: number }[] = [];
-
   for (const [name, { code }] of Object.entries(workloads)) {
-    // Run native
-    const nativeStart = performance.now();
-    const nativeResult = vmNative.evalCode(code);
-    const nativeMs = performance.now() - nativeStart;
-    const ops = Number(nativeResult.toString());
-    nativeResult.dispose();
+    const bench = new Bench({ name, time: 500, iterations: 1, warmupTime: 200, warmupIterations: 1 });
 
-    // Run polyfill
-    const polyfillStart = performance.now();
-    const polyfillResult = vmPolyfill.evalCode(code);
-    const polyfillMs = performance.now() - polyfillStart;
-    polyfillResult.dispose();
+    bench
+      .add('Native WASM (ada-url)', () => {
+        vmNative.evalCode(code).dispose();
+      })
+      .add('JS Polyfill (core-js)', () => {
+        vmPolyfill.evalCode(code).dispose();
+      });
 
-    results.push({ name, nativeMs, polyfillMs, ops });
+    await bench.run();
+
+    console.log(`### ${name}`);
+    console.table(bench.table());
+    console.log('');
   }
-
-  // Print performance table
-  const col1 = 40;
-  const col2 = 14;
-  const col3 = 14;
-  const col4 = 12;
-
-  console.log(
-    padRight('Workload', col1) +
-    padLeft('Native (ada)', col2) +
-    padLeft('JS (core-js)', col3) +
-    padLeft('Speedup', col4)
-  );
-  console.log('-'.repeat(col1 + col2 + col3 + col4));
-
-  for (const r of results) {
-    const speedup = r.polyfillMs / r.nativeMs;
-    const nativeOpsPerSec = (r.ops / r.nativeMs) * 1000;
-    const polyfillOpsPerSec = (r.ops / r.polyfillMs) * 1000;
-
-    console.log(
-      padRight(r.name, col1) +
-      padLeft(`${r.nativeMs.toFixed(1)}ms`, col2) +
-      padLeft(`${r.polyfillMs.toFixed(1)}ms`, col3) +
-      padLeft(`${speedup.toFixed(1)}x`, col4)
-    );
-  }
-
-  console.log('');
-
-  // Summary
-  const totalNative = results.reduce((s, r) => s + r.nativeMs, 0);
-  const totalPolyfill = results.reduce((s, r) => s + r.polyfillMs, 0);
-  console.log(
-    padRight('TOTAL', col1) +
-    padLeft(`${totalNative.toFixed(1)}ms`, col2) +
-    padLeft(`${totalPolyfill.toFixed(1)}ms`, col3) +
-    padLeft(`${(totalPolyfill / totalNative).toFixed(1)}x`, col4)
-  );
 
   vmNative.dispose();
   vmPolyfill.dispose();
 
-  // ── Part 2: Snapshot Size ────────────────────────────────────────────────
+  // ── Part 2: Snapshot Size ──────────────────────────────────────────────
 
-  console.log('\n' + '='.repeat(85));
+  console.log('='.repeat(85));
   console.log('\n## Snapshot Size Comparison\n');
 
   // Baseline: empty VM snapshot
   const vmBase = await QuickJS.create({ wasm: wasmBytes });
-  const snapBase = vmBase.snapshot();
-  const snapBaseBytes = QuickJS.serializeSnapshot(snapBase);
+  const snapBaseBytes = QuickJS.serializeSnapshot(vmBase.snapshot());
   vmBase.dispose();
 
-  // Native extension: VM + URL extension (no JS polyfill code in snapshot)
+  // Native extension: VM + URL extension
   const vmNativeSnap = await QuickJS.create({
     wasm: wasmBytes,
     extensions: [{ name: 'url', wasm: urlExtBytes }],
   });
-  // Create some URL objects to have them in the snapshot
   vmNativeSnap.evalCode(`
     globalThis.url1 = new URL('https://example.com:8080/path?q=1#h');
     globalThis.url2 = new URL('https://user:pass@sub.example.org/a/b/c');
     globalThis.params = new URLSearchParams('a=1&b=2&c=3');
   `).dispose();
-  const snapNative = vmNativeSnap.snapshot();
-  const snapNativeBytes = QuickJS.serializeSnapshot(snapNative);
+  const snapNativeBytes = QuickJS.serializeSnapshot(vmNativeSnap.snapshot());
   vmNativeSnap.dispose();
 
-  // Polyfill: VM + polyfill code evaluated (polyfill code is in the snapshot)
+  // Polyfill: VM + polyfill code evaluated
   const vmPolySnap = await QuickJS.create({ wasm: wasmBytes });
   vmPolySnap.evalCode(polyfillCode).dispose();
   vmPolySnap.evalCode(`
@@ -253,24 +196,20 @@ async function main() {
     globalThis.url2 = new URL('https://user:pass@sub.example.org/a/b/c');
     globalThis.params = new URLSearchParams('a=1&b=2&c=3');
   `).dispose();
-  const snapPoly = vmPolySnap.snapshot();
-  const snapPolyBytes = QuickJS.serializeSnapshot(snapPoly);
+  const snapPolyBytes = QuickJS.serializeSnapshot(vmPolySnap.snapshot());
   vmPolySnap.dispose();
 
-  // Polyfill: Snapshot WITHOUT URL objects (just the polyfill code loaded)
+  // Empty snapshots (no URL objects)
   const vmPolySnapEmpty = await QuickJS.create({ wasm: wasmBytes });
   vmPolySnapEmpty.evalCode(polyfillCode).dispose();
-  const snapPolyEmpty = vmPolySnapEmpty.snapshot();
-  const snapPolyEmptyBytes = QuickJS.serializeSnapshot(snapPolyEmpty);
+  const snapPolyEmptyBytes = QuickJS.serializeSnapshot(vmPolySnapEmpty.snapshot());
   vmPolySnapEmpty.dispose();
 
-  // Native extension: Snapshot WITHOUT URL objects (just the extension loaded)
   const vmNativeSnapEmpty = await QuickJS.create({
     wasm: wasmBytes,
     extensions: [{ name: 'url', wasm: urlExtBytes }],
   });
-  const snapNativeEmpty = vmNativeSnapEmpty.snapshot();
-  const snapNativeEmptyBytes = QuickJS.serializeSnapshot(snapNativeEmpty);
+  const snapNativeEmptyBytes = QuickJS.serializeSnapshot(vmNativeSnapEmpty.snapshot());
   vmNativeSnapEmpty.dispose();
 
   // Compress all snapshots
@@ -281,16 +220,12 @@ async function main() {
   const gzNativeEmpty = gzipSync(snapNativeEmptyBytes);
 
   // Print snapshot table
-  const scol1 = 40;
-  const scol2 = 16;
-  const scol3 = 16;
+  const c1 = 40, c2 = 16, c3 = 16;
 
   console.log(
-    padRight('Snapshot', scol1) +
-    padLeft('Raw', scol2) +
-    padLeft('Gzip', scol3)
+    'Snapshot'.padEnd(c1) + 'Raw'.padStart(c2) + 'Gzip'.padStart(c3)
   );
-  console.log('-'.repeat(scol1 + scol2 + scol3));
+  console.log('-'.repeat(c1 + c2 + c3));
 
   const snapRows = [
     ['Baseline (empty VM)', snapBaseBytes.byteLength, gzBase.byteLength],
@@ -302,9 +237,7 @@ async function main() {
 
   for (const [label, raw, gz] of snapRows) {
     console.log(
-      padRight(label, scol1) +
-      padLeft(formatBytes(raw), scol2) +
-      padLeft(formatBytes(gz), scol3)
+      label.padEnd(c1) + formatBytes(raw).padStart(c2) + formatBytes(gz).padStart(c3)
     );
   }
 
@@ -312,11 +245,9 @@ async function main() {
 
   // Delta comparison
   console.log(
-    padRight('Scenario', scol1) +
-    padLeft('Raw delta', scol2) +
-    padLeft('Gzip delta', scol3)
+    'Scenario'.padEnd(c1) + 'Raw delta'.padStart(c2) + 'Gzip delta'.padStart(c3)
   );
-  console.log('-'.repeat(scol1 + scol2 + scol3));
+  console.log('-'.repeat(c1 + c2 + c3));
 
   const nativeEmptyDelta = snapNativeEmptyBytes.byteLength - snapBaseBytes.byteLength;
   const nativeEmptyGzDelta = gzNativeEmpty.byteLength - gzBase.byteLength;
@@ -339,13 +270,13 @@ async function main() {
     const rawSign = raw >= 0 ? '+' : '';
     const gzSign = gz >= 0 ? '+' : '';
     console.log(
-      padRight(label, scol1) +
-      padLeft(`${rawSign}${formatBytes(raw)}`, scol2) +
-      padLeft(`${gzSign}${formatBytes(gz)}`, scol3)
+      label.padEnd(c1) +
+      `${rawSign}${formatBytes(raw)}`.padStart(c2) +
+      `${gzSign}${formatBytes(gz)}`.padStart(c3)
     );
   }
 
-  // Also note the on-disk extension size
+  // Note on-disk extension size
   console.log('');
   console.log('Note: The native url.so extension binary is ' + formatBytes(urlExtBytes.byteLength) +
     ' (' + formatBytes(gzipSync(urlExtBytes).byteLength) + ' gzipped) loaded separately from the snapshot.');
