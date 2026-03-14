@@ -30,6 +30,10 @@
     "./headers": {
       "types": "./dist/headers.d.ts",
       "default": "./dist/headers.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto.d.ts",
+      "default": "./dist/crypto.js"
     }
   },
   "files": [

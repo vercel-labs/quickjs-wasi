@@ -36,6 +36,11 @@ if (existsSync(structuredCloneExtSrc)) {
   copyFileSync(structuredCloneExtSrc, resolve(publicDir, 'structured-clone.so'));
 }
 
+const cryptoExtSrc = resolve(repoRoot, 'extensions/crypto/crypto.so');
+if (existsSync(cryptoExtSrc)) {
+  copyFileSync(cryptoExtSrc, resolve(publicDir, 'crypto.so'));
+}
+
 export default defineConfig({
   plugins: [tailwindcss(), react()],
   resolve: {

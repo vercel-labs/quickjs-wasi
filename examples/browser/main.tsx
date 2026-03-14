@@ -4,7 +4,7 @@ import { ObjectInspector, chromeDark } from 'react-inspector';
 import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, FileText, Copy, Github } from 'lucide-react';
+import { Play, Loader2, Globe, Terminal, Type, Binary, FileText, Copy, Github, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +21,7 @@ const STORAGE_KEYS = {
   base64Ext: 'qjs-playground:base64Ext',
   headersExt: 'qjs-playground:headersExt',
   structuredCloneExt: 'qjs-playground:structuredCloneExt',
+  cryptoExt: 'qjs-playground:cryptoExt',
   vim: 'qjs-playground:vim',
 } as const;
 
@@ -138,6 +139,48 @@ const STRUCTUREDCLONE_TYPE_DEFS = `
 declare function structuredClone<T>(value: T): T;
 `;
 
+// ─── Web Crypto API type definitions ──────────────────────────────────────────
+
+const CRYPTO_TYPE_DEFS = `
+/** The CryptoKey interface represents a cryptographic key. */
+interface CryptoKey {
+  readonly type: "secret" | "public" | "private";
+  readonly extractable: boolean;
+  readonly algorithm: KeyAlgorithm;
+  readonly usages: KeyUsage[];
+}
+interface KeyAlgorithm { name: string; [key: string]: any; }
+type KeyUsage = "encrypt" | "decrypt" | "sign" | "verify" | "deriveKey" | "deriveBits" | "wrapKey" | "unwrapKey";
+type KeyFormat = "raw" | "pkcs8" | "spki" | "jwk";
+interface CryptoKeyPair { publicKey: CryptoKey; privateKey: CryptoKey; }
+interface Algorithm { name: string; [key: string]: any; }
+
+/** The SubtleCrypto interface provides cryptographic primitives. */
+interface SubtleCrypto {
+  digest(algorithm: string | Algorithm, data: BufferSource): Promise<ArrayBuffer>;
+  generateKey(algorithm: any, extractable: boolean, keyUsages: KeyUsage[]): Promise<CryptoKey | CryptoKeyPair>;
+  importKey(format: KeyFormat, keyData: BufferSource, algorithm: any, extractable: boolean, keyUsages: KeyUsage[]): Promise<CryptoKey>;
+  exportKey(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer>;
+  sign(algorithm: string | Algorithm, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer>;
+  verify(algorithm: string | Algorithm, key: CryptoKey, signature: BufferSource, data: BufferSource): Promise<boolean>;
+  encrypt(algorithm: any, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer>;
+  decrypt(algorithm: any, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer>;
+  deriveBits(algorithm: any, baseKey: CryptoKey, length: number): Promise<ArrayBuffer>;
+  deriveKey(algorithm: any, baseKey: CryptoKey, derivedKeyType: any, extractable: boolean, keyUsages: KeyUsage[]): Promise<CryptoKey>;
+  wrapKey(format: KeyFormat, key: CryptoKey, wrappingKey: CryptoKey, wrapAlgorithm: any): Promise<ArrayBuffer>;
+  unwrapKey(format: KeyFormat, wrappedKey: BufferSource, unwrappingKey: CryptoKey, unwrapAlgorithm: any, unwrappedKeyAlgorithm: any, extractable: boolean, keyUsages: KeyUsage[]): Promise<CryptoKey>;
+}
+
+/** The Crypto interface provides basic cryptography features. */
+interface Crypto {
+  readonly subtle: SubtleCrypto;
+  getRandomValues<T extends ArrayBufferView>(array: T): T;
+  randomUUID(): string;
+}
+
+declare var crypto: Crypto;
+`;
+
 // ─── Extension Toggle component ──────────────────────────────────────────────
 
 function ExtensionToggle({ checked, onToggle, icon: Icon, label, tooltip }: {
@@ -248,6 +291,7 @@ const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
 const HEADERS_TYPES_URI = 'ts:headers-extension/headers.d.ts';
 const STRUCTUREDCLONE_TYPES_URI = 'ts:structured-clone-extension/structured-clone.d.ts';
+const CRYPTO_TYPES_URI = 'ts:crypto-extension/crypto.d.ts';
 
 function App() {
   const [status, setStatus] = useState('');
@@ -259,6 +303,7 @@ function App() {
   const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
   const [headersExtEnabled, setHeadersExtEnabled] = useState(() => loadBool(STORAGE_KEYS.headersExt, false));
   const [structuredCloneExtEnabled, setStructuredCloneExtEnabled] = useState(() => loadBool(STORAGE_KEYS.structuredCloneExt, false));
+  const [cryptoExtEnabled, setCryptoExtEnabled] = useState(() => loadBool(STORAGE_KEYS.cryptoExt, false));
   const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
@@ -266,6 +311,7 @@ function App() {
   const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
   const headersExtBytesRef = useRef<ArrayBuffer | null>(null);
   const structuredCloneExtBytesRef = useRef<ArrayBuffer | null>(null);
+  const cryptoExtBytesRef = useRef<ArrayBuffer | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const vimModeRef = useRef<ReturnType<typeof initVimMode> | null>(null);
@@ -275,6 +321,7 @@ function App() {
   const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const headersTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const cryptoTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
   // Persist checkbox states
@@ -283,6 +330,7 @@ function App() {
   useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.headersExt, headersExtEnabled); }, [headersExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.structuredCloneExt, structuredCloneExtEnabled); }, [structuredCloneExtEnabled]);
+  useEffect(() => { save(STORAGE_KEYS.cryptoExt, cryptoExtEnabled); }, [cryptoExtEnabled]);
   useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
 
   // Auto-scroll output to bottom
@@ -315,6 +363,9 @@ function App() {
         if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current) {
           fetches.push(fetch('/structured-clone.so').then((r) => r.arrayBuffer()));
         }
+        if (cryptoExtEnabled && !cryptoExtBytesRef.current) {
+          fetches.push(fetch('/crypto.so').then((r) => r.arrayBuffer()));
+        }
         const [wasmBytes, ...extBytes] = await Promise.all(fetches);
         wasmModuleRef.current = await WebAssembly.compile(wasmBytes);
         let extIdx = 0;
@@ -332,6 +383,9 @@ function App() {
         }
         if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current && extBytes[extIdx]) {
           structuredCloneExtBytesRef.current = extBytes[extIdx++];
+        }
+        if (cryptoExtEnabled && !cryptoExtBytesRef.current && extBytes[extIdx]) {
+          cryptoExtBytesRef.current = extBytes[extIdx++];
         }
         setWasmReady(true);
         setStatus(`WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`);
@@ -468,6 +522,27 @@ function App() {
     };
   }, [structuredCloneExtEnabled]);
 
+  // Crypto extension types: add/remove type definitions in Monaco
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    if (cryptoExtEnabled) {
+      cryptoTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        CRYPTO_TYPE_DEFS,
+        CRYPTO_TYPES_URI,
+      );
+    } else {
+      cryptoTypesDisposableRef.current?.dispose();
+      cryptoTypesDisposableRef.current = null;
+    }
+
+    return () => {
+      cryptoTypesDisposableRef.current?.dispose();
+      cryptoTypesDisposableRef.current = null;
+    };
+  }, [cryptoExtEnabled]);
+
   // Lazily fetch the URL extension binary on first enable
   const handleUrlExtToggle = useCallback(async (checked: boolean) => {
     setUrlExtEnabled(checked);
@@ -543,6 +618,21 @@ function App() {
     }
   }, []);
 
+  // Lazily fetch the Crypto extension binary on first enable
+  const handleCryptoExtToggle = useCallback(async (checked: boolean) => {
+    setCryptoExtEnabled(checked);
+    if (checked && !cryptoExtBytesRef.current) {
+      try {
+        const response = await fetch('/crypto.so');
+        cryptoExtBytesRef.current = await response.arrayBuffer();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setOutput([{ type: 'error', text: `Failed to load Crypto extension: ${message}` }]);
+        setCryptoExtEnabled(false);
+      }
+    }
+  }, []);
+
   // Use a ref so that the Monaco keybinding action always calls the latest
   // version of run() without needing to re-register the action on every render.
   const runRef = useRef<() => void>(() => {});
@@ -574,6 +664,9 @@ function App() {
       if (structuredCloneExtEnabled && structuredCloneExtBytesRef.current) {
         extensions.push({ name: 'structured-clone', wasm: new Uint8Array(structuredCloneExtBytesRef.current), initFn: 'qjs_ext_structured_clone_init' });
       }
+      if (cryptoExtEnabled && cryptoExtBytesRef.current) {
+        extensions.push({ name: 'crypto', wasm: new Uint8Array(cryptoExtBytesRef.current) });
+      }
       const vm = await QuickJS.create({
         wasm: wasmModuleRef.current!,
         memoryLimit: 8 * 1024 * 1024,
@@ -603,9 +696,13 @@ function App() {
         consoleObj.dispose();
       }
 
-      // Evaluate
+      // Evaluate — wrap in async IIFE if top-level await is used (like DevTools)
       try {
-        const result = vm.evalCode(code);
+        const hasTopLevelAwait = /\bawait\b/.test(code);
+        const evalCode = hasTopLevelAwait
+          ? `(async () => {\n${code}\n})()`
+          : code;
+        const result = vm.evalCode(evalCode);
         // Execute any pending microtasks (queueMicrotask, promise reactions)
         vm.executePendingJobs();
         const value = vm.dump(result);
@@ -638,7 +735,7 @@ function App() {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, headersExtEnabled, structuredCloneExtEnabled]);
+  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, headersExtEnabled, structuredCloneExtEnabled, cryptoExtEnabled]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -685,6 +782,9 @@ function App() {
     }
     if (loadBool(STORAGE_KEYS.structuredCloneExt, false)) {
       structuredCloneTypesDisposableRef.current = jsDefaults.addExtraLib(STRUCTUREDCLONE_TYPE_DEFS, STRUCTUREDCLONE_TYPES_URI);
+    }
+    if (loadBool(STORAGE_KEYS.cryptoExt, false)) {
+      cryptoTypesDisposableRef.current = jsDefaults.addExtraLib(CRYPTO_TYPE_DEFS, CRYPTO_TYPES_URI);
     }
 
     // Disable validation noise for a playground
@@ -845,6 +945,8 @@ function App() {
               tooltip={<>Adds the <MdnLink path="Headers">Headers</MdnLink> class</>} />
             <ExtensionToggle checked={urlExtEnabled} onToggle={handleUrlExtToggle} icon={Globe} label="URL"
               tooltip={<>Adds <MdnLink path="URL">URL</MdnLink> and <MdnLink path="URLSearchParams">URLSearchParams</MdnLink></>} />
+            <ExtensionToggle checked={cryptoExtEnabled} onToggle={handleCryptoExtToggle} icon={Lock} label="Crypto"
+              tooltip={<>Adds <MdnLink path="Crypto">crypto</MdnLink> and <MdnLink path="SubtleCrypto">SubtleCrypto</MdnLink></>} />
           </div>
 
           {/* Spacer + status */}

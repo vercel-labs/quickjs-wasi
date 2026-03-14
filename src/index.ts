@@ -14,6 +14,7 @@ import {
   restoreExtensions,
   type ExtensionDescriptor,
   type LoadedExtension,
+  type WasiImports,
 } from './extensions.js';
 
 // ---- Public types ----
@@ -28,7 +29,7 @@ export interface JSPropertyDescriptor {
 }
 
 export type { WasiOptions };
-export type { ExtensionDescriptor, LoadedExtension, DylinkInfo } from './extensions.js';
+export type { ExtensionDescriptor, LoadedExtension, DylinkInfo, WasiImports } from './extensions.js';
 
 export interface QuickJSOptions {
   /** WASM module bytes or pre-compiled module. If omitted, loads from the package. */
@@ -328,7 +329,7 @@ export class QuickJS {
     const opts = QuickJS.normalizeOptions(options);
     const module = await QuickJS.resolveModule(opts.wasm);
     const vm = new QuickJS(module);
-    const instance = await QuickJS.instantiate(module, vm, opts.wasi);
+    const { instance, wasiBuiltins, wasiUserOverrides, memoryProxy } = await QuickJS.instantiate(module, vm, opts.wasi);
     vm.setInstance(instance);
 
     // Initialize the WASI reactor
@@ -344,7 +345,7 @@ export class QuickJS {
     if (opts.extensions) {
       const mainExports = instance.exports as Record<string, WebAssembly.ExportValue>;
       for (const desc of opts.extensions) {
-        const ext = await loadExtension(desc, mainExports);
+        const ext = await loadExtension(desc, mainExports, wasiBuiltins, wasiUserOverrides, memoryProxy);
         vm.loadedExtensions.push(ext);
         initExtension(ext, mainExports);
       }
@@ -367,7 +368,7 @@ export class QuickJS {
     const opts = QuickJS.normalizeOptions(options);
     const module = await QuickJS.resolveModule(opts.wasm);
     const vm = new QuickJS(module);
-    const instance = await QuickJS.instantiate(module, vm, opts.wasi);
+    const { instance, wasiBuiltins, wasiUserOverrides, memoryProxy } = await QuickJS.instantiate(module, vm, opts.wasi);
     vm.setInstance(instance);
 
     const mainExports = instance.exports as Record<string, WebAssembly.ExportValue>;
@@ -393,6 +394,9 @@ export class QuickJS {
         descriptors,
         snapshot.extensions,
         mainExports,
+        wasiBuiltins,
+        wasiUserOverrides,
+        memoryProxy,
       );
     }
 
@@ -598,9 +602,31 @@ export class QuickJS {
     }
   }
 
-  private static async instantiate(module: WebAssembly.Module, vm: QuickJS, wasiOptions?: WasiOptions): Promise<WebAssembly.Instance> {
+  private static async instantiate(module: WebAssembly.Module, vm: QuickJS, wasiOptions?: WasiOptions): Promise<{
+    instance: WebAssembly.Instance;
+    wasiBuiltins: WasiImports;
+    wasiUserOverrides: WasiImports | undefined;
+    memoryProxy: WebAssembly.Memory;
+  }> {
     let memory: WebAssembly.Memory | null = null;
-    const wasiShim = createWasiShim(() => memory!, wasiOptions);
+
+    // Create a memory proxy that defers to the actual memory once set.
+    // This allows WASI override factories to close over the memory reference
+    // before the WASM instance is created.
+    const memoryProxy = new Proxy({} as WebAssembly.Memory, {
+      get(_target, prop) {
+        return (memory as any)[prop];
+      },
+    });
+
+    // Build the builtins (no user overrides)
+    const wasiBuiltins = createWasiShim(() => memory!);
+
+    // Resolve user overrides via factory
+    const wasiUserOverrides = wasiOptions ? wasiOptions(memoryProxy) : undefined;
+
+    // Final shim for the main module: builtins + user overrides
+    const wasiShim = { ...wasiBuiltins, ...wasiUserOverrides };
 
     const hostCall = (funcId: number, thisPtr: number, argc: number, argvPtr: number): number => {
       return vm.handleHostCall(funcId, thisPtr, argc, argvPtr);
@@ -616,7 +642,7 @@ export class QuickJS {
     });
 
     memory = (instance.exports as any).memory as WebAssembly.Memory;
-    return instance;
+    return { instance, wasiBuiltins, wasiUserOverrides, memoryProxy };
   }
 
   /**

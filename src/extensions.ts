@@ -42,6 +42,12 @@ export interface LoadedExtension {
   initFn: string;
 }
 
+/**
+ * The concrete WASI import object shared between the main module and extensions.
+ * This is the result of `createWasiShim()` (with any user overrides applied).
+ */
+export type WasiImports = Record<string, WebAssembly.ImportValue>;
+
 /** Description of an extension to load */
 export interface ExtensionDescriptor {
   /** Name identifier (used in snapshot metadata) */
@@ -50,6 +56,22 @@ export interface ExtensionDescriptor {
   wasm: BufferSource | WebAssembly.Module;
   /** Name of the init function exported by the extension (default: `qjs_ext_${name}_init`) */
   initFn?: string;
+  /**
+   * Extension-provided WASI host function implementations.
+   *
+   * A factory that receives the WASM linear memory and returns an object of
+   * `wasi_snapshot_preview1` functions. These are layered between the built-in
+   * defaults and any user-provided overrides:
+   *
+   *   1. Built-in defaults (lowest priority)
+   *   2. Extension-provided (this field)
+   *   3. User-provided via `QuickJSOptions.wasi` (highest priority)
+   *
+   * This allows an extension to ship its own WASI implementations (e.g. a
+   * crypto extension providing `random_get`) while still allowing the user
+   * to override them at the top level.
+   */
+  wasi?: (memory: WebAssembly.Memory) => Record<string, (...args: any[]) => any>;
 }
 
 // ---- dylink.0 parser ----
@@ -129,11 +151,17 @@ function alignUp(value: number, align: number): number {
  *
  * @param descriptor - Extension description (name, wasm bytes, init function)
  * @param mainExports - The main QuickJS WASM module's exports
+ * @param wasiBuiltins - Built-in WASI implementations (lowest priority)
+ * @param wasiUserOverrides - User-provided WASI overrides (highest priority)
+ * @param memoryProxy - A memory proxy for extension WASI factories
  * @param allocBase - Optional fixed memory/table bases (for snapshot restore)
  */
 export async function loadExtension(
   descriptor: ExtensionDescriptor,
   mainExports: Record<string, WebAssembly.ExportValue>,
+  wasiBuiltins?: WasiImports,
+  wasiUserOverrides?: WasiImports,
+  memoryProxy?: WebAssembly.Memory,
   allocBase?: { memoryBase: number; tableBase: number }
 ): Promise<LoadedExtension> {
   // Compile the extension module
@@ -208,6 +236,18 @@ export async function loadExtension(
     'GOT.func': {},
   };
 
+  // Provide wasi_snapshot_preview1 imports to extensions that need them.
+  // Layered merge: builtins → extension-provided → user overrides.
+  const needsWasi = extImports.some((imp) => imp.module === 'wasi_snapshot_preview1');
+  if (needsWasi) {
+    const extWasi = (descriptor.wasi && memoryProxy) ? descriptor.wasi(memoryProxy) : undefined;
+    importObj['wasi_snapshot_preview1'] = {
+      ...wasiBuiltins,     // 1. Built-in defaults (lowest priority)
+      ...extWasi,          // 2. Extension-provided
+      ...wasiUserOverrides // 3. User overrides (highest priority)
+    };
+  }
+
   // Collect names of functions the extension exports (for self-resolution)
   const extExportNames = new Set(
     WebAssembly.Module.exports(module)
@@ -275,11 +315,24 @@ export async function loadExtension(
         0
       );
     } else if (imp.module === 'GOT.func' && imp.kind === 'global') {
-      // GOT.func entries are mutable globals containing table indices of functions
-      importObj['GOT.func'][imp.name] = new WebAssembly.Global(
-        { value: 'i32', mutable: true },
-        0
-      );
+      // GOT.func entries are mutable globals containing table indices of functions.
+      // We resolve these by finding the function in the main module's exports,
+      // adding it to the indirect function table, and providing the table index.
+      const resolved = mainExports[imp.name];
+      if (resolved && typeof resolved === 'function') {
+        const idx = table.length;
+        table.grow(1);
+        table.set(idx, resolved as WebAssembly.ExportValue & Function);
+        importObj['GOT.func'][imp.name] = new WebAssembly.Global(
+          { value: 'i32', mutable: true },
+          idx
+        );
+      } else {
+        importObj['GOT.func'][imp.name] = new WebAssembly.Global(
+          { value: 'i32', mutable: true },
+          0
+        );
+      }
     }
   }
 
@@ -391,7 +444,10 @@ export async function restoreExtensions(
     tableBase: number;
     initFn: string;
   }>,
-  mainExports: Record<string, WebAssembly.ExportValue>
+  mainExports: Record<string, WebAssembly.ExportValue>,
+  wasiBuiltins?: WasiImports,
+  wasiUserOverrides?: WasiImports,
+  memoryProxy?: WebAssembly.Memory
 ): Promise<LoadedExtension[]> {
   const loaded: LoadedExtension[] = [];
 
@@ -405,7 +461,7 @@ export async function restoreExtensions(
     }
 
     // Load with fixed bases
-    const ext = await loadExtension(descriptor, mainExports, {
+    const ext = await loadExtension(descriptor, mainExports, wasiBuiltins, wasiUserOverrides, memoryProxy, {
       memoryBase: meta.memoryBase,
       tableBase: meta.tableBase,
     });

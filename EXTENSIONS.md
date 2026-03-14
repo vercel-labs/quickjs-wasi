@@ -418,6 +418,73 @@ Throws `DataCloneError` DOMException for:
 
 **Note**: Transfer semantics (`options.transfer`) are not supported.
 
+### `quickjs-wasi/crypto`
+
+A W3C Web Cryptography API implementation backed by [mbedTLS 4.0](https://github.com/Mbed-TLS/mbedtls) (PSA Crypto). Provides the `crypto` global with `SubtleCrypto` for cryptographic operations.
+
+```typescript
+import { cryptoExtension } from 'quickjs-wasi/crypto';
+
+const vm = await QuickJS.create({
+  extensions: [cryptoExtension],
+});
+```
+
+**`crypto`** global:
+- `crypto.getRandomValues(typedArray)` — fill with cryptographically strong random values (max 65536 bytes)
+- `crypto.randomUUID()` — generate a v4 UUID string
+
+**`crypto.subtle`** (SubtleCrypto):
+- `digest(algorithm, data)` — SHA-1, SHA-256, SHA-384, SHA-512
+- `generateKey(algorithm, extractable, keyUsages)` — HMAC, AES-CBC/CTR/GCM/KW, ECDSA (P-256/P-384/P-521), ECDH, Ed25519, X25519, RSA-OAEP/PKCS1v1.5/PSS
+- `importKey(format, keyData, algorithm, extractable, keyUsages)` — raw, pkcs8, spki formats
+- `exportKey(format, key)` — raw, pkcs8, spki formats
+- `sign(algorithm, key, data)` / `verify(algorithm, key, signature, data)` — HMAC, ECDSA, Ed25519, RSA
+- `encrypt(algorithm, key, data)` / `decrypt(algorithm, key, data)` — AES-GCM, AES-CBC, AES-CTR, RSA-OAEP
+- `deriveBits(algorithm, baseKey, length)` / `deriveKey(...)` — HKDF, PBKDF2, ECDH, X25519
+- `wrapKey(format, key, wrappingKey, algorithm)` / `unwrapKey(...)` — key wrapping via encrypt/decrypt
+
+**`CryptoKey`** class:
+- Properties: `type` (`"secret"`, `"public"`, `"private"`), `extractable`, `algorithm` (frozen), `usages` (frozen)
+- `Symbol.toStringTag` = `"CryptoKey"`
+
+The extension uses WASI `random_get` as its entropy source, which means user-provided `wasi` overrides of `random_get` flow through to all crypto operations. This enables deterministic crypto output for testing.
+
+## WASI Override Layering
+
+Extensions that import `wasi_snapshot_preview1` functions (like the crypto extension importing `random_get`) receive WASI implementations from a three-layer merge:
+
+1. **Built-in defaults** (lowest priority) — the implementations in `wasi-shim.ts`
+2. **Extension-provided** — via `ExtensionDescriptor.wasi` factory
+3. **User overrides** (highest priority) — via `QuickJSOptions.wasi` factory
+
+This means an extension can ship its own WASI implementations, and users can still override them:
+
+```typescript
+// Extension ships its own random_get
+const myExtension: ExtensionDescriptor = {
+  name: 'my-ext',
+  wasm: wasmBytes,
+  wasi: (memory) => ({
+    random_get(bufPtr, bufLen) {
+      crypto.getRandomValues(new Uint8Array(memory.buffer, bufPtr, bufLen));
+      return 0;
+    },
+  }),
+};
+
+// User overrides random_get for deterministic testing
+const vm = await QuickJS.create({
+  wasi: (memory) => ({
+    random_get(bufPtr, bufLen) {
+      new Uint8Array(memory.buffer, bufPtr, bufLen).fill(0x42);
+      return 0;
+    },
+  }),
+  extensions: [myExtension],
+});
+```
+
 ## Known Limitations
 
 ### Unstable ABI
@@ -440,11 +507,9 @@ The current build uses **wasi-sdk 30** (clang 21.1.4).
 
 The main module uses link-time optimization (`-flto`), but extensions cannot — LTO is incompatible with `-fPIC --shared` in wasi-sdk. Extension code will not be as aggressively optimized. For most extensions this is irrelevant, but compute-heavy extensions may notice a difference.
 
-### No GOT Resolution for Complex Symbols
+### Limited GOT Resolution
 
-The current loader creates zero-initialized `GOT.mem.*` and `GOT.func.*` globals. Extensions that only use **direct function calls** (like the URL extension) work fine. Extensions that take the **address** of an external function or reference an external global variable would need proper GOT resolution, which is not yet implemented in the loader.
-
-In practice, this means: don't use function pointers to QuickJS API functions in your extension code. Call them directly instead.
+The loader resolves `GOT.func.*` entries by looking up functions in the main module's exports and adding them to the indirect function table. This allows extensions to call main-module functions via function pointers (e.g. `memset` used by mbedTLS). `GOT.mem.*` entries are zero-initialized — extensions that take the address of an external global variable may not work correctly.
 
 ### Snapshot Portability
 

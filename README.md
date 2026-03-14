@@ -133,17 +133,22 @@ try {
 }
 ```
 
-### Deterministic Execution
+### WASI Overrides
 
-The `wasi.now` option controls `Date.now()`, `new Date()`, and — crucially — the `Math.random()` PRNG seed. QuickJS uses a [xorshift64*](https://en.wikipedia.org/wiki/Xorshift) PRNG that is seeded once from the clock value during context creation. The `now()` callback is **not** called on every `Math.random()` invocation — it seeds the PRNG at startup, and subsequent calls are purely deterministic from that seed.
+The `wasi` option lets you override any `wasi_snapshot_preview1` host function. It's a factory that receives the WASM linear memory and returns an object of override functions. Overrides apply to both the main module and all loaded extensions.
 
-This means two VMs created with the same `now()` value will produce identical `Math.random()` sequences:
+This is useful for deterministic execution — QuickJS uses a [xorshift64*](https://en.wikipedia.org/wiki/Xorshift) PRNG that is seeded once from the clock value during context creation. Override `clock_time_get` to control both `Date.now()` and the `Math.random()` seed:
 
 ```typescript
-const fixedTime = () => BigInt(1700000000000) * 1_000_000n; // nanoseconds
+const fixedClock = (memory: WebAssembly.Memory) => ({
+  clock_time_get(_clockId: number, _precision: bigint, resultPtr: number) {
+    new DataView(memory.buffer).setBigUint64(resultPtr, 1700000000000n * 1_000_000n, true);
+    return 0;
+  },
+});
 
-using vm1 = await QuickJS.create({ wasm: wasmBytes, wasi: { now: fixedTime } });
-using vm2 = await QuickJS.create({ wasm: wasmBytes, wasi: { now: fixedTime } });
+using vm1 = await QuickJS.create({ wasm: wasmBytes, wasi: fixedClock });
+using vm2 = await QuickJS.create({ wasm: wasmBytes, wasi: fixedClock });
 
 vm1.evalCode('Math.random()').consume(h => h.toNumber());
 // => 0.8130834347906803
@@ -152,15 +157,33 @@ vm2.evalCode('Math.random()').consume(h => h.toNumber());
 // => 0.8130834347906803 (identical)
 ```
 
+Override `random_get` to control the crypto extension's RNG:
+
+```typescript
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  wasi: (memory) => ({
+    random_get(bufPtr: number, bufLen: number) {
+      new Uint8Array(memory.buffer, bufPtr, bufLen).fill(0x42); // deterministic
+      return 0;
+    },
+  }),
+  extensions: [cryptoExtension],
+});
+```
+
 The time can also be advanced between calls for realistic behavior:
 
 ```typescript
 let currentTime = 1700000000000n;
 using vm = await QuickJS.create({
   wasm: wasmBytes,
-  wasi: {
-    now: () => currentTime * 1_000_000n,
-  },
+  wasi: (memory) => ({
+    clock_time_get(_clockId: number, _precision: bigint, resultPtr: number) {
+      new DataView(memory.buffer).setBigUint64(resultPtr, currentTime * 1_000_000n, true);
+      return 0;
+    },
+  }),
 });
 
 vm.evalCode('Date.now()').consume(h => h.toNumber()); // 1700000000000
@@ -370,7 +393,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic li
 | Option | Description |
 |--------|-------------|
 | `wasm` | WASM module bytes or pre-compiled `WebAssembly.Module` |
-| `wasi` | Custom WASI function implementations (`now`, `stdout`) |
+| `wasi` | WASI override factory: `(memory) => ({ random_get, clock_time_get, ... })`. Applies to main module and all extensions |
 | `memoryLimit` | Maximum memory the QuickJS runtime can allocate (bytes) |
 | `interruptHandler` | Callback to interrupt execution (return `true` to stop) |
 | `extensions` | Array of `ExtensionDescriptor` objects — native WASM extensions to load |
@@ -382,6 +405,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic li
 | `name` | Identifier string (used in snapshot metadata) |
 | `wasm` | WASM bytes (`BufferSource`) or pre-compiled `WebAssembly.Module` |
 | `initFn?` | Init function name (default: `qjs_ext_${name}_init`) |
+| `wasi?` | Extension-provided WASI overrides: `(memory) => ({...})`. Layered between built-in defaults and user overrides |
 
 ### Cached Properties
 

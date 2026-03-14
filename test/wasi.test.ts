@@ -2,13 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 
-describe('custom clock (wasi.now)', () => {
+/** Helper: WASI factory that overrides clock_time_get with a fixed/dynamic time. */
+function fixedClock(getTimeNs: () => bigint) {
+  return (memory: WebAssembly.Memory) => ({
+    clock_time_get(_clockId: number, _precision: bigint, resultPtr: number): number {
+      new DataView(memory.buffer).setBigUint64(resultPtr, getTimeNs(), true);
+      return 0;
+    },
+  });
+}
+
+describe('custom clock (wasi overrides)', () => {
   it('should use a fixed timestamp for Date.now()', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
-      wasi: {
-        now: () => BigInt(1700000000000) * 1_000_000n,
-      },
+      wasi: fixedClock(() => BigInt(1700000000000) * 1_000_000n),
     });
 
     const result = vm.evalCode('Date.now()').consume(h => h.toNumber());
@@ -18,9 +26,7 @@ describe('custom clock (wasi.now)', () => {
   it('should use a fixed timestamp for new Date()', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
-      wasi: {
-        now: () => BigInt(1700000000000) * 1_000_000n,
-      },
+      wasi: fixedClock(() => BigInt(1700000000000) * 1_000_000n),
     });
 
     const result = vm.evalCode('new Date().toISOString()').consume(h => h.toString());
@@ -28,34 +34,29 @@ describe('custom clock (wasi.now)', () => {
   });
 
   it('should support advancing time between calls', async () => {
-    let currentTime = 1700000000000n;
+    let currentTimeMs = 1700000000000n;
     using vm = await QuickJS.create({
       wasm: wasmBytes,
-      wasi: {
-        now: () => currentTime * 1_000_000n,
-      },
+      wasi: fixedClock(() => currentTimeMs * 1_000_000n),
     });
 
     const t1 = vm.evalCode('Date.now()').consume(h => h.toNumber());
     expect(t1).toBe(1700000000000);
 
-    currentTime = 1700000001000n; // advance 1 second
+    currentTimeMs = 1700000001000n; // advance 1 second
     const t2 = vm.evalCode('Date.now()').consume(h => h.toNumber());
     expect(t2).toBe(1700000001000);
   });
 });
 
-describe('Math.random() PRNG seeding via wasi.now', () => {
-  it('should produce identical sequences from two VMs with the same now() value', async () => {
+describe('Math.random() PRNG seeding via clock', () => {
+  it('should produce identical sequences from two VMs with the same clock', async () => {
     // QuickJS seeds its xorshift64* PRNG from the clock value during
-    // context creation. Two VMs with the same now() produce the same sequence.
-    const opts = {
-      wasm: wasmBytes,
-      wasi: { now: () => BigInt(1700000000000) * 1_000_000n },
-    };
+    // context creation. Two VMs with the same clock produce the same sequence.
+    const wasi = fixedClock(() => BigInt(1700000000000) * 1_000_000n);
 
-    using vm1 = await QuickJS.create(opts);
-    using vm2 = await QuickJS.create(opts);
+    using vm1 = await QuickJS.create({ wasm: wasmBytes, wasi });
+    using vm2 = await QuickJS.create({ wasm: wasmBytes, wasi });
 
     const results1: number[] = [];
     const results2: number[] = [];
@@ -66,14 +67,14 @@ describe('Math.random() PRNG seeding via wasi.now', () => {
     expect(results1).toEqual(results2);
   });
 
-  it('should produce different sequences with different now() values', async () => {
+  it('should produce different sequences with different clock values', async () => {
     using vm1 = await QuickJS.create({
       wasm: wasmBytes,
-      wasi: { now: () => BigInt(1000) * 1_000_000n },
+      wasi: fixedClock(() => BigInt(1000) * 1_000_000n),
     });
     using vm2 = await QuickJS.create({
       wasm: wasmBytes,
-      wasi: { now: () => BigInt(2000) * 1_000_000n },
+      wasi: fixedClock(() => BigInt(2000) * 1_000_000n),
     });
 
     const r1 = vm1.evalCode('Math.random()').consume(h => h.toNumber());
@@ -96,7 +97,7 @@ describe('options backwards compatibility', () => {
   it('should accept QuickJSOptions with wasi field', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
-      wasi: { now: () => BigInt(0) * 1_000_000n },
+      wasi: fixedClock(() => 0n),
     });
     expect(vm.evalCode('Date.now()').consume(h => h.toNumber())).toBe(0);
   });
@@ -111,9 +112,7 @@ describe('restore with wasi options', () => {
 
     using vm2 = await QuickJS.restore(snapshot, {
       wasm: wasmBytes,
-      wasi: {
-        now: () => BigInt(9999999999999) * 1_000_000n,
-      },
+      wasi: fixedClock(() => BigInt(9999999999999) * 1_000_000n),
     });
 
     expect(vm2.evalCode('x').consume(h => h.toNumber())).toBe(42);

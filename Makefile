@@ -189,9 +189,119 @@ EXT_HDR_SO = $(EXT_HDR_DIR)/headers.so
 EXT_SC_DIR = extensions/structured-clone
 EXT_SC_SO = $(EXT_SC_DIR)/structured-clone.so
 
+# Extensions: Crypto (Web Crypto API backed by mbedTLS 4.0 PSA)
+EXT_CRYPTO_DIR = extensions/crypto
+EXT_CRYPTO_BUILD = $(EXT_CRYPTO_DIR)/build
+MBEDTLS_DIR = $(EXT_CRYPTO_DIR)/mbedtls
+
+# mbedTLS / PSA Crypto include paths
+MBEDTLS_INCLUDES = \
+	-I$(MBEDTLS_DIR)/include \
+	-I$(MBEDTLS_DIR)/tf-psa-crypto/include \
+	-I$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/include \
+	-I$(MBEDTLS_DIR)/tf-psa-crypto/drivers/everest/include \
+	-I$(MBEDTLS_DIR)/tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest \
+	-I$(MBEDTLS_DIR)/tf-psa-crypto/drivers/everest/include/tf-psa-crypto/private/everest/kremlib \
+	-I$(MBEDTLS_DIR)/tf-psa-crypto/core \
+	-I$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src \
+	-I$(MBEDTLS_DIR)/library
+
+# mbedTLS config: use our custom WASM config for both mbedTLS and TF-PSA-Crypto
+MBEDTLS_CONFIG_FLAGS = \
+	-DMBEDTLS_CONFIG_FILE='"mbedtls_config_wasm.h"' \
+	-DTF_PSA_CRYPTO_CONFIG_FILE='"mbedtls_config_wasm.h"' \
+	-I$(EXT_CRYPTO_DIR)
+
+# Crypto extension C flags
+EXT_CRYPTO_CFLAGS = $(EXT_CFLAGS) $(MBEDTLS_INCLUDES) $(MBEDTLS_CONFIG_FLAGS) \
+	-Wno-unused-function -Wno-unused-variable
+
+# PSA Core source files
+MBEDTLS_PSA_CORE_SRCS = \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/psa_crypto.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/psa_crypto_client.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/psa_crypto_driver_wrappers_no_static.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/psa_crypto_slot_management.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/psa_crypto_storage.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/psa_its_file.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/tf_psa_crypto_config.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/core/tf_psa_crypto_version.c
+
+# Builtin driver source files
+MBEDTLS_BUILTIN_SRCS = \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/aes.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/asn1parse.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/asn1write.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/base64.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/bignum.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/bignum_core.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/bignum_mod.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/bignum_mod_raw.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/block_cipher.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/cipher.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/cipher_wrap.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/constant_time.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/ecdh.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/ecdsa.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/ecp.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/ecp_curves.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/ecp_curves_new.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/entropy.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/entropy_poll.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/gcm.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/md.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/nist_kw.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/oid.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pem.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pk.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pk_ecc.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pk_rsa.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pk_wrap.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pkcs5.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pkparse.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/pkwrite.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/platform.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/platform_util.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_aead.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_cipher.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_ffdh.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_hash.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_mac.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_pake.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/psa_util.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/rsa.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/rsa_alt_helpers.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/sha1.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/sha256.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/sha512.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/src/threading.c
+
+# Everest (X25519/Curve25519)
+MBEDTLS_EVEREST_SRCS = \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/everest/library/everest.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/everest/library/x25519.c \
+	$(MBEDTLS_DIR)/tf-psa-crypto/drivers/everest/library/Hacl_Curve25519_joined.c
+
+# Top-level library (error strings)
+MBEDTLS_LIB_SRCS = \
+	$(MBEDTLS_DIR)/library/error.c
+
+# All mbedTLS sources
+MBEDTLS_ALL_SRCS = $(MBEDTLS_PSA_CORE_SRCS) $(MBEDTLS_BUILTIN_SRCS) $(MBEDTLS_EVEREST_SRCS) $(MBEDTLS_LIB_SRCS)
+
+# Object files: flatten into build dir
+MBEDTLS_ALL_OBJS = $(patsubst %.c,$(EXT_CRYPTO_BUILD)/%.o,$(notdir $(MBEDTLS_ALL_SRCS)))
+
+# Add the crypto.c object
+EXT_CRYPTO_OBJ = $(EXT_CRYPTO_BUILD)/crypto.o
+EXT_CRYPTO_ALL_OBJS = $(EXT_CRYPTO_OBJ) $(MBEDTLS_ALL_OBJS)
+EXT_CRYPTO_SO = $(EXT_CRYPTO_DIR)/crypto.so
+
 .PHONY: all clean
 
-all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_HDR_SO) $(EXT_SC_SO)
+all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_HDR_SO) $(EXT_SC_SO) $(EXT_CRYPTO_SO)
 
 $(OUTPUT): $(ALL_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -267,6 +377,29 @@ $(EXT_SC_SO): $(EXT_SC_DIR)/structured-clone.o
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
+# ---- Crypto extension ----
+
+$(EXT_CRYPTO_BUILD):
+	mkdir -p $(EXT_CRYPTO_BUILD)
+
+# Compile crypto.c (our extension code)
+$(EXT_CRYPTO_BUILD)/crypto.o: $(EXT_CRYPTO_DIR)/crypto.c | $(EXT_CRYPTO_BUILD)
+	$(CC) $(EXT_CRYPTO_CFLAGS) -c -o $@ $<
+
+# Compile mbedTLS sources. We use VPATH-like pattern rules via a define+eval loop
+# to map each source file to its corresponding .o in the build directory.
+define MBEDTLS_COMPILE_RULE
+$(EXT_CRYPTO_BUILD)/$(notdir $(1:.c=.o)): $(1) | $(EXT_CRYPTO_BUILD)
+	$(CC) $(EXT_CRYPTO_CFLAGS) -c -o $$@ $$<
+endef
+$(foreach src,$(MBEDTLS_ALL_SRCS),$(eval $(call MBEDTLS_COMPILE_RULE,$(src))))
+
+# Link crypto extension as shared library
+$(EXT_CRYPTO_SO): $(EXT_CRYPTO_ALL_OBJS)
+	$(WASI_SDK)/bin/wasm-ld \
+		--shared --no-entry --export-dynamic --allow-undefined \
+		-o $@ $(EXT_CRYPTO_ALL_OBJS)
+
 clean:
 	rm -rf $(BUILD_DIR) $(OUTPUT) \
 		$(EXT_URL_DIR)/url.o $(EXT_URL_DIR)/ada/ada.o \
@@ -275,4 +408,5 @@ clean:
 		$(EXT_ENC_DIR)/encoding.o $(EXT_ENC_SO) \
 		$(EXT_B64_DIR)/base64.o $(EXT_B64_SO) \
 		$(EXT_HDR_DIR)/headers.o $(EXT_HDR_SO) \
-		$(EXT_SC_DIR)/structured-clone.o $(EXT_SC_SO)
+		$(EXT_SC_DIR)/structured-clone.o $(EXT_SC_SO) \
+		$(EXT_CRYPTO_BUILD) $(EXT_CRYPTO_SO)
