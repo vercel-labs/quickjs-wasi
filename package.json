@@ -74,6 +74,7 @@
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
     "@types/node": "^22.0.0",
+    "@vercel/nft": "^1.3.2",
     "bun": "^1.3.10",
     "core-js-pure": "^3.48.0",
     "degenerator": "^5.0.1",

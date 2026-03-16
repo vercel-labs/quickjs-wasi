@@ -592,12 +592,8 @@ export class QuickJS {
     } else if (wasmInput) {
       return WebAssembly.compile(wasmInput);
     } else {
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-      const url = await import('node:url');
-      const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-      const wasmPath = path.resolve(__dirname, '..', 'quickjs.wasm');
-      const buf = fs.readFileSync(wasmPath);
+      const { readFile } = await import('node:fs/promises');
+      const buf = await readFile(new URL('../quickjs.wasm', import.meta.url));
       return WebAssembly.compile(buf);
     }
   }
