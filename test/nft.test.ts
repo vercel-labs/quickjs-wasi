@@ -4,12 +4,25 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const dist = (...parts: string[]) => resolve(__dirname, '..', 'dist', ...parts);
 
 describe('@vercel/nft', () => {
   it('should trace quickjs.wasm as a dependency of dist/index.js', async () => {
-    const distIndex = resolve(__dirname, '..', 'dist', 'index.js');
-    const { fileList } = await nodeFileTrace([distIndex]);
+    const { fileList } = await nodeFileTrace([dist('index.js')]);
     const wasmFiles = [...fileList].filter((f) => f.endsWith('quickjs.wasm'));
     expect(wasmFiles.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['url', 'extensions/url/url.so'],
+    ['encoding', 'extensions/encoding/encoding.so'],
+    ['base64', 'extensions/base64/base64.so'],
+    ['headers', 'extensions/headers/headers.so'],
+    ['crypto', 'extensions/crypto/crypto.so'],
+    ['structured-clone', 'extensions/structured-clone/structured-clone.so'],
+  ])('should trace %s extension .so file', async (name, soPath) => {
+    const { fileList } = await nodeFileTrace([dist(`${name}.js`)]);
+    const soFiles = [...fileList].filter((f) => f.endsWith(soPath));
+    expect(soFiles.length).toBeGreaterThan(0);
   });
 });

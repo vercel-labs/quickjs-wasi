@@ -46,13 +46,10 @@
  * ```
  */
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { ExtensionDescriptor } from './extensions.ts';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmBytes = readFileSync(
-  resolve(__dirname, '..', 'extensions', 'crypto', 'crypto.so')
+  new URL('../extensions/crypto/crypto.so', import.meta.url)
 );
 
 /**
