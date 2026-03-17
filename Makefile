@@ -3,7 +3,7 @@
 # Compiles quickjs-ng + our interface layer into a single .wasm WASI reactor binary.
 # Requires wasi-sdk to be installed. Run `make setup` to install it automatically.
 
-WASI_SDK_VERSION_REQUIRED = 30
+WASI_SDK_VERSION_REQUIRED = 32
 WASI_SDK ?= /tmp/wasi-sdk
 CC = $(WASI_SDK)/bin/clang
 CXX = $(WASI_SDK)/bin/clang++

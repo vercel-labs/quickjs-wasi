@@ -2,8 +2,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-WASI_SDK_VERSION="30"
-WASI_SDK="${WASI_SDK:-/tmp/wasi-sdk}"
 
 # Skip if WASM is already built
 if [ -f "$REPO_ROOT/quickjs.wasm" ]; then
@@ -15,26 +13,11 @@ fi
 echo "Initializing git submodules..."
 git -C "$REPO_ROOT" submodule update --init --recursive
 
-echo "Installing wasi-sdk v${WASI_SDK_VERSION}..."
-
-# Detect platform
-case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64)  WASI_SDK_PLATFORM="x86_64-linux" ;;
-  Linux-aarch64) WASI_SDK_PLATFORM="arm64-linux" ;;
-  Darwin-arm64)  WASI_SDK_PLATFORM="arm64-macos" ;;
-  Darwin-x86_64) WASI_SDK_PLATFORM="x86_64-macos" ;;
-  *) echo "Unsupported platform: $(uname -s)-$(uname -m)"; exit 1 ;;
-esac
-
-if [ ! -f "$WASI_SDK/bin/clang" ]; then
-  rm -rf "$WASI_SDK"
-  mkdir -p "$WASI_SDK"
-  curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-${WASI_SDK_PLATFORM}.tar.gz" \
-    | tar xz -C "$WASI_SDK" --strip-components=1
-fi
+echo "Setting up wasi-sdk..."
+make -C "$REPO_ROOT" setup
 
 echo "Building quickjs.wasm..."
-WASI_SDK="$WASI_SDK" make -C "$REPO_ROOT"
+make -C "$REPO_ROOT"
 
 echo "Building TypeScript..."
 cd "$REPO_ROOT"
