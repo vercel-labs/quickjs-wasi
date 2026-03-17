@@ -27,8 +27,10 @@ case "$(uname -s)-$(uname -m)" in
 esac
 
 if [ ! -f "$WASI_SDK/bin/clang" ]; then
+  rm -rf "$WASI_SDK"
+  mkdir -p "$WASI_SDK"
   curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-${WASI_SDK_PLATFORM}.tar.gz" \
-    | tar xz -C /tmp --strip-components=1 --one-top-level=wasi-sdk
+    | tar xz -C "$WASI_SDK" --strip-components=1
 fi
 
 echo "Building quickjs.wasm..."

@@ -50,6 +50,7 @@
     "url": "git://github.com/vercel-labs/quickjs-wasi.git"
   },
   "scripts": {
+    "setup": "make setup",
     "build:wasm": "make",
     "build:ts": "tsc",
     "build": "pnpm run build:wasm && pnpm run build:ts",

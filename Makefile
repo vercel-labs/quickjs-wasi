@@ -1,8 +1,9 @@
 # QuickJS WASM Build
 #
 # Compiles quickjs-ng + our interface layer into a single .wasm WASI reactor binary.
-# Requires wasi-sdk to be installed.
+# Requires wasi-sdk to be installed. Run `make setup` to install it automatically.
 
+WASI_SDK_VERSION_REQUIRED = 30
 WASI_SDK ?= /tmp/wasi-sdk
 CC = $(WASI_SDK)/bin/clang
 CXX = $(WASI_SDK)/bin/clang++
@@ -299,9 +300,50 @@ EXT_CRYPTO_OBJ = $(EXT_CRYPTO_BUILD)/crypto.o
 EXT_CRYPTO_ALL_OBJS = $(EXT_CRYPTO_OBJ) $(MBEDTLS_ALL_OBJS)
 EXT_CRYPTO_SO = $(EXT_CRYPTO_DIR)/crypto.so
 
-.PHONY: all clean
+.PHONY: all clean setup check-wasi-sdk
 
-all: $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_HDR_SO) $(EXT_SC_SO) $(EXT_CRYPTO_SO)
+all: check-wasi-sdk $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_HDR_SO) $(EXT_SC_SO) $(EXT_CRYPTO_SO)
+
+# Verify wasi-sdk is installed and matches the required version
+check-wasi-sdk:
+	@if [ ! -f "$(WASI_SDK)/VERSION" ]; then \
+		echo ""; \
+		echo "ERROR: wasi-sdk not found at $(WASI_SDK)"; \
+		echo ""; \
+		echo "Run 'make setup' to install wasi-sdk $(WASI_SDK_VERSION_REQUIRED) automatically,"; \
+		echo "or set WASI_SDK to point to an existing installation."; \
+		echo ""; \
+		exit 1; \
+	fi
+	@INSTALLED=$$(head -1 "$(WASI_SDK)/VERSION" | cut -d. -f1); \
+	if [ "$$INSTALLED" != "$(WASI_SDK_VERSION_REQUIRED)" ]; then \
+		echo ""; \
+		echo "ERROR: wasi-sdk version mismatch"; \
+		echo "  Required: $(WASI_SDK_VERSION_REQUIRED)"; \
+		echo "  Installed: $$INSTALLED (at $(WASI_SDK))"; \
+		echo ""; \
+		echo "Run 'make setup' to install the correct version."; \
+		echo ""; \
+		exit 1; \
+	fi
+
+# Download and install the correct wasi-sdk version for the current platform
+setup:
+	@echo "Installing wasi-sdk $(WASI_SDK_VERSION_REQUIRED)..."
+	@case "$$(uname -s)-$$(uname -m)" in \
+		Linux-x86_64)  PLATFORM="x86_64-linux" ;; \
+		Linux-aarch64) PLATFORM="arm64-linux" ;; \
+		Darwin-arm64)  PLATFORM="arm64-macos" ;; \
+		Darwin-x86_64) PLATFORM="x86_64-macos" ;; \
+		*) echo "Unsupported platform: $$(uname -s)-$$(uname -m)"; exit 1 ;; \
+	esac; \
+	URL="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$(WASI_SDK_VERSION_REQUIRED)/wasi-sdk-$(WASI_SDK_VERSION_REQUIRED).0-$$PLATFORM.tar.gz"; \
+	echo "Downloading $$URL"; \
+	rm -rf "$(WASI_SDK)"; \
+	mkdir -p "$(WASI_SDK)"; \
+	curl -sL "$$URL" | tar xz -C "$(WASI_SDK)" --strip-components=1; \
+	echo ""; \
+	echo "wasi-sdk $(WASI_SDK_VERSION_REQUIRED) installed to $(WASI_SDK)"
 
 $(OUTPUT): $(ALL_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
