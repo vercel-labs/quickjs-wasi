@@ -145,7 +145,7 @@ interface QuickJSExports {
   qjs_call(funcPtr: number, thisPtr: number, argc: number, argvPtr: number): number;
 
   // Host function registration
-  qjs_new_host_function(namePtr: number, nameLen: number, funcId: number, argCount: number): number;
+  qjs_new_host_function(namePtr: number, nameLen: number, argCount: number): number;
 
   // Promise operations
   qjs_new_promise(resolveOutPtr: number, rejectOutPtr: number): number;
@@ -248,9 +248,10 @@ export class QuickJS {
   private decoder = new TextDecoder();
   private disposed = false;
 
-  /** Registry of host callbacks, keyed by integer ID */
-  private hostCallbacks = new Map<number, HostFunction>();
-  private nextCallbackId = 1;
+  /** Registry of host callbacks, keyed by function name */
+  private hostCallbacks = new Map<string, HostFunction>();
+  /** Counter for internal-only callbacks (e.g. promise settle handlers) */
+  private nextInternalId = 1;
   private interruptHandler: (() => boolean) | null = null;
 
   // Cached singleton handles
@@ -624,8 +625,8 @@ export class QuickJS {
     // Final shim for the main module: builtins + user overrides
     const wasiShim = { ...wasiBuiltins, ...wasiUserOverrides };
 
-    const hostCall = (funcId: number, thisPtr: number, argc: number, argvPtr: number): number => {
-      return vm.handleHostCall(funcId, thisPtr, argc, argvPtr);
+    const hostCall = (namePtr: number, nameLen: number, thisPtr: number, argc: number, argvPtr: number): number => {
+      return vm.handleHostCall(namePtr, nameLen, thisPtr, argc, argvPtr);
     };
 
     const hostInterrupt = (): number => {
@@ -644,8 +645,9 @@ export class QuickJS {
   /**
    * Called from WASM when a host function is invoked from QuickJS code.
    */
-  private handleHostCall(funcId: number, thisPtr: number, argc: number, argvPtr: number): number {
-    const callback = this.hostCallbacks.get(funcId);
+  private handleHostCall(namePtr: number, nameLen: number, thisPtr: number, argc: number, argvPtr: number): number {
+    const name = this.decoder.decode(new Uint8Array(this.exports.memory.buffer, namePtr, nameLen));
+    const callback = this.hostCallbacks.get(name);
     if (!callback) {
       return this.exports.qjs_get_undefined();
     }
@@ -880,11 +882,27 @@ export class QuickJS {
    */
   newFunction(name: string, fn: HostFunction): JSValueHandle {
     this.assertNotDisposed();
-    const funcId = this.nextCallbackId++;
-    this.hostCallbacks.set(funcId, fn);
+    if (this.hostCallbacks.has(name)) {
+      throw new Error(`Host callback with name "${name}" is already registered`);
+    }
+    this.hostCallbacks.set(name, fn);
 
     const { ptr: namePtr, len: nameLen } = this.writeString(name);
-    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, funcId, 0);
+    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, 0);
+    this.exports.wasm_free(namePtr);
+    return new JSValueHandle(this, resultPtr);
+  }
+
+  /**
+   * Create an internal host function that bypasses the duplicate-name check.
+   * Used for ephemeral callbacks (promise settle handlers, resolvePromise, etc.)
+   * that are not intended to survive snapshot/restore.
+   */
+  private newInternalFunction(name: string, fn: HostFunction): JSValueHandle {
+    this.hostCallbacks.set(name, fn);
+
+    const { ptr: namePtr, len: nameLen } = this.writeString(name);
+    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, 0);
     this.exports.wasm_free(namePtr);
     return new JSValueHandle(this, resultPtr);
   }
@@ -935,16 +953,12 @@ export class QuickJS {
             settledResolve = res;
           });
 
-          const settleCallbackId = vm.nextCallbackId++;
-          vm.hostCallbacks.set(settleCallbackId, () => {
+          const settleName = `__settle:${vm.nextInternalId++}`;
+          const onSettleFn = vm.newInternalFunction(settleName, () => {
             settledResolve!();
-            vm.hostCallbacks.delete(settleCallbackId);
+            vm.hostCallbacks.delete(settleName);
             return vm.undefined;
           });
-
-          const { ptr: onSettleName, len: onSettleNameLen } = vm.writeString('__onSettle');
-          const onSettleFn = new JSValueHandle(vm, vm.exports.qjs_new_host_function(onSettleName, onSettleNameLen, settleCallbackId, 0));
-          vm.exports.wasm_free(onSettleName);
 
           const thenFn = promiseHandle.getProp('then');
           const onSettleDup = onSettleFn.dup();
@@ -997,13 +1011,21 @@ export class QuickJS {
 
     // Pending — attach a .then/.catch to get notified
     return new Promise((hostResolve) => {
-      const onFulfilled = this.newFunction('__onFulfilled', (...args) => {
+      const id = this.nextInternalId++;
+      const fulfilledName = `__onFulfilled:${id}`;
+      const rejectedName = `__onRejected:${id}`;
+
+      const onFulfilled = this.newInternalFunction(fulfilledName, (...args) => {
         const val = args[0]?.dup() ?? this.undefined;
+        this.hostCallbacks.delete(fulfilledName);
+        this.hostCallbacks.delete(rejectedName);
         hostResolve({ value: val });
         return this.undefined;
       });
-      const onRejected = this.newFunction('__onRejected', (...args) => {
+      const onRejected = this.newInternalFunction(rejectedName, (...args) => {
         const val = args[0]?.dup() ?? this.undefined;
+        this.hostCallbacks.delete(fulfilledName);
+        this.hostCallbacks.delete(rejectedName);
         hostResolve({ error: val });
         return this.undefined;
       });
@@ -1433,13 +1455,10 @@ export class QuickJS {
 
   /**
    * Re-register a host callback after restoring from a snapshot.
-   * The func_id must match the ID that was used before the snapshot.
+   * The name must match the name passed to `newFunction()` before the snapshot.
    */
-  registerHostCallback(funcId: number, fn: HostFunction): void {
-    this.hostCallbacks.set(funcId, fn);
-    if (funcId >= this.nextCallbackId) {
-      this.nextCallbackId = funcId + 1;
-    }
+  registerHostCallback(name: string, fn: HostFunction): void {
+    this.hostCallbacks.set(name, fn);
   }
 
   /**

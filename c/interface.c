@@ -31,7 +31,8 @@ static JSValue *jsvalue_to_heap(JSValue val) {
 /*
  * Imported from the host environment. When QuickJS calls a host function,
  * this import is invoked with:
- *   func_id  - the callback ID assigned by the host
+ *   name_ptr - pointer to the UTF-8 function name string in WASM memory
+ *   name_len - byte length of the function name
  *   this_ptr - pointer to heap-allocated JSValue for 'this'
  *   argc     - argument count
  *   argv_ptr - pointer to array of JSValue* pointers in WASM memory
@@ -39,7 +40,7 @@ static JSValue *jsvalue_to_heap(JSValue val) {
  * Returns a pointer to a heap-allocated JSValue (the return value).
  */
 __attribute__((import_module("env"), import_name("host_call")))
-extern JSValue *host_call(int func_id, JSValue *this_ptr, int argc, JSValue **argv_ptr);
+extern JSValue *host_call(const char *name_ptr, int name_len, JSValue *this_ptr, int argc, JSValue **argv_ptr);
 
 /*
  * Imported from the host environment. Called periodically during JS execution
@@ -60,7 +61,7 @@ static int interrupt_handler_trampoline(JSRuntime *rt, void *opaque)
 
 /*
  * Trampoline: a JSCFunctionData callback that dispatches to the host.
- * The func_id is stored in func_data[0] as an integer.
+ * The function name is stored in func_data[0] as a JS string.
  */
 static JSValue host_callback_trampoline(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv,
@@ -68,9 +69,9 @@ static JSValue host_callback_trampoline(JSContext *ctx, JSValueConst this_val,
 {
     (void)magic;
 
-    /* Extract the func_id from func_data[0] */
-    int func_id;
-    JS_ToInt32(ctx, &func_id, func_data[0]);
+    /* Extract the function name from func_data[0] */
+    size_t name_len;
+    const char *name = JS_ToCStringLen(ctx, &name_len, func_data[0]);
 
     /* Heap-allocate this_val for the host */
     JSValue *this_ptr = jsvalue_to_heap(JS_DupValue(ctx, this_val));
@@ -85,7 +86,9 @@ static JSValue host_callback_trampoline(JSContext *ctx, JSValueConst this_val,
     }
 
     /* Call into the host */
-    JSValue *result_ptr = host_call(func_id, this_ptr, argc, argv_ptrs);
+    JSValue *result_ptr = host_call(name, (int)name_len, this_ptr, argc, argv_ptrs);
+
+    JS_FreeCString(ctx, name);
 
     /* Extract and dup the result, then free the pointer.
        NULL means the host threw an exception (via qjs_throw). */
@@ -467,16 +470,17 @@ JSValue *qjs_call(JSValue *func, JSValue *this_val, int argc, JSValue **argv) {
 
 /*
  * Create a new QuickJS function that dispatches to the host callback
- * identified by func_id. When called from QuickJS code, this function
- * will invoke the host_call import with the given func_id.
+ * identified by name. When called from QuickJS code, this function
+ * will invoke the host_call import with the function name string.
+ * The name is stored as a JS string in func_data[0] so it survives
+ * snapshot/restore.
  */
 __attribute__((export_name("qjs_new_host_function")))
-JSValue *qjs_new_host_function(const char *name, int name_len, int func_id, int arg_count) {
-    (void)name_len;
-    JSValue func_id_val = JS_NewInt32(ctx, func_id);
+JSValue *qjs_new_host_function(const char *name, int name_len, int arg_count) {
+    JSValue name_val = JS_NewStringLen(ctx, name, name_len);
     JSValue func = JS_NewCFunctionData2(ctx, host_callback_trampoline,
-                                         name, arg_count, 0, 1, &func_id_val);
-    JS_FreeValue(ctx, func_id_val);
+                                         name, arg_count, 0, 1, &name_val);
+    JS_FreeValue(ctx, name_val);
     return jsvalue_to_heap(func);
 }
 

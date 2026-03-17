@@ -351,4 +351,16 @@ describe('async host callbacks', () => {
 
     expect(vm.global.getProp('resolvedIP').consume(h => h.toString())).toBe('93.184.216.34');
   });
+
+  it('should throw when registering duplicate function names', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    {
+      using fn1 = vm.newFunction('myFunc', () => vm.undefined);
+      vm.setProp(vm.global, 'myFunc', fn1);
+    }
+
+    expect(() => {
+      vm.newFunction('myFunc', () => vm.undefined);
+    }).toThrow('Host callback with name "myFunc" is already registered');
+  });
 });

@@ -291,14 +291,13 @@ const restored = QuickJS.deserializeSnapshot(loaded);
 
 ### Host Callbacks After Restore
 
-Host functions registered with `newFunction()` are assigned integer IDs that get baked into the snapshot. After restoring, re-register the callbacks:
+Host functions registered with `newFunction()` are keyed by their name, which gets baked into the snapshot. After restoring, re-register the callbacks by name:
 
 ```typescript
 let snapshot: Snapshot;
 
 {
   using vm = await QuickJS.create(wasmBytes);
-  // fn is assigned callback ID 1 (first registered callback)
   using fn = vm.newFunction('hostAdd', (...args) => {
     return vm.newNumber(args[0].toNumber() + args[1].toNumber());
   });
@@ -307,9 +306,9 @@ let snapshot: Snapshot;
 }
 
 {
-  // After restore — re-register with the same ID
+  // After restore — re-register by name
   using vm = await QuickJS.restore(snapshot, wasmBytes);
-  vm.registerHostCallback(1, (...args) => {
+  vm.registerHostCallback('hostAdd', (...args) => {
     return vm.newNumber(args[0].toNumber() + args[1].toNumber());
   });
 
@@ -318,6 +317,8 @@ let snapshot: Snapshot;
   console.log(result.toNumber()); // 300
 }
 ```
+
+Note: each call to `newFunction()` must use a unique name. Attempting to register two host functions with the same name will throw an error.
 
 ### Native WASM Extensions
 
@@ -384,7 +385,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic li
 | `vm.dump(handle)` | Convert a QuickJS value to a host value |
 | `vm.hostToHandle(value)` | Convert a host value to a QuickJS handle |
 | `vm.snapshot()` | Capture the entire VM state (including extension metadata) |
-| `vm.registerHostCallback(id, fn)` | Re-register a host callback after restore |
+| `vm.registerHostCallback(name, fn)` | Re-register a host callback by name after restore |
 | `vm.dispose()` | Free the VM |
 | `vm[Symbol.dispose]()` | Same as `dispose()` — enables `using vm = ...` |
 
@@ -513,9 +514,9 @@ Host (Node.js / Deno / Bun / Browser)
 
 ### Host Callback Mechanism
 
-When `vm.newFunction()` is called, an integer ID is allocated and a QuickJS C function is created via `JS_NewCFunctionData2` with that ID stored as function data. When QuickJS code calls the function, the C trampoline extracts the ID and calls the imported `host_call(func_id, this_ptr, argc, argv_ptr)` function, which dispatches to the registered host callback by ID.
+When `vm.newFunction(name, fn)` is called, a QuickJS C function is created via `JS_NewCFunctionData2` with the function name stored as a JS string in `func_data[0]`. When QuickJS code calls the function, the C trampoline extracts the name and calls the imported `host_call(name_ptr, name_len, this_ptr, argc, argv_ptr)` function, which dispatches to the registered host callback by name.
 
-This design survives snapshot/restore: the ID is stored in QuickJS's heap (part of the snapshot), and after restore, `registerHostCallback(id, fn)` re-maps the ID to a new host function.
+This design survives snapshot/restore: the name string is stored in QuickJS's heap (part of the snapshot), and after restore, `registerHostCallback(name, fn)` re-maps the name to a new host function. Because callbacks are keyed by name rather than sequential integer IDs, the registration order doesn't matter and adding or removing host functions won't silently break restore.
 
 ## Implications for Durable Workflows
 

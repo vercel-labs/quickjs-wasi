@@ -58,7 +58,7 @@ describe('snapshot and restore', () => {
     vm1.dispose();
 
     const vm2 = await QuickJS.restore(snapshot, wasmBytes);
-    vm2.registerHostCallback(1, (...args) => {
+    vm2.registerHostCallback('hostAdd', (...args) => {
       return vm2.newNumber(args[0].toNumber() + args[1].toNumber());
     });
 
