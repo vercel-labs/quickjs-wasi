@@ -1,5 +1,17 @@
 # quickjs-wasi
 
+## 2.0.0
+
+### Major Changes
+
+- [`d231c61`](https://github.com/vercel-labs/quickjs-wasi/commit/d231c61b843cfd4828c937dcf5316ce0b7ecc857) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Replace opaque integer callback IDs with string names for host callbacks. `registerHostCallback()` now takes the function name instead of a numeric ID, making restore order-independent and self-documenting. `newFunction()` enforces unique names to prevent silent conflicts.
+
+### Patch Changes
+
+- [`0a32dbb`](https://github.com/vercel-labs/quickjs-wasi/commit/0a32dbb27c3bf46413f09a9b3bf11fac270657bc) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Use `new URL(import.meta.url)` pattern in extension files for consistent `@vercel/nft` asset tracing
+
+- [`4f7bcb2`](https://github.com/vercel-labs/quickjs-wasi/commit/4f7bcb2c4ef94e3846926171a3cfe071aed22e77) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Rebuild WASM artifacts with wasi-sdk 32 (clang 22.1.0), upgraded from wasi-sdk 30 (clang 21.1.4).
+
 ## 1.3.0
 
 ### Minor Changes
