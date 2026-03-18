@@ -11,7 +11,7 @@ const scExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'structur
 async function createVM() {
   return QuickJS.create({
     wasm: wasmBytes,
-    extensions: [{ name: 'structured-clone', wasm: scExtBytes, initFn: 'qjs_ext_structured_clone_init' }],
+    extensions: [{ name: 'structured-clone', wasm: scExtBytes }],
   });
 }
 

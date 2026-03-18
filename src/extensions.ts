@@ -54,7 +54,7 @@ export interface ExtensionDescriptor {
   name: string;
   /** WASM bytes or pre-compiled module */
   wasm: BufferSource | WebAssembly.Module;
-  /** Name of the init function exported by the extension (default: `qjs_ext_${name}_init`) */
+  /** Name of the init function exported by the extension (default: `qjs_ext_${name}_init`, with `-` replaced by `_`) */
   initFn?: string;
   /**
    * Extension-provided WASI host function implementations.
@@ -384,7 +384,7 @@ export async function loadExtension(
   }
 
   const initFn =
-    descriptor.initFn ?? `qjs_ext_${descriptor.name}_init`;
+    descriptor.initFn ?? `qjs_ext_${descriptor.name.replace(/-/g, '_')}_init`;
 
   return {
     name: descriptor.name,

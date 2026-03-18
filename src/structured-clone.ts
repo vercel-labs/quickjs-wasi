@@ -42,5 +42,4 @@ const wasmBytes = readFileSync(
 export const structuredCloneExtension: ExtensionDescriptor = {
   name: 'structured-clone',
   wasm: wasmBytes,
-  initFn: 'qjs_ext_structured_clone_init',
 };
