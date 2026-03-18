@@ -34,7 +34,8 @@
     "./crypto": {
       "types": "./dist/crypto.d.ts",
       "default": "./dist/crypto.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
