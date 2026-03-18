@@ -11,14 +11,11 @@
 import { Bench } from 'tinybench';
 import { QuickJS } from '../src/index.ts';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const wasmBytes = readFileSync(resolve(__dirname, '..', 'quickjs.wasm'));
-const encodingExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'encoding', 'encoding.so'));
-const polyfillCode = readFileSync(resolve(__dirname, 'encoding-polyfill-bundle.js'), 'utf-8');
+const wasmBytes = readFileSync(new URL('../quickjs.wasm', import.meta.url));
+const encodingExtBytes = readFileSync(new URL('../extensions/encoding/encoding.so', import.meta.url));
+const polyfillCode = readFileSync(new URL('encoding-polyfill-bundle.js', import.meta.url), 'utf-8');
 
 // ─── Benchmark Workloads ─────────────────────────────────────────────────────
 

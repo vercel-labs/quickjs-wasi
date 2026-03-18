@@ -2,11 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const scExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'structured-clone', 'structured-clone.so'));
+const scExtBytes = readFileSync(new URL('../extensions/structured-clone/structured-clone.so', import.meta.url));
 
 async function createVM() {
   return QuickJS.create({

@@ -2,12 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const cryptoExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'crypto', 'crypto.so'));
-const encodingExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'encoding', 'encoding.so'));
+const cryptoExtBytes = readFileSync(new URL('../extensions/crypto/crypto.so', import.meta.url));
+const encodingExtBytes = readFileSync(new URL('../extensions/encoding/encoding.so', import.meta.url));
 
 // We load both crypto and encoding extensions so TextEncoder is available
 // for creating test data from strings.

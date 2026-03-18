@@ -2,11 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const encodingExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'encoding', 'encoding.so'));
+const encodingExtBytes = readFileSync(new URL('../extensions/encoding/encoding.so', import.meta.url));
 
 /** Helper: create a VM with the encoding extension loaded */
 async function createVM() {

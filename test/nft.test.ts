@@ -1,10 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { nodeFileTrace } from '@vercel/nft';
-import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dist = (...parts: string[]) => resolve(__dirname, '..', 'dist', ...parts);
+const dist = (...parts: string[]) => fileURLToPath(new URL(['../dist', ...parts].join('/'), import.meta.url));
 
 describe('@vercel/nft', () => {
   it('should trace quickjs.wasm as a dependency of dist/index.js', async () => {

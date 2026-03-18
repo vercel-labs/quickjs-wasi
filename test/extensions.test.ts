@@ -2,11 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const urlExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'url', 'url.so'));
+const urlExtBytes = readFileSync(new URL('../extensions/url/url.so', import.meta.url));
 
 describe('native WASM extensions', () => {
   it('should load the URL extension and parse a URL', async () => {

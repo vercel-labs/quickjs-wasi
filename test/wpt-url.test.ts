@@ -10,11 +10,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const urlExtBytes = readFileSync(resolve(__dirname, '..', 'extensions', 'url', 'url.so'));
+const urlExtBytes = readFileSync(new URL('../extensions/url/url.so', import.meta.url));
 
 interface WPTTestEntry {
   input: string;
@@ -35,7 +32,7 @@ interface WPTTestEntry {
 
 // Load WPT test data, filtering out comment strings
 const wptData: (WPTTestEntry | string)[] = JSON.parse(
-  readFileSync(resolve(__dirname, 'wpt-urltestdata.json'), 'utf-8')
+  readFileSync(new URL('wpt-urltestdata.json', import.meta.url), 'utf-8')
 );
 const wptTests = wptData.filter((entry): entry is WPTTestEntry => typeof entry === 'object');
 const successTests = wptTests.filter(t => !t.failure);

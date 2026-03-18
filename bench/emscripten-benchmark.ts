@@ -15,11 +15,10 @@ import { Bench } from 'tinybench';
 import { QuickJS } from '../src/index.ts';
 import { getQuickJS, type QuickJSWASMModule } from 'quickjs-emscripten';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
+import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const wasmBytes = readFileSync(resolve(__dirname, '..', 'quickjs.wasm'));
+const wasmBytes = readFileSync(new URL('../quickjs.wasm', import.meta.url));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -375,11 +374,11 @@ async function main() {
 
   printHeader('Package Install Size');
 
-  const nodeModules = resolve(__dirname, '..', 'node_modules');
+  const wasiRoot = fileURLToPath(new URL('..', import.meta.url));
+  const nodeModules = resolve(wasiRoot, 'node_modules');
   const pnpmStore = resolve(nodeModules, '.pnpm');
 
   // quickjs-wasi: the files that would be published (dist/ + quickjs.wasm + extensions/*/*.so)
-  const wasiRoot = resolve(__dirname, '..');
   const wasiDistSize = dirSize(resolve(wasiRoot, 'dist'));
   const wasiWasmSize = statSync(resolve(wasiRoot, 'quickjs.wasm')).size;
   let wasiExtSize = 0;
