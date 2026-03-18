@@ -1,5 +1,13 @@
 # quickjs-wasi
 
+## 2.0.1
+
+### Patch Changes
+
+- [`f5261ba`](https://github.com/vercel-labs/quickjs-wasi/commit/f5261baea594415857923be7bc4cfbaf264b257e) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `./package.json` sub-export to the exports map
+
+- [`73c323d`](https://github.com/vercel-labs/quickjs-wasi/commit/73c323d73675428b2d8d388295ae229b03be783c) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Replace `-` with `_` in extension name when deriving the default `initFn`, since hyphens are not valid in C function names
+
 ## 2.0.0
 
 ### Major Changes
