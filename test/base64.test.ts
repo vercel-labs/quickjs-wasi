@@ -175,6 +175,372 @@ describe('btoa/atob round-trip', () => {
   });
 });
 
+/* ==================================================================
+ *  Uint8Array.prototype.toBase64 / toHex
+ * ================================================================== */
+
+describe('Uint8Array.prototype.toBase64', () => {
+  it('should be available as a method', async () => {
+    expect(await evalStr('typeof Uint8Array.prototype.toBase64')).toBe('function');
+  });
+
+  it('should encode empty array', async () => {
+    expect(await evalStr('new Uint8Array([]).toBase64()')).toBe('');
+  });
+
+  it('should encode "Hello World"', async () => {
+    expect(await evalStr('new Uint8Array([72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]).toBase64()')).toBe('SGVsbG8gV29ybGQ=');
+  });
+
+  it('should encode single byte', async () => {
+    expect(await evalStr('new Uint8Array([72]).toBase64()')).toBe('SA==');
+  });
+
+  it('should encode two bytes', async () => {
+    expect(await evalStr('new Uint8Array([72, 101]).toBase64()')).toBe('SGU=');
+  });
+
+  it('should encode three bytes (no padding)', async () => {
+    expect(await evalStr('new Uint8Array([72, 101, 108]).toBase64()')).toBe('SGVs');
+  });
+
+  it('should support base64url alphabet', async () => {
+    expect(await evalStr("new Uint8Array([251, 255, 191]).toBase64({ alphabet: 'base64url' })")).toBe('-_-_');
+  });
+
+  it('should use standard base64 by default', async () => {
+    expect(await evalStr('new Uint8Array([251, 255, 191]).toBase64()')).toBe('+/+/');
+  });
+
+  it('should support omitPadding option', async () => {
+    expect(await evalStr('new Uint8Array([72]).toBase64({ omitPadding: true })')).toBe('SA');
+  });
+
+  it('should include padding by default', async () => {
+    expect(await evalStr('new Uint8Array([72]).toBase64()')).toBe('SA==');
+  });
+
+  it('should support omitPadding with 2-byte remainder', async () => {
+    expect(await evalStr('new Uint8Array([72, 101]).toBase64({ omitPadding: true })')).toBe('SGU');
+  });
+
+  it('should throw TypeError for non-Uint8Array', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode('Uint8Array.prototype.toBase64.call([1, 2, 3])'); }).toThrow();
+  });
+
+  it('should throw TypeError for invalid alphabet option', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("new Uint8Array([1]).toBase64({ alphabet: 'invalid' })"); }).toThrow();
+  });
+});
+
+describe('Uint8Array.prototype.toHex', () => {
+  it('should be available as a method', async () => {
+    expect(await evalStr('typeof Uint8Array.prototype.toHex')).toBe('function');
+  });
+
+  it('should encode empty array', async () => {
+    expect(await evalStr('new Uint8Array([]).toHex()')).toBe('');
+  });
+
+  it('should encode "Hello World"', async () => {
+    expect(await evalStr('new Uint8Array([72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]).toHex()')).toBe('48656c6c6f20576f726c64');
+  });
+
+  it('should pad single digit hex values', async () => {
+    expect(await evalStr('new Uint8Array([0, 1, 15]).toHex()')).toBe('00010f');
+  });
+
+  it('should use lowercase hex', async () => {
+    expect(await evalStr('new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]).toHex()')).toBe('deadbeef');
+  });
+
+  it('should encode all byte values 0-255', async () => {
+    const result = await evalStr(`
+      var arr = new Uint8Array(256);
+      for (var i = 0; i < 256; i++) arr[i] = i;
+      arr.toHex().length
+    `);
+    expect(result).toBe('512');
+  });
+});
+
+/* ==================================================================
+ *  Uint8Array.fromBase64 / fromHex
+ * ================================================================== */
+
+describe('Uint8Array.fromBase64', () => {
+  it('should be available as a static method', async () => {
+    expect(await evalStr('typeof Uint8Array.fromBase64')).toBe('function');
+  });
+
+  it('should decode empty string', async () => {
+    expect(await evalStr("Uint8Array.fromBase64('').length")).toBe('0');
+  });
+
+  it('should decode "Hello World"', async () => {
+    expect(await evalStr("Array.from(Uint8Array.fromBase64('SGVsbG8gV29ybGQ=')).join(',')")).toBe('72,101,108,108,111,32,87,111,114,108,100');
+  });
+
+  it('should decode without padding (loose)', async () => {
+    expect(await evalStr("Array.from(Uint8Array.fromBase64('SGVsbG8gV29ybGQ')).join(',')")).toBe('72,101,108,108,111,32,87,111,114,108,100');
+  });
+
+  it('should ignore whitespace', async () => {
+    expect(await evalStr("Array.from(Uint8Array.fromBase64('SGVs bG8g\\nV29y bGQ=')).join(',')")).toBe('72,101,108,108,111,32,87,111,114,108,100');
+  });
+
+  it('should support base64url alphabet', async () => {
+    expect(await evalStr("Array.from(Uint8Array.fromBase64('-_-_', { alphabet: 'base64url' })).join(',')")).toBe('251,255,191');
+  });
+
+  it('should reject + and / in base64url mode', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("Uint8Array.fromBase64('+/+/', { alphabet: 'base64url' })"); }).toThrow();
+  });
+
+  it('should throw for invalid characters', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("Uint8Array.fromBase64('not valid!!')"); }).toThrow();
+  });
+
+  it('should throw for single character (loose)', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("Uint8Array.fromBase64('A')"); }).toThrow();
+  });
+
+  it('should throw for non-string input', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode('Uint8Array.fromBase64(123)'); }).toThrow();
+  });
+
+  it('should handle strict lastChunkHandling', async () => {
+    // 'SGVsbG8=' has valid padding, strict should accept
+    expect(await evalStr("Array.from(Uint8Array.fromBase64('SGVsbG8=', { lastChunkHandling: 'strict' })).join(',')")).toBe('72,101,108,108,111');
+  });
+
+  it('should reject overflow bits in strict mode', async () => {
+    using vm = await createVM();
+    // 'SGVsbG8gV29ybGR=' has non-zero overflow bits in the last chunk
+    expect(() => { vm.evalCode("Uint8Array.fromBase64('SGVsbG8gV29ybGR=', { lastChunkHandling: 'strict' })"); }).toThrow();
+  });
+
+  it('should reject unpadded input in strict mode', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("Uint8Array.fromBase64('SGVsbG8', { lastChunkHandling: 'strict' })"); }).toThrow();
+  });
+
+  it('should stop before partial chunk with stop-before-partial', async () => {
+    // 'SGVsbG8' = 'SGVs' (4-char chunk -> 3 bytes: H,e,l) + 'bG8' (3-char partial)
+    // stop-before-partial stops before the partial chunk
+    expect(await evalStr("Array.from(Uint8Array.fromBase64('SGVsbG8', { lastChunkHandling: 'stop-before-partial' })).join(',')")).toBe('72,101,108');
+  });
+});
+
+describe('Uint8Array.fromHex', () => {
+  it('should be available as a static method', async () => {
+    expect(await evalStr('typeof Uint8Array.fromHex')).toBe('function');
+  });
+
+  it('should decode empty string', async () => {
+    expect(await evalStr("Uint8Array.fromHex('').length")).toBe('0');
+  });
+
+  it('should decode "Hello World"', async () => {
+    expect(await evalStr("Array.from(Uint8Array.fromHex('48656c6c6f20576f726c64')).join(',')")).toBe('72,101,108,108,111,32,87,111,114,108,100');
+  });
+
+  it('should decode uppercase hex', async () => {
+    expect(await evalStr("Array.from(Uint8Array.fromHex('DEADBEEF')).join(',')")).toBe('222,173,190,239');
+  });
+
+  it('should decode mixed case hex', async () => {
+    expect(await evalStr("Array.from(Uint8Array.fromHex('DeAdBeEf')).join(',')")).toBe('222,173,190,239');
+  });
+
+  it('should throw for odd-length string', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("Uint8Array.fromHex('abc')"); }).toThrow();
+  });
+
+  it('should throw for invalid hex characters', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("Uint8Array.fromHex('gg')"); }).toThrow();
+  });
+
+  it('should throw for non-string input', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode('Uint8Array.fromHex(123)'); }).toThrow();
+  });
+});
+
+/* ==================================================================
+ *  Uint8Array.prototype.setFromBase64 / setFromHex
+ * ================================================================== */
+
+describe('Uint8Array.prototype.setFromBase64', () => {
+  it('should be available as a method', async () => {
+    expect(await evalStr('typeof Uint8Array.prototype.setFromBase64')).toBe('function');
+  });
+
+  it('should decode into an existing Uint8Array', async () => {
+    const result = await evalStr(`
+      var target = new Uint8Array(11);
+      var r = target.setFromBase64('SGVsbG8gV29ybGQ=');
+      JSON.stringify({ arr: Array.from(target), read: r.read, written: r.written })
+    `);
+    const parsed = JSON.parse(result);
+    expect(parsed.arr).toEqual([72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]);
+    expect(parsed.read).toBe(16);
+    expect(parsed.written).toBe(11);
+  });
+
+  it('should stop when target is full', async () => {
+    const result = await evalStr(`
+      var target = new Uint8Array(7);
+      var r = target.setFromBase64('Zm9vYmFy');
+      JSON.stringify({ arr: Array.from(target), read: r.read, written: r.written })
+    `);
+    const parsed = JSON.parse(result);
+    expect(parsed.arr).toEqual([102, 111, 111, 98, 97, 114, 0]);
+    expect(parsed.written).toBe(6);
+    expect(parsed.read).toBe(8);
+  });
+
+  it('should return read and written for empty string', async () => {
+    const result = await evalStr(`
+      var target = new Uint8Array(5);
+      var r = target.setFromBase64('');
+      JSON.stringify({ read: r.read, written: r.written })
+    `);
+    const parsed = JSON.parse(result);
+    expect(parsed.read).toBe(0);
+    expect(parsed.written).toBe(0);
+  });
+
+  it('should support base64url alphabet', async () => {
+    const result = await evalStr(`
+      var target = new Uint8Array(3);
+      var r = target.setFromBase64('-_-_', { alphabet: 'base64url' });
+      JSON.stringify({ arr: Array.from(target), read: r.read, written: r.written })
+    `);
+    const parsed = JSON.parse(result);
+    expect(parsed.arr).toEqual([251, 255, 191]);
+    expect(parsed.read).toBe(4);
+    expect(parsed.written).toBe(3);
+  });
+});
+
+describe('Uint8Array.prototype.setFromHex', () => {
+  it('should be available as a method', async () => {
+    expect(await evalStr('typeof Uint8Array.prototype.setFromHex')).toBe('function');
+  });
+
+  it('should decode into an existing Uint8Array', async () => {
+    const result = await evalStr(`
+      var target = new Uint8Array(6);
+      var r = target.setFromHex('deadbeef');
+      JSON.stringify({ arr: Array.from(target), read: r.read, written: r.written })
+    `);
+    const parsed = JSON.parse(result);
+    expect(parsed.arr).toEqual([222, 173, 190, 239, 0, 0]);
+    expect(parsed.read).toBe(8);
+    expect(parsed.written).toBe(4);
+  });
+
+  it('should stop when target is full', async () => {
+    const result = await evalStr(`
+      var target = new Uint8Array(2);
+      var r = target.setFromHex('deadbeef');
+      JSON.stringify({ arr: Array.from(target), read: r.read, written: r.written })
+    `);
+    const parsed = JSON.parse(result);
+    expect(parsed.arr).toEqual([222, 173]);
+    expect(parsed.read).toBe(4);
+    expect(parsed.written).toBe(2);
+  });
+
+  it('should return read and written for empty string', async () => {
+    const result = await evalStr(`
+      var target = new Uint8Array(5);
+      var r = target.setFromHex('');
+      JSON.stringify({ read: r.read, written: r.written })
+    `);
+    const parsed = JSON.parse(result);
+    expect(parsed.read).toBe(0);
+    expect(parsed.written).toBe(0);
+  });
+
+  it('should throw for invalid hex', async () => {
+    using vm = await createVM();
+    expect(() => { vm.evalCode("new Uint8Array(10).setFromHex('gg')"); }).toThrow();
+  });
+});
+
+/* ==================================================================
+ *  Round-trip tests: toBase64 <-> fromBase64, toHex <-> fromHex
+ * ================================================================== */
+
+describe('toBase64/fromBase64 round-trip', () => {
+  it('should round-trip empty', async () => {
+    expect(await evalStr(`
+      var a = new Uint8Array([]);
+      var b = Uint8Array.fromBase64(a.toBase64());
+      b.length === 0 ? 'ok' : 'fail'
+    `)).toBe('ok');
+  });
+
+  it('should round-trip all byte values', async () => {
+    expect(await evalStr(`
+      var a = new Uint8Array(256);
+      for (var i = 0; i < 256; i++) a[i] = i;
+      var encoded = a.toBase64();
+      var decoded = Uint8Array.fromBase64(encoded);
+      decoded.length === 256 && decoded[0] === 0 && decoded[255] === 255 ? 'ok' : 'fail'
+    `)).toBe('ok');
+  });
+
+  it('should round-trip with base64url', async () => {
+    expect(await evalStr(`
+      var a = new Uint8Array([251, 255, 191]);
+      var opts = { alphabet: 'base64url' };
+      var encoded = a.toBase64(opts);
+      var decoded = Uint8Array.fromBase64(encoded, opts);
+      Array.from(decoded).join(',') === '251,255,191' ? 'ok' : 'fail'
+    `)).toBe('ok');
+  });
+
+  it('should round-trip with omitPadding', async () => {
+    expect(await evalStr(`
+      var a = new Uint8Array([72, 101]);
+      var encoded = a.toBase64({ omitPadding: true });
+      var decoded = Uint8Array.fromBase64(encoded);
+      Array.from(decoded).join(',') === '72,101' ? 'ok' : 'fail'
+    `)).toBe('ok');
+  });
+});
+
+describe('toHex/fromHex round-trip', () => {
+  it('should round-trip empty', async () => {
+    expect(await evalStr(`
+      var a = new Uint8Array([]);
+      var b = Uint8Array.fromHex(a.toHex());
+      b.length === 0 ? 'ok' : 'fail'
+    `)).toBe('ok');
+  });
+
+  it('should round-trip all byte values', async () => {
+    expect(await evalStr(`
+      var a = new Uint8Array(256);
+      for (var i = 0; i < 256; i++) a[i] = i;
+      var hex = a.toHex();
+      var decoded = Uint8Array.fromHex(hex);
+      decoded.length === 256 && decoded[0] === 0 && decoded[255] === 255 ? 'ok' : 'fail'
+    `)).toBe('ok');
+  });
+});
+
 describe('WPT: base64 edge cases', () => {
   // From web-platform-tests/wpt/html/webappapis/atob/base64.html
   const validPairs: [string, string][] = [
