@@ -31,6 +31,28 @@ export interface JSPropertyDescriptor {
 export type { WasiOptions };
 export type { ExtensionDescriptor, LoadedExtension, DylinkInfo, WasiImports } from './extensions.js';
 
+/**
+ * Flags for `evalCode()`, matching the QuickJS `JS_EVAL_*` constants.
+ */
+export const EvalFlags = {
+  /** Global script mode (default). */
+  TYPE_GLOBAL: 0 as const,
+  /** Module mode. */
+  TYPE_MODULE: (1 << 0) as 1,
+  /** Force strict mode. */
+  STRICT: (1 << 3) as 8,
+  /** Compile only — do not execute. */
+  COMPILE_ONLY: (1 << 5) as 32,
+  /** Omit stack frames before this eval from Error backtraces. */
+  BACKTRACE_BARRIER: (1 << 6) as 64,
+  /**
+   * Allow top-level `await` in global scripts. When used, `evalCode()`
+   * returns a handle to a Promise that resolves to the completion value.
+   * Use together with `executePendingJobs()` and `resolvePromise()`.
+   */
+  ASYNC: (1 << 7) as 128,
+} as const;
+
 export interface QuickJSOptions {
   /** WASM module bytes or pre-compiled module. If omitted, loads from the package. */
   wasm?: BufferSource | WebAssembly.Module;
@@ -719,12 +741,18 @@ export class QuickJS {
    * Evaluate JavaScript code and return the result as a handle.
    * If the code throws, a `JSException` (which extends `Error`) is thrown
    * on the host side — matching standard JavaScript semantics.
+   *
+   * @param code - The JavaScript source code to evaluate.
+   * @param filename - Optional filename for error stack traces (default `'<eval>'`).
+   * @param flags - Optional bitwise OR of `EvalFlags.*` constants.
+   *   For example, pass `EvalFlags.ASYNC` to allow top-level `await` — the
+   *   returned handle will be a Promise that resolves to the completion value.
    */
-  evalCode(code: string, filename: string = '<eval>'): JSValueHandle {
+  evalCode(code: string, filename: string = '<eval>', flags: number = 0): JSValueHandle {
     this.assertNotDisposed();
     const codeStr = this.writeString(code);
     const fnStr = this.writeString(filename);
-    const resultPtr = this.exports.qjs_eval(codeStr.ptr, codeStr.len, fnStr.ptr, 0);
+    const resultPtr = this.exports.qjs_eval(codeStr.ptr, codeStr.len, fnStr.ptr, flags);
     this.exports.wasm_free(codeStr.ptr);
     this.exports.wasm_free(fnStr.ptr);
     return this.throwIfException(new JSValueHandle(this, resultPtr));
