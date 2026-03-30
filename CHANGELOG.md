@@ -1,5 +1,15 @@
 # quickjs-wasi
 
+## 2.1.0
+
+### Minor Changes
+
+- [`2cbdb4e`](https://github.com/vercel-labs/quickjs-wasi/commit/2cbdb4ebf4ab6265d80bc91f3f45dfc89e5070b7) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `EvalFlags` constants export and an optional `flags` parameter to `evalCode()`. The `EvalFlags.ASYNC` flag enables native top-level `await` support in evaluated scripts — the result is a Promise that resolves to the script's completion value. This is cleaner than wrapping code in an async IIFE, as it preserves last-expression-value semantics and avoids regex-based `await` detection.
+
+- [`7c546ed`](https://github.com/vercel-labs/quickjs-wasi/commit/7c546ed4660a0182f76b4c1d15a55f262b189108) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add Uint8Array base64/hex methods to the base64 extension per the TC39 proposal-arraybuffer-base64 (Stage 4): `Uint8Array.prototype.toBase64()`, `Uint8Array.prototype.toHex()`, `Uint8Array.fromBase64()`, `Uint8Array.fromHex()`, `Uint8Array.prototype.setFromBase64()`, and `Uint8Array.prototype.setFromHex()`.
+
+- [`3c57e14`](https://github.com/vercel-labs/quickjs-wasi/commit/3c57e1451f9291fb81be7ea35fc76d1a4c4162ed) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Update QuickJS-ng from v0.12.1 to v0.13.0. Includes bug fixes for FinalizationRegistry, async generators, regex engine, Iterator, and TypedArray, as well as performance improvements for String.prototype.concat, Promise creation, regexp operations, and context creation.
+
 ## 2.0.1
 
 ### Patch Changes
