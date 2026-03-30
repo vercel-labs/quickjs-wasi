@@ -109,6 +109,33 @@ const BASE64_TYPE_DEFS = `
 declare function btoa(data: string): string;
 /** Decodes a base64-encoded string to a binary string. */
 declare function atob(data: string): string;
+
+interface Uint8ArrayBase64Options {
+  alphabet?: "base64" | "base64url";
+}
+interface Uint8ArrayFromBase64Options extends Uint8ArrayBase64Options {
+  lastChunkHandling?: "loose" | "strict" | "stop-before-partial";
+}
+interface Uint8ArraySetFromResult {
+  read: number;
+  written: number;
+}
+interface Uint8Array {
+  /** Encodes the byte data as a base64 string. */
+  toBase64(options?: Uint8ArrayBase64Options & { omitPadding?: boolean }): string;
+  /** Encodes the byte data as a lowercase hex string. */
+  toHex(): string;
+  /** Writes bytes decoded from a base64 string into this array. */
+  setFromBase64(base64: string, options?: Uint8ArrayFromBase64Options): Uint8ArraySetFromResult;
+  /** Writes bytes decoded from a hex string into this array. */
+  setFromHex(hex: string): Uint8ArraySetFromResult;
+}
+interface Uint8ArrayConstructor {
+  /** Creates a new Uint8Array from a base64-encoded string. */
+  fromBase64(base64: string, options?: Uint8ArrayFromBase64Options): Uint8Array;
+  /** Creates a new Uint8Array from a hex-encoded string. */
+  fromHex(hex: string): Uint8Array;
+}
 `;
 
 // ─── Headers type definitions ─────────────────────────────────────────────────
