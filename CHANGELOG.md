@@ -159,7 +159,7 @@
   - `hostToHandle()` converts host `Symbol.for()` values to QuickJS global symbols
   - Local (anonymous) symbols dump as the string `"Symbol(description)"` and throw if passed to `hostToHandle()`
 
-  This enables the Workflow DevKit `globalThis[Symbol.for("WORKFLOW_USE_STEP")]` pattern.
+  This enables the Workflow SDK `globalThis[Symbol.for("WORKFLOW_USE_STEP")]` pattern.
 
 ## 0.1.0
 

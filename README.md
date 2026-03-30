@@ -4,7 +4,7 @@ A snapshotable JavaScript runtime via WebAssembly. Runs [QuickJS](https://github
 
 ## Motivation
 
-The [Workflow DevKit](https://github.com/vercel/workflow) project implements durable function execution for TypeScript using an event-replay technique: workflow code is re-executed from the beginning on every resumption, with the full event log used as the source of truth for previously completed work. This approach has scaling limitations:
+The [Workflow SDK](https://useworkflow.dev) project implements durable function execution for TypeScript using an event-replay technique: workflow code is re-executed from the beginning on every resumption, with the full event log used as the source of truth for previously completed work. This approach has scaling limitations:
 
 - As the event log grows, re-fetching it becomes expensive
 - Replaying the full log takes increasingly longer

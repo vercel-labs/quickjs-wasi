@@ -51,7 +51,7 @@ describe('Symbol.for() (global symbols)', () => {
     expect(bySymbol.toString()).toBe('symbol value');
   });
 
-  it('should work with the Workflow DevKit WORKFLOW_USE_STEP pattern', async () => {
+  it('should work with the Workflow SDK WORKFLOW_USE_STEP pattern', async () => {
     using vm = await QuickJS.create(wasmBytes);
     // This is the pattern used by WDK: globalThis[Symbol.for("WORKFLOW_USE_STEP")]
     using sym = vm.newSymbolFor('WORKFLOW_USE_STEP');
