@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ObjectInspector, chromeDark } from 'react-inspector';
-import { QuickJS, JSException, type JSValueHandle } from 'quickjs-wasi';
+import { QuickJS, JSException, EvalFlags, type JSValueHandle } from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
 import { Play, Loader2, Globe, Terminal, Type, Binary, FileText, Copy, Github, Lock } from 'lucide-react';
@@ -637,6 +637,15 @@ function App() {
   // version of run() without needing to re-register the action on every render.
   const runRef = useRef<() => void>(() => {});
 
+  function pushError(entries: OutputEntry[], dumped: unknown) {
+    if (dumped instanceof Error) {
+      entries.push({ type: 'error', text: `${dumped.name}: ${dumped.message}` });
+      if (dumped.stack) entries.push({ type: 'error', text: dumped.stack });
+    } else {
+      entries.push({ type: 'error', text: String(dumped) });
+    }
+  }
+
   const run = useCallback(async () => {
     const code = editorRef.current?.getValue();
     if (!code) return;
@@ -696,28 +705,26 @@ function App() {
         consoleObj.dispose();
       }
 
-      // Evaluate — wrap in async IIFE if top-level await is used (like DevTools)
+      // Evaluate with ASYNC flag — result is always a Promise (supports top-level await)
       try {
-        const hasTopLevelAwait = /\bawait\b/.test(code);
-        const evalCode = hasTopLevelAwait
-          ? `(async () => {\n${code}\n})()`
-          : code;
-        const result = vm.evalCode(evalCode);
-        // Execute any pending microtasks (queueMicrotask, promise reactions)
+        const result = vm.evalCode(code, '<eval>', EvalFlags.ASYNC);
         vm.executePendingJobs();
-        const value = vm.dump(result);
-        entries.push({ type: 'result', value });
+        const resolved = await vm.resolvePromise(result);
         result.dispose();
+        vm.executePendingJobs();
+        if ('value' in resolved) {
+          // ASYNC flag wraps the completion value in { value: <actual> }
+          const value = resolved.value.getProp('value').consume(h => vm.dump(h));
+          entries.push({ type: 'result', value });
+          resolved.value.dispose();
+        } else {
+          pushError(entries, vm.dump(resolved.error));
+          resolved.error.dispose();
+        }
       } catch (evalErr) {
         if (evalErr instanceof JSException) {
-          const dumped = vm.dump(evalErr.handle);
+          pushError(entries, vm.dump(evalErr.handle));
           evalErr.handle.dispose();
-          if (dumped instanceof Error) {
-            entries.push({ type: 'error', text: `${dumped.name}: ${dumped.message}` });
-            if (dumped.stack) entries.push({ type: 'error', text: dumped.stack });
-          } else {
-            entries.push({ type: 'error', text: String(dumped) });
-          }
         } else {
           throw evalErr;
         }
