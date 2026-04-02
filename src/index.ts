@@ -161,6 +161,10 @@ interface QuickJSExports {
   qjs_get_prop_uint32(objPtr: number, idx: number): number;
   qjs_set_prop_uint32(objPtr: number, idx: number, valPtr: number): number;
   qjs_get_own_property_names(objPtr: number): number;
+  qjs_get_own_property_names_all(objPtr: number): number;
+  qjs_has_own_property(objPtr: number, namePtr: number): number;
+  qjs_property_is_enumerable(objPtr: number, namePtr: number): number;
+  qjs_get_prototype_of(objPtr: number): number;
   qjs_get_value_ptr(valPtr: number): number;
 
   // Function calls
@@ -1657,8 +1661,170 @@ export class JSValueHandle {
   /**
    * Get the promise state: 0 = pending, 1 = fulfilled, 2 = rejected
    */
+
+  get isBool(): boolean {
+    return this.vm._getExports().qjs_is_bool(this.ptr) !== 0;
+  }
+
+  get isNumber(): boolean {
+    return this.vm._getExports().qjs_is_number(this.ptr) !== 0;
+  }
+
+  get isString(): boolean {
+    return this.vm._getExports().qjs_is_string(this.ptr) !== 0;
+  }
+
+  get isSymbol(): boolean {
+    return this.vm._getExports().qjs_is_symbol(this.ptr) !== 0;
+  }
+
+  get isBigInt(): boolean {
+    return this.vm._getExports().qjs_is_big_int(this.ptr) !== 0;
+  }
+
+  get isObject(): boolean {
+    return this.vm._getExports().qjs_is_object(this.ptr) !== 0;
+  }
+
+  get isArray(): boolean {
+    return this.vm._getExports().qjs_is_array(this.ptr) !== 0;
+  }
+
+  get isFunction(): boolean {
+    return this.vm._getExports().qjs_is_function(this.ptr) !== 0;
+  }
+
+  get isError(): boolean {
+    return this.vm._getExports().qjs_is_error(this.ptr) !== 0;
+  }
+
+  get isPromise(): boolean {
+    return this.vm._getExports().qjs_is_promise(this.ptr) !== 0;
+  }
+
+  get isArrayBuffer(): boolean {
+    return this.vm._getExports().qjs_is_array_buffer(this.ptr) !== 0;
+  }
+
   get promiseState(): number {
     return this.vm._getExports().qjs_promise_state(this.ptr);
+  }
+
+  /**
+   * Get the typeof this value as a string.
+   * Returns the same values as the native `typeof` operator.
+   */
+  get typeof(): string {
+    return this.vm.typeof(this);
+  }
+
+  /**
+   * Get the length property of this value (for arrays, strings, etc.).
+   */
+  get length(): number {
+    const h = this.getProp('length');
+    const n = h.toNumber();
+    h.dispose();
+    return n;
+  }
+
+  /**
+   * Get the constructor name of this object, or undefined if unavailable.
+   */
+  get constructorName(): string | undefined {
+    const ctor = this.getProp('constructor');
+    if (ctor.isUndefined || ctor.isNull) {
+      ctor.dispose();
+      return undefined;
+    }
+    const name = ctor.getProp('name');
+    ctor.dispose();
+    if (name.isUndefined || name.isNull) {
+      name.dispose();
+      return undefined;
+    }
+    const result = name.toString();
+    name.dispose();
+    return result;
+  }
+
+  /**
+   * Get the own enumerable string property names (equivalent to Object.keys()).
+   */
+  keys(): string[] {
+    const e = this.vm._getExports();
+    const keysPtr = e.qjs_get_own_property_names(this.ptr);
+    const keysHandle = new JSValueHandle(this.vm, keysPtr);
+    if (e.qjs_is_exception(keysHandle.ptr) !== 0) {
+      keysHandle.dispose();
+      return [];
+    }
+    const lenHandle = keysHandle.getProp('length');
+    const len = e.qjs_get_float64(lenHandle.ptr);
+    lenHandle.dispose();
+    const result: string[] = [];
+    for (let i = 0; i < len; i++) {
+      const keyPtr = e.qjs_get_prop_uint32(keysHandle.ptr, i);
+      const keyHandle = new JSValueHandle(this.vm, keyPtr);
+      result.push(keyHandle.toString());
+      keyHandle.dispose();
+    }
+    keysHandle.dispose();
+    return result;
+  }
+
+  /**
+   * Get all own property names including non-enumerable ones
+   * (equivalent to Object.getOwnPropertyNames()).
+   */
+  getOwnPropertyNames(): string[] {
+    const e = this.vm._getExports();
+    const keysPtr = e.qjs_get_own_property_names_all(this.ptr);
+    const keysHandle = new JSValueHandle(this.vm, keysPtr);
+    if (e.qjs_is_exception(keysHandle.ptr) !== 0) {
+      keysHandle.dispose();
+      return [];
+    }
+    const lenHandle = keysHandle.getProp('length');
+    const len = e.qjs_get_float64(lenHandle.ptr);
+    lenHandle.dispose();
+    const result: string[] = [];
+    for (let i = 0; i < len; i++) {
+      const keyPtr = e.qjs_get_prop_uint32(keysHandle.ptr, i);
+      const keyHandle = new JSValueHandle(this.vm, keyPtr);
+      result.push(keyHandle.toString());
+      keyHandle.dispose();
+    }
+    keysHandle.dispose();
+    return result;
+  }
+
+  /**
+   * Check if a property is an own property (equivalent to Object.prototype.hasOwnProperty).
+   */
+  hasOwnProperty(name: string): boolean {
+    const { ptr: namePtr } = this.vm._writeString(name);
+    const result = this.vm._getExports().qjs_has_own_property(this.ptr, namePtr);
+    this.vm._getExports().wasm_free(namePtr);
+    return result === 1;
+  }
+
+  /**
+   * Check if a property is enumerable (equivalent to Object.prototype.propertyIsEnumerable).
+   */
+  propertyIsEnumerable(name: string): boolean {
+    const { ptr: namePtr } = this.vm._writeString(name);
+    const result = this.vm._getExports().qjs_property_is_enumerable(this.ptr, namePtr);
+    this.vm._getExports().wasm_free(namePtr);
+    return result === 1;
+  }
+
+  /**
+   * Get the prototype of this object (equivalent to Object.getPrototypeOf()).
+   */
+  getPrototypeOf(): JSValueHandle {
+    const protoPtr = this.vm._getExports().qjs_get_prototype_of(this.ptr);
+    return new JSValueHandle(this.vm, protoPtr);
   }
 
   /**

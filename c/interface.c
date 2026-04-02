@@ -581,7 +581,7 @@ void *qjs_get_value_ptr(JSValue *val) {
 
 /*
  * Get the own enumerable string property names of an object as a QuickJS Array.
- * Returns a heap-allocated JSValue* pointing to the array, or NULL on failure.
+ * Returns a heap-allocated JSValue* pointing to the array, or JS_EXCEPTION on failure.
  */
 __attribute__((export_name("qjs_get_own_property_names")))
 JSValue *qjs_get_own_property_names(JSValue *obj) {
@@ -601,6 +601,84 @@ JSValue *qjs_get_own_property_names(JSValue *obj) {
 
     JS_FreePropertyEnum(ctx, tab, len);
     return jsvalue_to_heap(arr);
+}
+
+/*
+ * Get ALL own property names (including non-enumerable) as a QuickJS Array.
+ * Returns a heap-allocated JSValue* pointing to the array, or JS_EXCEPTION on failure.
+ */
+__attribute__((export_name("qjs_get_own_property_names_all")))
+JSValue *qjs_get_own_property_names_all(JSValue *obj) {
+    JSPropertyEnum *tab;
+    uint32_t len;
+    int flags = JS_GPN_STRING_MASK;
+
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, *obj, flags) < 0) {
+        return jsvalue_to_heap(JS_EXCEPTION);
+    }
+
+    JSValue arr = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue key = JS_AtomToString(ctx, tab[i].atom);
+        JS_SetPropertyUint32(ctx, arr, i, key);
+    }
+
+    JS_FreePropertyEnum(ctx, tab, len);
+    return jsvalue_to_heap(arr);
+}
+
+/*
+ * Check if a property name is an own property of an object.
+ * Returns 1 if the property exists, 0 if not, -1 on error.
+ */
+__attribute__((export_name("qjs_has_own_property")))
+int qjs_has_own_property(JSValue *obj, const char *name) {
+    JSAtom atom = JS_NewAtom(ctx, name);
+    if (atom == JS_ATOM_NULL) return -1;
+    JSPropertyDescriptor desc;
+    int ret = JS_GetOwnProperty(ctx, &desc, *obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (ret > 0) {
+        /* Free the descriptor fields to avoid leaks */
+        JS_FreeValue(ctx, desc.value);
+        if (desc.flags & JS_PROP_GETSET) {
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+        return 1;
+    }
+    return ret; /* 0 = not found, -1 = error */
+}
+
+/*
+ * Check if a property is enumerable.
+ * Returns 1 if the property is own and enumerable, 0 otherwise, -1 on error.
+ */
+__attribute__((export_name("qjs_property_is_enumerable")))
+int qjs_property_is_enumerable(JSValue *obj, const char *name) {
+    JSAtom atom = JS_NewAtom(ctx, name);
+    if (atom == JS_ATOM_NULL) return -1;
+    JSPropertyDescriptor desc;
+    int ret = JS_GetOwnProperty(ctx, &desc, *obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (ret > 0) {
+        int enumerable = (desc.flags & JS_PROP_ENUMERABLE) ? 1 : 0;
+        JS_FreeValue(ctx, desc.value);
+        if (desc.flags & JS_PROP_GETSET) {
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+        return enumerable;
+    }
+    return ret; /* 0 = not found, -1 = error */
+}
+
+/*
+ * Get the prototype of an object. Returns a heap-allocated JSValue*.
+ */
+__attribute__((export_name("qjs_get_prototype_of")))
+JSValue *qjs_get_prototype_of(JSValue *obj) {
+    return jsvalue_to_heap(JS_GetPrototype(ctx, *obj));
 }
 
 /* ---- ArrayBuffer / TypedArray ---- */
