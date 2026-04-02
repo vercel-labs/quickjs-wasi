@@ -236,6 +236,44 @@ vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
 
 The handler is called approximately once per JS bytecode instruction, so it should be fast. When it returns `true`, the current execution is interrupted and returns an exception result. The VM remains usable after an interrupt.
 
+### Timezone Offset
+
+By default, `Date` inside the sandbox mirrors the host environment's timezone. You can override this with a fixed offset or a dynamic callback:
+
+```typescript
+// Fixed offset: UTC-8 (480 minutes west of UTC)
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  timezoneOffset: 480,
+});
+vm.evalCode('new Date().getTimezoneOffset()').consume(h => h.toNumber()); // 480
+```
+
+```typescript
+// Force UTC (offset 0)
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  timezoneOffset: 0,
+});
+```
+
+```typescript
+// Dynamic callback for custom DST-aware logic
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  timezoneOffset: (timeSecs) => {
+    // Return offset in minutes (getTimezoneOffset convention: positive = west of UTC)
+    return new Date(timeSecs * 1000).getTimezoneOffset();
+  },
+});
+```
+
+The `timezoneOffset` option accepts:
+
+- **`'host'`** (default) — mirrors the host's timezone, including DST transitions.
+- **A number** — fixed UTC offset in minutes using the `getTimezoneOffset()` sign convention (positive values are west of UTC, e.g. `480` for UTC-8).
+- **A callback `(timeSecs: number) => number`** — called with seconds since epoch, must return the offset in minutes. Useful for custom timezone logic. The callback is invoked whenever QuickJS needs to convert between UTC and local time (e.g. `getHours()`, `toString()`, `new Date(year, month, ...)`, `getTimezoneOffset()`), so it may be called multiple times per Date operation.
+
 ### Snapshot and Restore
 
 The key differentiator — snapshot the entire VM state and restore it later:
@@ -398,6 +436,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic li
 | `memoryLimit` | Maximum memory the QuickJS runtime can allocate (bytes) |
 | `interruptHandler` | Callback to interrupt execution (return `true` to stop) |
 | `extensions` | Array of `ExtensionDescriptor` objects — native WASM extensions to load |
+| `timezoneOffset` | Timezone for `Date` inside the VM: `'host'` (default), fixed offset in minutes, or `(timeSecs) => minutes` callback |
 
 ### `ExtensionDescriptor`
 

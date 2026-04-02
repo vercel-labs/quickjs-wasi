@@ -92,7 +92,10 @@ export interface QuickJSOptions {
    *   convention where *west* of UTC is positive.
    * - **A callback `(time: number) => number`**: called with seconds since
    *   epoch, must return the UTC offset in minutes for that instant. Useful
-   *   for DST-aware custom timezone logic.
+   *   for DST-aware custom timezone logic. The callback is invoked whenever
+   *   QuickJS converts between UTC and local time (e.g. `getHours()`,
+   *   `toString()`, `getTimezoneOffset()`), so it may be called multiple
+   *   times per Date operation.
    */
   timezoneOffset?: 'host' | number | ((timeSecs: number) => number);
 }
