@@ -1016,7 +1016,8 @@ int qjs_ext_headers_init(JSContext *ctx, JSRuntime *rt) {
     JSValue proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, proto, js_headers_proto_funcs,
                                countof(js_headers_proto_funcs));
-    JS_SetPropertyStr(ctx, proto, "constructor", JS_DupValue(ctx, ctor));
+    JS_DefinePropertyValueStr(ctx, proto, "constructor", JS_DupValue(ctx, ctor),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
     /* Set Symbol.iterator = entries */
     {

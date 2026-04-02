@@ -1083,7 +1083,8 @@ int qjs_ext_encoding_init(JSContext *ctx, JSRuntime *rt) {
     JSValue te_proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, te_proto, js_text_encoder_proto_funcs,
                                countof(js_text_encoder_proto_funcs));
-    JS_SetPropertyStr(ctx, te_proto, "constructor", JS_DupValue(ctx, te_ctor));
+    JS_DefinePropertyValueStr(ctx, te_proto, "constructor", JS_DupValue(ctx, te_ctor),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_SetClassProto(ctx, js_text_encoder_class_id, te_proto);
 
     JSValue te_proto_ref = JS_GetClassProto(ctx, js_text_encoder_class_id);
@@ -1103,7 +1104,8 @@ int qjs_ext_encoding_init(JSContext *ctx, JSRuntime *rt) {
     JSValue td_proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, td_proto, js_text_decoder_proto_funcs,
                                countof(js_text_decoder_proto_funcs));
-    JS_SetPropertyStr(ctx, td_proto, "constructor", JS_DupValue(ctx, td_ctor));
+    JS_DefinePropertyValueStr(ctx, td_proto, "constructor", JS_DupValue(ctx, td_ctor),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_SetClassProto(ctx, js_text_decoder_class_id, td_proto);
 
     JSValue td_proto_ref = JS_GetClassProto(ctx, js_text_decoder_class_id);

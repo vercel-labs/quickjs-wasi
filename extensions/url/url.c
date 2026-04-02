@@ -712,7 +712,8 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
     JS_SetPropertyFunctionList(ctx, url_proto, js_url_proto_funcs,
                                sizeof(js_url_proto_funcs) / sizeof(js_url_proto_funcs[0]));
     /* Set prototype.constructor so that `new URL(...).constructor.name === "URL"` */
-    JS_SetPropertyStr(ctx, url_proto, "constructor", JS_DupValue(ctx, url_ctor));
+    JS_DefinePropertyValueStr(ctx, url_proto, "constructor", JS_DupValue(ctx, url_ctor),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_SetClassProto(ctx, js_url_class_id, url_proto);
 
     JSValue url_proto_ref = JS_GetClassProto(ctx, js_url_class_id);
@@ -735,7 +736,8 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
     JSValue sp_proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, sp_proto, js_search_params_proto_funcs,
                                sizeof(js_search_params_proto_funcs) / sizeof(js_search_params_proto_funcs[0]));
-    JS_SetPropertyStr(ctx, sp_proto, "constructor", JS_DupValue(ctx, sp_ctor));
+    JS_DefinePropertyValueStr(ctx, sp_proto, "constructor", JS_DupValue(ctx, sp_ctor),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
     /* Set Symbol.iterator = entries (per WHATWG URL spec) */
     {

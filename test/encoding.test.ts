@@ -49,6 +49,13 @@ describe('TextEncoder', () => {
     expect(desc.configurable).toBe(false);
   });
 
+  it('TextEncoder.prototype.constructor should be writable, non-enumerable, configurable', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(TextEncoder.prototype, 'constructor')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
   it('should be available as a global constructor', async () => {
     expect(await evalStr('typeof TextEncoder')).toBe('function');
   });
@@ -221,6 +228,13 @@ describe('TextDecoder', () => {
     expect(desc.writable).toBe(false);
     expect(desc.enumerable).toBe(false);
     expect(desc.configurable).toBe(false);
+  });
+
+  it('TextDecoder.prototype.constructor should be writable, non-enumerable, configurable', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(TextDecoder.prototype, 'constructor')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
   });
 
   it('should be available as a global constructor', async () => {

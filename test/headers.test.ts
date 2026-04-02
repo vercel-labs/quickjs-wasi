@@ -47,6 +47,13 @@ describe('Headers globalThis property', () => {
     expect(desc.enumerable).toBe(false);
     expect(desc.configurable).toBe(false);
   });
+
+  it('Headers.prototype.constructor should be writable, non-enumerable, configurable', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(Headers.prototype, 'constructor')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
 });
 
 // ---- WPT: headers-basic ----
