@@ -52,6 +52,42 @@ function testLabel(t: WPTTestEntry): string {
   return label.length > 120 ? label.slice(0, 117) + '...' : label;
 }
 
+// ─── Property descriptors ────────────────────────────────────────────────────
+
+describe('URL property descriptors', () => {
+  async function evalJSON(code: string) {
+    const vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+    const result = vm.evalCode(`JSON.stringify(${code})`);
+    const parsed = JSON.parse(result.toString());
+    result.dispose();
+    vm.dispose();
+    return parsed;
+  }
+
+  it('URL.prototype should be non-writable, non-enumerable, non-configurable', async () => {
+    const desc = await evalJSON(`(() => {
+      const d = Object.getOwnPropertyDescriptor(URL, 'prototype');
+      return { writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+    })()`);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
+  });
+
+  it('URLSearchParams.prototype should be non-writable, non-enumerable, non-configurable', async () => {
+    const desc = await evalJSON(`(() => {
+      const d = Object.getOwnPropertyDescriptor(URLSearchParams, 'prototype');
+      return { writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+    })()`);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
+  });
+});
+
 // ─── WPT URL Parsing (success cases) ─────────────────────────────────────────
 
 describe('WPT URL parsing', () => {

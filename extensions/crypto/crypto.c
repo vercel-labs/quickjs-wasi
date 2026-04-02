@@ -2404,7 +2404,7 @@ int qjs_ext_crypto_init(JSContext *ctx, JSRuntime *rt) {
     JSValue ck_ctor = JS_NewCFunction2(ctx, NULL, "CryptoKey", 0,
                                         JS_CFUNC_constructor, 0);
     JSValue ck_proto_ref = JS_GetClassProto(ctx, js_cryptokey_class_id);
-    JS_SetPropertyStr(ctx, ck_ctor, "prototype", ck_proto_ref);
+    JS_DefinePropertyValueStr(ctx, ck_ctor, "prototype", ck_proto_ref, 0);
     JS_DefinePropertyValueStr(ctx, global, "CryptoKey", ck_ctor,
                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 

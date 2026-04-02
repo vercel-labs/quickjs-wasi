@@ -1034,7 +1034,7 @@ int qjs_ext_headers_init(JSContext *ctx, JSRuntime *rt) {
     JS_SetClassProto(ctx, js_headers_class_id, proto);
 
     JSValue proto_ref = JS_GetClassProto(ctx, js_headers_class_id);
-    JS_SetPropertyStr(ctx, ctor, "prototype", proto_ref);
+    JS_DefinePropertyValueStr(ctx, ctor, "prototype", proto_ref, 0);
 
     JS_DefinePropertyValueStr(ctx, global, "Headers", ctor,
                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);

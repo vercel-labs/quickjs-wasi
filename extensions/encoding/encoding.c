@@ -1087,7 +1087,7 @@ int qjs_ext_encoding_init(JSContext *ctx, JSRuntime *rt) {
     JS_SetClassProto(ctx, js_text_encoder_class_id, te_proto);
 
     JSValue te_proto_ref = JS_GetClassProto(ctx, js_text_encoder_class_id);
-    JS_SetPropertyStr(ctx, te_ctor, "prototype", te_proto_ref);
+    JS_DefinePropertyValueStr(ctx, te_ctor, "prototype", te_proto_ref, 0);
 
     JS_DefinePropertyValueStr(ctx, global, "TextEncoder", te_ctor,
                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
@@ -1107,7 +1107,7 @@ int qjs_ext_encoding_init(JSContext *ctx, JSRuntime *rt) {
     JS_SetClassProto(ctx, js_text_decoder_class_id, td_proto);
 
     JSValue td_proto_ref = JS_GetClassProto(ctx, js_text_decoder_class_id);
-    JS_SetPropertyStr(ctx, td_ctor, "prototype", td_proto_ref);
+    JS_DefinePropertyValueStr(ctx, td_ctor, "prototype", td_proto_ref, 0);
 
     JS_DefinePropertyValueStr(ctx, global, "TextDecoder", td_ctor,
                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);

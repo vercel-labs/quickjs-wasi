@@ -61,6 +61,18 @@ async function evalJSON(code: string) {
 // Crypto interface existence
 // ═══════════════════════════════════════════════════════════════════════════════
 
+describe('CryptoKey property descriptors', () => {
+  it('CryptoKey.prototype should be non-writable, non-enumerable, non-configurable', async () => {
+    const desc = await evalJSON(`(() => {
+      const d = Object.getOwnPropertyDescriptor(CryptoKey, 'prototype');
+      return { writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+    })()`);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
+  });
+});
+
 describe('crypto global', () => {
   it('should define crypto on globalThis', async () => {
     expect(await evalStr('typeof crypto')).toBe('object');

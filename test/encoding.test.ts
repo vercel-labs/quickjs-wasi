@@ -39,6 +39,16 @@ describe('TextEncoder', () => {
     expect(desc.configurable).toBe(true);
   });
 
+  it('TextEncoder.prototype should be non-writable, non-enumerable, non-configurable', async () => {
+    const desc = await evalJSON(`(() => {
+      const d = Object.getOwnPropertyDescriptor(TextEncoder, 'prototype');
+      return { writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+    })()`);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
+  });
+
   it('should be available as a global constructor', async () => {
     expect(await evalStr('typeof TextEncoder')).toBe('function');
   });
@@ -201,6 +211,16 @@ describe('TextDecoder', () => {
     expect(desc.writable).toBe(true);
     expect(desc.enumerable).toBe(false);
     expect(desc.configurable).toBe(true);
+  });
+
+  it('TextDecoder.prototype should be non-writable, non-enumerable, non-configurable', async () => {
+    const desc = await evalJSON(`(() => {
+      const d = Object.getOwnPropertyDescriptor(TextDecoder, 'prototype');
+      return { writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+    })()`);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
   });
 
   it('should be available as a global constructor', async () => {
