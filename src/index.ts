@@ -1635,7 +1635,8 @@ export class JSException extends Error {
  * A handle to a JSValue inside the QuickJS WASM instance.
  */
 export class JSValueHandle {
-  private vm: QuickJS;
+  /** The QuickJS VM instance this handle belongs to. */
+  readonly vm: QuickJS;
   /** @internal */
   readonly ptr: number;
   private disposed = false;
