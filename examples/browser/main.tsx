@@ -52,6 +52,17 @@ function getObjectPrototypePtr(vm: QuickJS): number {
   return ptr;
 }
 
+const symbolIteratorCache = new WeakMap<QuickJS, JSValueHandle>();
+
+function getSymbolIterator(vm: QuickJS): JSValueHandle {
+  let sym = symbolIteratorCache.get(vm);
+  if (!sym) {
+    sym = vm.evalCode('Symbol.iterator');
+    symbolIteratorCache.set(vm, sym);
+  }
+  return sym;
+}
+
 const jsValueAccessor: DataAccessor = {
   typeof(value: unknown): string {
     return (value as JSValueHandle).typeof;
@@ -82,13 +93,46 @@ const jsValueAccessor: DataAccessor = {
   },
 
   isIterable(value: unknown): boolean {
-    // For simplicity, we don't check Symbol.iterator in the guest VM.
-    // Maps and Sets are iterable but rare in typical inspector usage.
-    return false;
+    const h = value as JSValueHandle;
+    if (!h.isObject) return false;
+    // Arrays are iterable but react-inspector handles them separately
+    if (h.isArray) return false;
+    const sym = getSymbolIterator(h.vm);
+    const method = h.vm.getProp(h, sym);
+    const result = method.isFunction;
+    method.dispose();
+    return result;
   },
 
   iterate(value: unknown): Iterable<unknown> {
-    return [];
+    const h = value as JSValueHandle;
+    const sym = getSymbolIterator(h.vm);
+    const method = h.vm.getProp(h, sym);
+    if (!method.isFunction) {
+      method.dispose();
+      return [];
+    }
+    const iterator = h.vm.callFunction(method, h);
+    method.dispose();
+    const entries: JSValueHandle[] = [];
+    const nextFn = iterator.getProp('next');
+    for (;;) {
+      const result = h.vm.callFunction(nextFn, iterator);
+      const doneProp = result.getProp('done');
+      const done = doneProp.toString() === 'true';
+      doneProp.dispose();
+      if (done) {
+        result.dispose();
+        break;
+      }
+      const val = result.getProp('value');
+      entries.push(val.dup());
+      val.dispose();
+      result.dispose();
+    }
+    nextFn.dispose();
+    iterator.dispose();
+    return entries;
   },
 
   length(value: unknown): number {
