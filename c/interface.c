@@ -117,6 +117,32 @@ static JSValue host_callback_trampoline(JSContext *ctx, JSValueConst this_val,
     return result;
 }
 
+/* ---- Timezone support ---- */
+
+/*
+ * Imported from the host environment. Called when the WASI libc needs to
+ * convert a time to local time. Receives seconds since epoch (split into
+ * hi/lo i32 halves), returns the timezone offset in seconds (e.g. -28800
+ * for UTC-8).
+ *
+ * This overrides the WASI libc stub `__secs_to_zone()` via the linker
+ * --wrap flag. Calls to `__secs_to_zone` are redirected here.
+ */
+__attribute__((import_module("env"), import_name("host_get_timezone_offset")))
+extern int host_get_timezone_offset(int hi, unsigned int lo);
+
+extern const char __utc[];
+
+void __wrap___secs_to_zone(long long t, int local, int *isdst, int *offset,
+                           long *oppoff, const char **zonename)
+{
+    int off = host_get_timezone_offset((int)(t >> 32), (unsigned int)t);
+    if (isdst) *isdst = 0;
+    if (offset) *offset = off;
+    if (oppoff) *oppoff = 0;
+    if (zonename) *zonename = off == 0 ? __utc : "LMT";
+}
+
 /* ---- Lifecycle ---- */
 
 __attribute__((export_name("qjs_init")))

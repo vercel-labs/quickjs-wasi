@@ -53,6 +53,7 @@ LDFLAGS = \
 	-mexec-model=reactor \
 	-lwasi-emulated-process-clocks \
 	-lwasi-emulated-signal \
+	-Wl,--wrap=__secs_to_zone \
 	-Wl,--export-dynamic \
 	-Wl,--export=__stack_pointer \
 	-Wl,-z,stack-size=1048576 \

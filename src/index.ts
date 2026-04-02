@@ -82,6 +82,19 @@ export interface QuickJSOptions {
    * same order) must be provided when restoring from a snapshot.
    */
   extensions?: ExtensionDescriptor[];
+  /**
+   * Controls the timezone offset used by `Date` within the QuickJS sandbox.
+   *
+   * - **`'host'`** (default): mirrors the host environment's timezone.
+   *   `new Date().getTimezoneOffset()` inside the VM will match the host.
+   * - **A number**: a fixed UTC offset in **minutes** (e.g. `-480` for UTC-8,
+   *   `60` for UTC+1). Note: this follows the `getTimezoneOffset()` sign
+   *   convention where *west* of UTC is positive.
+   * - **A callback `(time: number) => number`**: called with seconds since
+   *   epoch, must return the UTC offset in minutes for that instant. Useful
+   *   for DST-aware custom timezone logic.
+   */
+  timezoneOffset?: 'host' | number | ((timeSecs: number) => number);
 }
 
 // ---- WASM Export Types ----
@@ -279,6 +292,7 @@ export class QuickJS {
   /** Counter for internal-only callbacks (e.g. promise settle handlers) */
   private nextInternalId = 1;
   private interruptHandler: (() => boolean) | null = null;
+  private timezoneOffsetHandler: ((timeSecs: number) => number) | null = null;
 
   // Cached singleton handles
   private _global: JSValueHandle | null = null;
@@ -598,7 +612,7 @@ export class QuickJS {
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
     if (!options) return {};
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'extensions' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
   }
@@ -610,6 +624,24 @@ export class QuickJS {
     if (opts.interruptHandler) {
       vm.interruptHandler = opts.interruptHandler;
       vm.exports.qjs_set_interrupt_handler(1);
+    }
+    // Configure timezone handler.
+    // The internal handler always returns the UTC offset in *seconds*
+    // (positive east of UTC), which is what libc's __secs_to_zone expects.
+    const tz = opts.timezoneOffset;
+    if (typeof tz === 'function') {
+      // User callback returns minutes (getTimezoneOffset convention:
+      // positive west of UTC). Convert to seconds with sign flip.
+      vm.timezoneOffsetHandler = (timeSecs: number) => -tz(timeSecs) * 60;
+    } else if (typeof tz === 'number') {
+      // Fixed offset in minutes, convert to seconds with sign flip.
+      const offsetSecs = -tz * 60;
+      vm.timezoneOffsetHandler = () => offsetSecs;
+    } else {
+      // 'host' (default): use the host's timezone
+      vm.timezoneOffsetHandler = (timeSecs: number) => {
+        return -new Date(timeSecs * 1000).getTimezoneOffset() * 60;
+      };
     }
   }
 
@@ -659,8 +691,15 @@ export class QuickJS {
       return vm.interruptHandler ? (vm.interruptHandler() ? 1 : 0) : 0;
     };
 
+    // host_get_timezone_offset receives time as split i32 (hi, lo) and
+    // returns the UTC offset in seconds.
+    const hostGetTimezoneOffset = (hi: number, lo: number): number => {
+      const timeSecs = Number((BigInt(hi) << 32n) | BigInt(lo >>> 0));
+      return vm.timezoneOffsetHandler ? vm.timezoneOffsetHandler(timeSecs) : 0;
+    };
+
     const instance = await WebAssembly.instantiate(module, {
-      env: { host_call: hostCall, host_interrupt: hostInterrupt },
+      env: { host_call: hostCall, host_interrupt: hostInterrupt, host_get_timezone_offset: hostGetTimezoneOffset },
       wasi_snapshot_preview1: wasiShim,
     });
 
