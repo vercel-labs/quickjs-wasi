@@ -1,16 +1,150 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ObjectInspector, chromeDark } from 'react-inspector';
-import { QuickJS, JSException, EvalFlags, type JSValueHandle } from 'quickjs-wasi';
+import {
+  ObjectInspector,
+  chromeDark,
+  type DataAccessor,
+} from 'react-inspector';
+import {
+  QuickJS,
+  JSException,
+  EvalFlags,
+  type JSValueHandle,
+} from 'quickjs-wasi';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import { initVimMode } from 'monaco-vim';
-import { Play, Loader2, Globe, Terminal, Type, Binary, FileText, Copy, Github, Lock } from 'lucide-react';
+import {
+  Play,
+  Loader2,
+  Globe,
+  Terminal,
+  Type,
+  Binary,
+  FileText,
+  Copy,
+  Github,
+  Lock,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 import '@/index.css';
+
+// ─── JSValue DataAccessor for react-inspector ───────────────────────────────
+
+const objectProtoPtrCache = new WeakMap<QuickJS, number>();
+
+function getObjectPrototypePtr(vm: QuickJS): number {
+  let ptr = objectProtoPtrCache.get(vm);
+  if (ptr === undefined) {
+    const proto = vm.evalCode('Object.prototype');
+    ptr = proto.ptr;
+    objectProtoPtrCache.set(vm, ptr);
+    proto.dispose();
+  }
+  return ptr;
+}
+
+const jsValueAccessor: DataAccessor = {
+  typeof(value: unknown): string {
+    return (value as JSValueHandle).typeof;
+  },
+
+  toString(value: unknown): string {
+    return (value as JSValueHandle).toString();
+  },
+
+  isNull(value: unknown): boolean {
+    return (value as JSValueHandle).isNull;
+  },
+
+  isArray(value: unknown): boolean {
+    return (value as JSValueHandle).isArray;
+  },
+
+  isDate(value: unknown): boolean {
+    const h = value as JSValueHandle;
+    if (!h.isObject) return false;
+    return h.constructorName === 'Date';
+  },
+
+  isRegExp(value: unknown): boolean {
+    const h = value as JSValueHandle;
+    if (!h.isObject) return false;
+    return h.constructorName === 'RegExp';
+  },
+
+  isIterable(value: unknown): boolean {
+    // For simplicity, we don't check Symbol.iterator in the guest VM.
+    // Maps and Sets are iterable but rare in typical inspector usage.
+    return false;
+  },
+
+  iterate(value: unknown): Iterable<unknown> {
+    return [];
+  },
+
+  length(value: unknown): number {
+    return (value as JSValueHandle).length;
+  },
+
+  getOwnPropertyNames(value: unknown): string[] {
+    return (value as JSValueHandle).getOwnPropertyNames();
+  },
+
+  keys(value: unknown): string[] {
+    return (value as JSValueHandle).keys();
+  },
+
+  hasOwnProperty(value: unknown, prop: string): boolean {
+    return (value as JSValueHandle).hasOwnProperty(prop);
+  },
+
+  propertyIsEnumerable(value: unknown, prop: string): boolean {
+    return (value as JSValueHandle).propertyIsEnumerable(prop);
+  },
+
+  getProperty(value: unknown, prop: string): unknown {
+    return (value as JSValueHandle).getProp(prop);
+  },
+
+  getPrototypeOf(value: unknown): unknown {
+    return (value as JSValueHandle).getPrototypeOf();
+  },
+
+  getConstructorName(value: unknown): string | undefined {
+    return (value as JSValueHandle).constructorName;
+  },
+
+  getFunctionName(value: unknown): string {
+    const h = value as JSValueHandle;
+    const name = h.getProp('name');
+    const result = name.isUndefined ? '' : name.toString();
+    name.dispose();
+    return result;
+  },
+
+  isBuffer(value: unknown): boolean {
+    return (value as JSValueHandle).isArrayBuffer;
+  },
+
+  hasChildren(value: unknown): boolean {
+    const h = value as JSValueHandle;
+    return h.isObject || h.isFunction;
+  },
+
+  isObjectPrototype(value: unknown): boolean {
+    const h = value as JSValueHandle;
+    return h.ptr === getObjectPrototypePtr(h.vm);
+  },
+};
 
 // ─── localStorage helpers ────────────────────────────────────────────────────
 
@@ -26,18 +160,28 @@ const STORAGE_KEYS = {
 } as const;
 
 function loadString(key: string, fallback: string): string {
-  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
     const v = localStorage.getItem(key);
     return v === null ? fallback : v === 'true';
-  } catch { return fallback; }
+  } catch {
+    return fallback;
+  }
 }
 
 function save(key: string, value: string | boolean) {
-  try { localStorage.setItem(key, String(value)); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    /* ignore */
+  }
 }
 
 // ─── DOMException type definitions (built-in QuickJS-NG intrinsic) ───────────
@@ -277,7 +421,13 @@ declare var crypto: Crypto;
 
 // ─── Extension Toggle component ──────────────────────────────────────────────
 
-function ExtensionToggle({ checked, onToggle, icon: Icon, label, tooltip }: {
+function ExtensionToggle({
+  checked,
+  onToggle,
+  icon: Icon,
+  label,
+  tooltip,
+}: {
   checked: boolean;
   onToggle: (checked: boolean) => void;
   icon: React.ComponentType<{ className?: string }>;
@@ -288,8 +438,15 @@ function ExtensionToggle({ checked, onToggle, icon: Icon, label, tooltip }: {
     <Tooltip>
       <TooltipTrigger>
         <div className="flex items-center gap-2">
-          <Switch checked={checked} onCheckedChange={onToggle} aria-label={`Enable ${label} extension`} />
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" onClick={() => onToggle(!checked)}>
+          <Switch
+            checked={checked}
+            onCheckedChange={onToggle}
+            aria-label={`Enable ${label} extension`}
+          />
+          <label
+            className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
+            onClick={() => onToggle(!checked)}
+          >
             <Icon className="w-3.5 h-3.5" />
             {label}
           </label>
@@ -301,23 +458,38 @@ function ExtensionToggle({ checked, onToggle, icon: Icon, label, tooltip }: {
 }
 
 /** Helper: renders an MDN link with <code> styling. */
-function MdnLink({ path, children }: { path: string; children: React.ReactNode }) {
-  return <a href={`https://developer.mozilla.org/en-US/docs/Web/API/${path}`} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:decoration-solid"><code>{children}</code></a>;
+function MdnLink({
+  path,
+  children,
+}: {
+  path: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={`https://developer.mozilla.org/en-US/docs/Web/API/${path}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+    >
+      <code>{children}</code>
+    </a>
+  );
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const inspectorTheme = {
   ...chromeDark,
-  BASE_FONT_FAMILY: "var(--font-mono)",
+  BASE_FONT_FAMILY: 'var(--font-mono)',
   BASE_FONT_SIZE: '13px',
   BASE_BACKGROUND_COLOR: 'transparent',
-  TREENODE_FONT_FAMILY: "var(--font-mono)",
+  TREENODE_FONT_FAMILY: 'var(--font-mono)',
   TREENODE_FONT_SIZE: '13px',
 } as unknown as string;
 
-type OutputResult = { type: 'result'; value: unknown };
-type OutputLog = { type: 'log'; values: unknown[] };
+type OutputResult = { type: 'result'; value: JSValueHandle };
+type OutputLog = { type: 'log'; values: JSValueHandle[] };
 type OutputError = { type: 'error'; text: string };
 type OutputEntry = OutputResult | OutputLog | OutputError;
 
@@ -340,7 +512,12 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
       <div className="flex gap-2 py-0.5">
         <span className="text-emerald-400 select-none shrink-0">&larr;</span>
         <div className="text-emerald-400 min-w-0">
-          <ObjectInspector data={entry.value} theme={inspectorTheme} expandLevel={1} />
+          <ObjectInspector
+            data={entry.value}
+            theme={inspectorTheme}
+            expandLevel={1}
+            dataAccessor={jsValueAccessor}
+          />
         </div>
       </div>
     );
@@ -354,11 +531,12 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
           {entry.values.map((v, i) => (
             <span key={i} className="align-top">
               {i > 0 && ' '}
-              {typeof v === 'object' && v !== null ? (
-                <ObjectInspector data={v} theme={inspectorTheme} expandLevel={0} />
-              ) : (
-                String(v)
-              )}
+              <ObjectInspector
+                data={v}
+                theme={inspectorTheme}
+                expandLevel={0}
+                dataAccessor={jsValueAccessor}
+              />
             </span>
           ))}
         </div>
@@ -370,7 +548,9 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
     return (
       <div className="flex gap-2 py-0.5">
         <span className="text-destructive select-none shrink-0">!</span>
-        <span className="text-destructive whitespace-pre-wrap">{entry.text}</span>
+        <span className="text-destructive whitespace-pre-wrap">
+          {entry.text}
+        </span>
       </div>
     );
   }
@@ -384,21 +564,37 @@ const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
 const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
 const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
 const HEADERS_TYPES_URI = 'ts:headers-extension/headers.d.ts';
-const STRUCTUREDCLONE_TYPES_URI = 'ts:structured-clone-extension/structured-clone.d.ts';
+const STRUCTUREDCLONE_TYPES_URI =
+  'ts:structured-clone-extension/structured-clone.d.ts';
 const CRYPTO_TYPES_URI = 'ts:crypto-extension/crypto.d.ts';
 
 function App() {
   const [status, setStatus] = useState('');
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState<OutputEntry[]>([]);
+  const vmRef = useRef<QuickJS | null>(null);
   const [wasmReady, setWasmReady] = useState(false);
-  const [urlExtEnabled, setUrlExtEnabled] = useState(() => loadBool(STORAGE_KEYS.urlExt, false));
-  const [encodingExtEnabled, setEncodingExtEnabled] = useState(() => loadBool(STORAGE_KEYS.encodingExt, false));
-  const [base64ExtEnabled, setBase64ExtEnabled] = useState(() => loadBool(STORAGE_KEYS.base64Ext, false));
-  const [headersExtEnabled, setHeadersExtEnabled] = useState(() => loadBool(STORAGE_KEYS.headersExt, false));
-  const [structuredCloneExtEnabled, setStructuredCloneExtEnabled] = useState(() => loadBool(STORAGE_KEYS.structuredCloneExt, false));
-  const [cryptoExtEnabled, setCryptoExtEnabled] = useState(() => loadBool(STORAGE_KEYS.cryptoExt, false));
-  const [vimEnabled, setVimEnabled] = useState(() => loadBool(STORAGE_KEYS.vim, false));
+  const [urlExtEnabled, setUrlExtEnabled] = useState(() =>
+    loadBool(STORAGE_KEYS.urlExt, false),
+  );
+  const [encodingExtEnabled, setEncodingExtEnabled] = useState(() =>
+    loadBool(STORAGE_KEYS.encodingExt, false),
+  );
+  const [base64ExtEnabled, setBase64ExtEnabled] = useState(() =>
+    loadBool(STORAGE_KEYS.base64Ext, false),
+  );
+  const [headersExtEnabled, setHeadersExtEnabled] = useState(() =>
+    loadBool(STORAGE_KEYS.headersExt, false),
+  );
+  const [structuredCloneExtEnabled, setStructuredCloneExtEnabled] = useState(
+    () => loadBool(STORAGE_KEYS.structuredCloneExt, false),
+  );
+  const [cryptoExtEnabled, setCryptoExtEnabled] = useState(() =>
+    loadBool(STORAGE_KEYS.cryptoExt, false),
+  );
+  const [vimEnabled, setVimEnabled] = useState(() =>
+    loadBool(STORAGE_KEYS.vim, false),
+  );
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
@@ -414,18 +610,34 @@ function App() {
   const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const headersTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
-  const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
+  const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(
+    null,
+  );
   const cryptoTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
 
   // Persist checkbox states
-  useEffect(() => { save(STORAGE_KEYS.urlExt, urlExtEnabled); }, [urlExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.encodingExt, encodingExtEnabled); }, [encodingExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.base64Ext, base64ExtEnabled); }, [base64ExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.headersExt, headersExtEnabled); }, [headersExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.structuredCloneExt, structuredCloneExtEnabled); }, [structuredCloneExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.cryptoExt, cryptoExtEnabled); }, [cryptoExtEnabled]);
-  useEffect(() => { save(STORAGE_KEYS.vim, vimEnabled); }, [vimEnabled]);
+  useEffect(() => {
+    save(STORAGE_KEYS.urlExt, urlExtEnabled);
+  }, [urlExtEnabled]);
+  useEffect(() => {
+    save(STORAGE_KEYS.encodingExt, encodingExtEnabled);
+  }, [encodingExtEnabled]);
+  useEffect(() => {
+    save(STORAGE_KEYS.base64Ext, base64ExtEnabled);
+  }, [base64ExtEnabled]);
+  useEffect(() => {
+    save(STORAGE_KEYS.headersExt, headersExtEnabled);
+  }, [headersExtEnabled]);
+  useEffect(() => {
+    save(STORAGE_KEYS.structuredCloneExt, structuredCloneExtEnabled);
+  }, [structuredCloneExtEnabled]);
+  useEffect(() => {
+    save(STORAGE_KEYS.cryptoExt, cryptoExtEnabled);
+  }, [cryptoExtEnabled]);
+  useEffect(() => {
+    save(STORAGE_KEYS.vim, vimEnabled);
+  }, [vimEnabled]);
 
   // Auto-scroll output to bottom
   useEffect(() => {
@@ -455,7 +667,9 @@ function App() {
           fetches.push(fetch('/headers.so').then((r) => r.arrayBuffer()));
         }
         if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current) {
-          fetches.push(fetch('/structured-clone.so').then((r) => r.arrayBuffer()));
+          fetches.push(
+            fetch('/structured-clone.so').then((r) => r.arrayBuffer()),
+          );
         }
         if (cryptoExtEnabled && !cryptoExtBytesRef.current) {
           fetches.push(fetch('/crypto.so').then((r) => r.arrayBuffer()));
@@ -466,23 +680,45 @@ function App() {
         if (urlExtEnabled && !urlExtBytesRef.current && extBytes[extIdx]) {
           urlExtBytesRef.current = extBytes[extIdx++];
         }
-        if (encodingExtEnabled && !encodingExtBytesRef.current && extBytes[extIdx]) {
+        if (
+          encodingExtEnabled &&
+          !encodingExtBytesRef.current &&
+          extBytes[extIdx]
+        ) {
           encodingExtBytesRef.current = extBytes[extIdx++];
         }
-        if (base64ExtEnabled && !base64ExtBytesRef.current && extBytes[extIdx]) {
+        if (
+          base64ExtEnabled &&
+          !base64ExtBytesRef.current &&
+          extBytes[extIdx]
+        ) {
           base64ExtBytesRef.current = extBytes[extIdx++];
         }
-        if (headersExtEnabled && !headersExtBytesRef.current && extBytes[extIdx]) {
+        if (
+          headersExtEnabled &&
+          !headersExtBytesRef.current &&
+          extBytes[extIdx]
+        ) {
           headersExtBytesRef.current = extBytes[extIdx++];
         }
-        if (structuredCloneExtEnabled && !structuredCloneExtBytesRef.current && extBytes[extIdx]) {
+        if (
+          structuredCloneExtEnabled &&
+          !structuredCloneExtBytesRef.current &&
+          extBytes[extIdx]
+        ) {
           structuredCloneExtBytesRef.current = extBytes[extIdx++];
         }
-        if (cryptoExtEnabled && !cryptoExtBytesRef.current && extBytes[extIdx]) {
+        if (
+          cryptoExtEnabled &&
+          !cryptoExtBytesRef.current &&
+          extBytes[extIdx]
+        ) {
           cryptoExtBytesRef.current = extBytes[extIdx++];
         }
         setWasmReady(true);
-        setStatus(`WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`);
+        setStatus(
+          `WASM loaded (${(wasmBytes.byteLength / 1024).toFixed(0)} KB)`,
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setStatus(`Failed to load WASM: ${message}`);
@@ -517,10 +753,11 @@ function App() {
 
     if (urlExtEnabled) {
       // Add URL type definitions as an extra lib
-      urlTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        URL_TYPE_DEFS,
-        URL_TYPES_URI,
-      );
+      urlTypesDisposableRef.current =
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(
+          URL_TYPE_DEFS,
+          URL_TYPES_URI,
+        );
     } else {
       urlTypesDisposableRef.current?.dispose();
       urlTypesDisposableRef.current = null;
@@ -538,10 +775,11 @@ function App() {
     if (!monaco) return;
 
     if (encodingExtEnabled) {
-      encodingTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        ENCODING_TYPE_DEFS,
-        ENCODING_TYPES_URI,
-      );
+      encodingTypesDisposableRef.current =
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(
+          ENCODING_TYPE_DEFS,
+          ENCODING_TYPES_URI,
+        );
     } else {
       encodingTypesDisposableRef.current?.dispose();
       encodingTypesDisposableRef.current = null;
@@ -559,10 +797,11 @@ function App() {
     if (!monaco) return;
 
     if (base64ExtEnabled) {
-      base64TypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        BASE64_TYPE_DEFS,
-        BASE64_TYPES_URI,
-      );
+      base64TypesDisposableRef.current =
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(
+          BASE64_TYPE_DEFS,
+          BASE64_TYPES_URI,
+        );
     } else {
       base64TypesDisposableRef.current?.dispose();
       base64TypesDisposableRef.current = null;
@@ -580,10 +819,11 @@ function App() {
     if (!monaco) return;
 
     if (headersExtEnabled) {
-      headersTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        HEADERS_TYPE_DEFS,
-        HEADERS_TYPES_URI,
-      );
+      headersTypesDisposableRef.current =
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(
+          HEADERS_TYPE_DEFS,
+          HEADERS_TYPES_URI,
+        );
     } else {
       headersTypesDisposableRef.current?.dispose();
       headersTypesDisposableRef.current = null;
@@ -601,10 +841,11 @@ function App() {
     if (!monaco) return;
 
     if (structuredCloneExtEnabled) {
-      structuredCloneTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        STRUCTUREDCLONE_TYPE_DEFS,
-        STRUCTUREDCLONE_TYPES_URI,
-      );
+      structuredCloneTypesDisposableRef.current =
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(
+          STRUCTUREDCLONE_TYPE_DEFS,
+          STRUCTUREDCLONE_TYPES_URI,
+        );
     } else {
       structuredCloneTypesDisposableRef.current?.dispose();
       structuredCloneTypesDisposableRef.current = null;
@@ -622,10 +863,11 @@ function App() {
     if (!monaco) return;
 
     if (cryptoExtEnabled) {
-      cryptoTypesDisposableRef.current = monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        CRYPTO_TYPE_DEFS,
-        CRYPTO_TYPES_URI,
-      );
+      cryptoTypesDisposableRef.current =
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(
+          CRYPTO_TYPE_DEFS,
+          CRYPTO_TYPES_URI,
+        );
     } else {
       cryptoTypesDisposableRef.current?.dispose();
       cryptoTypesDisposableRef.current = null;
@@ -646,7 +888,9 @@ function App() {
         urlExtBytesRef.current = await response.arrayBuffer();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load URL extension: ${message}` }]);
+        setOutput([
+          { type: 'error', text: `Failed to load URL extension: ${message}` },
+        ]);
         setUrlExtEnabled(false);
       }
     }
@@ -661,7 +905,12 @@ function App() {
         encodingExtBytesRef.current = await response.arrayBuffer();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load Encoding extension: ${message}` }]);
+        setOutput([
+          {
+            type: 'error',
+            text: `Failed to load Encoding extension: ${message}`,
+          },
+        ]);
         setEncodingExtEnabled(false);
       }
     }
@@ -676,7 +925,12 @@ function App() {
         base64ExtBytesRef.current = await response.arrayBuffer();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load Base64 extension: ${message}` }]);
+        setOutput([
+          {
+            type: 'error',
+            text: `Failed to load Base64 extension: ${message}`,
+          },
+        ]);
         setBase64ExtEnabled(false);
       }
     }
@@ -691,26 +945,39 @@ function App() {
         headersExtBytesRef.current = await response.arrayBuffer();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load Headers extension: ${message}` }]);
+        setOutput([
+          {
+            type: 'error',
+            text: `Failed to load Headers extension: ${message}`,
+          },
+        ]);
         setHeadersExtEnabled(false);
       }
     }
   }, []);
 
   // Lazily fetch the structuredClone extension binary on first enable
-  const handleStructuredCloneExtToggle = useCallback(async (checked: boolean) => {
-    setStructuredCloneExtEnabled(checked);
-    if (checked && !structuredCloneExtBytesRef.current) {
-      try {
-        const response = await fetch('/structured-clone.so');
-        structuredCloneExtBytesRef.current = await response.arrayBuffer();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load structuredClone extension: ${message}` }]);
-        setStructuredCloneExtEnabled(false);
+  const handleStructuredCloneExtToggle = useCallback(
+    async (checked: boolean) => {
+      setStructuredCloneExtEnabled(checked);
+      if (checked && !structuredCloneExtBytesRef.current) {
+        try {
+          const response = await fetch('/structured-clone.so');
+          structuredCloneExtBytesRef.current = await response.arrayBuffer();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setOutput([
+            {
+              type: 'error',
+              text: `Failed to load structuredClone extension: ${message}`,
+            },
+          ]);
+          setStructuredCloneExtEnabled(false);
+        }
       }
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Lazily fetch the Crypto extension binary on first enable
   const handleCryptoExtToggle = useCallback(async (checked: boolean) => {
@@ -721,7 +988,12 @@ function App() {
         cryptoExtBytesRef.current = await response.arrayBuffer();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setOutput([{ type: 'error', text: `Failed to load Crypto extension: ${message}` }]);
+        setOutput([
+          {
+            type: 'error',
+            text: `Failed to load Crypto extension: ${message}`,
+          },
+        ]);
         setCryptoExtEnabled(false);
       }
     }
@@ -731,9 +1003,17 @@ function App() {
   // version of run() without needing to re-register the action on every render.
   const runRef = useRef<() => void>(() => {});
 
-  function pushError(entries: OutputEntry[], dumped: unknown) {
+  function pushError(
+    entries: OutputEntry[],
+    vm: QuickJS,
+    handle: JSValueHandle,
+  ) {
+    const dumped = vm.dump(handle);
     if (dumped instanceof Error) {
-      entries.push({ type: 'error', text: `${dumped.name}: ${dumped.message}` });
+      entries.push({
+        type: 'error',
+        text: `${dumped.name}: ${dumped.message}`,
+      });
       if (dumped.stack) entries.push({ type: 'error', text: dumped.stack });
     } else {
       entries.push({ type: 'error', text: String(dumped) });
@@ -746,29 +1026,55 @@ function App() {
     setOutput([]);
     setRunning(true);
 
+    // Dispose the previous VM (invalidates all previous JSValueHandle references)
+    if (vmRef.current) {
+      vmRef.current.dispose();
+      vmRef.current = null;
+    }
+
     const entries: OutputEntry[] = [];
     const start = performance.now();
 
     try {
       const execStart = Date.now();
-      const extensions: { name: string; wasm: Uint8Array; initFn?: string }[] = [];
+      const extensions: { name: string; wasm: Uint8Array; initFn?: string }[] =
+        [];
       if (urlExtEnabled && urlExtBytesRef.current) {
-        extensions.push({ name: 'url', wasm: new Uint8Array(urlExtBytesRef.current) });
+        extensions.push({
+          name: 'url',
+          wasm: new Uint8Array(urlExtBytesRef.current),
+        });
       }
       if (encodingExtEnabled && encodingExtBytesRef.current) {
-        extensions.push({ name: 'encoding', wasm: new Uint8Array(encodingExtBytesRef.current) });
+        extensions.push({
+          name: 'encoding',
+          wasm: new Uint8Array(encodingExtBytesRef.current),
+        });
       }
       if (base64ExtEnabled && base64ExtBytesRef.current) {
-        extensions.push({ name: 'base64', wasm: new Uint8Array(base64ExtBytesRef.current) });
+        extensions.push({
+          name: 'base64',
+          wasm: new Uint8Array(base64ExtBytesRef.current),
+        });
       }
       if (headersExtEnabled && headersExtBytesRef.current) {
-        extensions.push({ name: 'headers', wasm: new Uint8Array(headersExtBytesRef.current) });
+        extensions.push({
+          name: 'headers',
+          wasm: new Uint8Array(headersExtBytesRef.current),
+        });
       }
       if (structuredCloneExtEnabled && structuredCloneExtBytesRef.current) {
-        extensions.push({ name: 'structured-clone', wasm: new Uint8Array(structuredCloneExtBytesRef.current), initFn: 'qjs_ext_structured_clone_init' });
+        extensions.push({
+          name: 'structured-clone',
+          wasm: new Uint8Array(structuredCloneExtBytesRef.current),
+          initFn: 'qjs_ext_structured_clone_init',
+        });
       }
       if (cryptoExtEnabled && cryptoExtBytesRef.current) {
-        extensions.push({ name: 'crypto', wasm: new Uint8Array(cryptoExtBytesRef.current) });
+        extensions.push({
+          name: 'crypto',
+          wasm: new Uint8Array(cryptoExtBytesRef.current),
+        });
       }
       const vm = await QuickJS.create({
         wasm: wasmModuleRef.current!,
@@ -779,21 +1085,34 @@ function App() {
 
       // Provide console.log / console.error
       {
-        const log = vm.newFunction('log', function (this: JSValueHandle, ...args: JSValueHandle[]) {
-          const values = args.map((a) => vm.dump(a));
-          entries.push({ type: 'log', values });
-          return vm.undefined;
-        });
-        const error = vm.newFunction('error', function (this: JSValueHandle, ...args: JSValueHandle[]) {
-          const text = args.map((a) => vm.dump(a)).map(String).join(' ');
-          entries.push({ type: 'error', text });
-          return vm.undefined;
-        });
+        const log = vm.newFunction(
+          'log',
+          function (this: JSValueHandle, ...args: JSValueHandle[]) {
+            // Dup handles so they survive after the host function returns
+            const values = args.map((a) => a.dup());
+            entries.push({ type: 'log', values });
+            return vm.undefined;
+          },
+        );
+        const error = vm.newFunction(
+          'error',
+          function (this: JSValueHandle, ...args: JSValueHandle[]) {
+            const text = args
+              .map((a) => vm.dump(a))
+              .map(String)
+              .join(' ');
+            entries.push({ type: 'error', text });
+            return vm.undefined;
+          },
+        );
         const consoleObj = vm.newObject();
         consoleObj.setProp('log', log);
         consoleObj.setProp('error', error);
         // Match browser: console is writable + configurable, but NOT enumerable
-        vm.defineProp(vm.global, 'console', consoleObj, { writable: true, configurable: true });
+        vm.defineProp(vm.global, 'console', consoleObj, {
+          writable: true,
+          configurable: true,
+        });
         log.dispose();
         error.dispose();
         consoleObj.dispose();
@@ -808,16 +1127,17 @@ function App() {
         vm.executePendingJobs();
         if ('value' in resolved) {
           // ASYNC flag wraps the completion value in { value: <actual> }
-          const value = resolved.value.getProp('value').consume(h => vm.dump(h));
+          // Dup the handle so it survives for the inspector to traverse
+          const value = resolved.value.getProp('value');
           entries.push({ type: 'result', value });
           resolved.value.dispose();
         } else {
-          pushError(entries, vm.dump(resolved.error));
+          pushError(entries, vm, resolved.error);
           resolved.error.dispose();
         }
       } catch (evalErr) {
         if (evalErr instanceof JSException) {
-          pushError(entries, vm.dump(evalErr.handle));
+          pushError(entries, vm, evalErr.handle);
           evalErr.handle.dispose();
         } else {
           throw evalErr;
@@ -827,16 +1147,25 @@ function App() {
       const elapsed = (performance.now() - start).toFixed(1);
       setStatus(`${elapsed}ms`);
 
-      vm.dispose();
+      // Keep the VM alive so the inspector can traverse JSValueHandle objects.
+      vmRef.current = vm;
+      setOutput(entries);
+      setRunning(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       entries.push({ type: 'error', text: `Host error: ${message}` });
       setStatus('Execution failed');
-    } finally {
       setOutput(entries);
       setRunning(false);
     }
-  }, [urlExtEnabled, encodingExtEnabled, base64ExtEnabled, headersExtEnabled, structuredCloneExtEnabled, cryptoExtEnabled]);
+  }, [
+    urlExtEnabled,
+    encodingExtEnabled,
+    base64ExtEnabled,
+    headersExtEnabled,
+    structuredCloneExtEnabled,
+    cryptoExtEnabled,
+  ]);
 
   // Keep the ref in sync with the latest run callback
   runRef.current = run;
@@ -869,26 +1198,47 @@ function App() {
     );
 
     // Add DOMException (built-in QuickJS-NG intrinsic, always available)
-    jsDefaults.addExtraLib(DOMEXCEPTION_TYPE_DEFS, 'ts:quickjs-env/domexception.d.ts');
+    jsDefaults.addExtraLib(
+      DOMEXCEPTION_TYPE_DEFS,
+      'ts:quickjs-env/domexception.d.ts',
+    );
 
     // If extensions were persisted as enabled, add types immediately
     if (loadBool(STORAGE_KEYS.urlExt, false)) {
-      urlTypesDisposableRef.current = jsDefaults.addExtraLib(URL_TYPE_DEFS, URL_TYPES_URI);
+      urlTypesDisposableRef.current = jsDefaults.addExtraLib(
+        URL_TYPE_DEFS,
+        URL_TYPES_URI,
+      );
     }
     if (loadBool(STORAGE_KEYS.encodingExt, false)) {
-      encodingTypesDisposableRef.current = jsDefaults.addExtraLib(ENCODING_TYPE_DEFS, ENCODING_TYPES_URI);
+      encodingTypesDisposableRef.current = jsDefaults.addExtraLib(
+        ENCODING_TYPE_DEFS,
+        ENCODING_TYPES_URI,
+      );
     }
     if (loadBool(STORAGE_KEYS.base64Ext, false)) {
-      base64TypesDisposableRef.current = jsDefaults.addExtraLib(BASE64_TYPE_DEFS, BASE64_TYPES_URI);
+      base64TypesDisposableRef.current = jsDefaults.addExtraLib(
+        BASE64_TYPE_DEFS,
+        BASE64_TYPES_URI,
+      );
     }
     if (loadBool(STORAGE_KEYS.headersExt, false)) {
-      headersTypesDisposableRef.current = jsDefaults.addExtraLib(HEADERS_TYPE_DEFS, HEADERS_TYPES_URI);
+      headersTypesDisposableRef.current = jsDefaults.addExtraLib(
+        HEADERS_TYPE_DEFS,
+        HEADERS_TYPES_URI,
+      );
     }
     if (loadBool(STORAGE_KEYS.structuredCloneExt, false)) {
-      structuredCloneTypesDisposableRef.current = jsDefaults.addExtraLib(STRUCTUREDCLONE_TYPE_DEFS, STRUCTUREDCLONE_TYPES_URI);
+      structuredCloneTypesDisposableRef.current = jsDefaults.addExtraLib(
+        STRUCTUREDCLONE_TYPE_DEFS,
+        STRUCTUREDCLONE_TYPES_URI,
+      );
     }
     if (loadBool(STORAGE_KEYS.cryptoExt, false)) {
-      cryptoTypesDisposableRef.current = jsDefaults.addExtraLib(CRYPTO_TYPE_DEFS, CRYPTO_TYPES_URI);
+      cryptoTypesDisposableRef.current = jsDefaults.addExtraLib(
+        CRYPTO_TYPE_DEFS,
+        CRYPTO_TYPES_URI,
+      );
     }
 
     // Disable validation noise for a playground
@@ -907,7 +1257,9 @@ function App() {
       id: 'run-code',
       label: 'Run Code',
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
-      run: () => { runRef.current(); },
+      run: () => {
+        runRef.current();
+      },
     });
 
     // Save editor content to localStorage on change (debounced)
@@ -927,159 +1279,234 @@ function App() {
 
   return (
     <TooltipProvider delay={300}>
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
-              <Terminal className="w-5 h-5" />
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
+                <Terminal className="w-5 h-5" />
+              </div>
+              <h1
+                className="text-2xl tracking-tight"
+                style={{ fontFamily: "'Geist Pixel', monospace" }}
+              >
+                quickjs-wasi
+              </h1>
             </div>
-            <h1 className="text-2xl tracking-tight" style={{ fontFamily: "'Geist Pixel', monospace" }}>
-              quickjs-wasi
-            </h1>
+            <a
+              href="https://github.com/vercel-labs/quickjs-wasi"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="View on GitHub"
+            >
+              <Github className="w-5 h-5" />
+            </a>
           </div>
-          <a
-            href="https://github.com/vercel-labs/quickjs-wasi"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="View on GitHub"
-          >
-            <Github className="w-5 h-5" />
-          </a>
+          <p className="text-sm text-muted-foreground">
+            QuickJS running in the browser via WebAssembly
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground">
-          QuickJS running in the browser via WebAssembly
-        </p>
-      </div>
 
-      {/* Editor Card */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden shadow-lg">
-        {/* Editor Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/80">
-          <span className="text-sm font-medium text-muted-foreground">Editor</span>
-          <div className="flex items-center gap-4">
-            {/* Vim Toggle */}
-            <Tooltip>
-              <TooltipTrigger>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={vimEnabled}
-                    onCheckedChange={setVimEnabled}
-                    aria-label="Enable Vim mode"
-                  />
-                  <label className="text-xs text-muted-foreground cursor-pointer select-none" onClick={() => setVimEnabled(!vimEnabled)}>
-                    Vim
-                  </label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Enable Vim keybindings</TooltipContent>
-            </Tooltip>
-            <span className="text-xs text-muted-foreground/60 hidden sm:inline">
-              {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter to run
+        {/* Editor Card */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden shadow-lg">
+          {/* Editor Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/80">
+            <span className="text-sm font-medium text-muted-foreground">
+              Editor
             </span>
-          </div>
-        </div>
-
-        {/* Monaco Editor */}
-        <Editor
-          height="280px"
-          defaultLanguage="javascript"
-          defaultValue={savedCode}
-          theme="vs-dark"
-          beforeMount={handleEditorWillMount}
-          onMount={handleEditorMount}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 13,
-            fontFamily: "'Geist Mono', 'SF Mono', 'Fira Code', monospace",
-            fontLigatures: true,
-            lineNumbers: 'on',
-            scrollBeyondLastLine: false,
-            padding: { top: 12, bottom: 12 },
-            renderLineHighlight: 'none',
-            overviewRulerLanes: 0,
-            hideCursorInOverviewRuler: true,
-            overviewRulerBorder: false,
-            scrollbar: {
-              vertical: 'hidden',
-              horizontal: 'hidden',
-            },
-            tabSize: 2,
-            wordWrap: 'on',
-            automaticLayout: true,
-          }}
-        />
-
-        {/* Vim status bar (hidden unless vim mode enabled) */}
-        <div
-          ref={vimStatusRef}
-          className={`px-4 py-1 font-mono text-xs text-muted-foreground border-t border-border bg-background ${vimEnabled ? '' : 'hidden'}`}
-        />
-
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-border bg-card/80">
-          <Button
-            onClick={run}
-            disabled={!wasmReady || running}
-            size="sm"
-            className="gap-1.5"
-          >
-            {running ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Play className="w-3.5 h-3.5" />
-            )}
-            {wasmReady ? 'Run' : 'Loading...'}
-          </Button>
-
-          {/* Divider */}
-          <div className="h-5 w-px bg-border" />
-
-          {/* Extension toggles */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <ExtensionToggle checked={base64ExtEnabled} onToggle={handleBase64ExtToggle} icon={Binary} label="Base64"
-              tooltip={<>Adds <MdnLink path="Window/atob">atob()</MdnLink> and <MdnLink path="Window/btoa">btoa()</MdnLink></>} />
-            <ExtensionToggle checked={structuredCloneExtEnabled} onToggle={handleStructuredCloneExtToggle} icon={Copy} label="Clone"
-              tooltip={<>Adds <MdnLink path="Window/structuredClone">structuredClone()</MdnLink></>} />
-            <ExtensionToggle checked={encodingExtEnabled} onToggle={handleEncodingExtToggle} icon={Type} label="Encoding"
-              tooltip={<>Adds <MdnLink path="TextEncoder">TextEncoder</MdnLink> and <MdnLink path="TextDecoder">TextDecoder</MdnLink></>} />
-            <ExtensionToggle checked={headersExtEnabled} onToggle={handleHeadersExtToggle} icon={FileText} label="Headers"
-              tooltip={<>Adds the <MdnLink path="Headers">Headers</MdnLink> class</>} />
-            <ExtensionToggle checked={urlExtEnabled} onToggle={handleUrlExtToggle} icon={Globe} label="URL"
-              tooltip={<>Adds <MdnLink path="URL">URL</MdnLink> and <MdnLink path="URLSearchParams">URLSearchParams</MdnLink></>} />
-            <ExtensionToggle checked={cryptoExtEnabled} onToggle={handleCryptoExtToggle} icon={Lock} label="Crypto"
-              tooltip={<>Adds <MdnLink path="Crypto">crypto</MdnLink> and <MdnLink path="SubtleCrypto">SubtleCrypto</MdnLink></>} />
+            <div className="flex items-center gap-4">
+              {/* Vim Toggle */}
+              <Tooltip>
+                <TooltipTrigger>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={vimEnabled}
+                      onCheckedChange={setVimEnabled}
+                      aria-label="Enable Vim mode"
+                    />
+                    <label
+                      className="text-xs text-muted-foreground cursor-pointer select-none"
+                      onClick={() => setVimEnabled(!vimEnabled)}
+                    >
+                      Vim
+                    </label>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>Enable Vim keybindings</TooltipContent>
+              </Tooltip>
+              <span className="text-xs text-muted-foreground/60 hidden sm:inline">
+                {navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter
+                to run
+              </span>
+            </div>
           </div>
 
-          {/* Spacer + status */}
-          <div className="flex-1" />
-          {status && (
-            <Badge variant="secondary" className="text-[10px] font-mono shrink-0">
-              {status}
-            </Badge>
-          )}
-        </div>
-      </div>
+          {/* Monaco Editor */}
+          <Editor
+            height="280px"
+            defaultLanguage="javascript"
+            defaultValue={savedCode}
+            theme="vs-dark"
+            beforeMount={handleEditorWillMount}
+            onMount={handleEditorMount}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 13,
+              fontFamily: "'Geist Mono', 'SF Mono', 'Fira Code', monospace",
+              fontLigatures: true,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              padding: { top: 12, bottom: 12 },
+              renderLineHighlight: 'none',
+              overviewRulerLanes: 0,
+              hideCursorInOverviewRuler: true,
+              overviewRulerBorder: false,
+              scrollbar: {
+                vertical: 'hidden',
+                horizontal: 'hidden',
+              },
+              tabSize: 2,
+              wordWrap: 'on',
+              automaticLayout: true,
+            }}
+          />
 
-      {/* Output */}
-      {output.length > 0 && (
-        <div className="mt-4 rounded-xl border border-border bg-card overflow-hidden shadow-lg">
-          <div className="px-4 py-2.5 border-b border-border bg-card/80">
-            <span className="text-sm font-medium text-muted-foreground">Output</span>
-          </div>
+          {/* Vim status bar (hidden unless vim mode enabled) */}
           <div
-            ref={outputRef}
-            className="p-4 font-mono text-[13px] leading-relaxed max-h-96 overflow-y-auto"
-          >
-            {output.map((entry, i) => (
-              <OutputEntryView key={i} entry={entry} />
-            ))}
+            ref={vimStatusRef}
+            className={`px-4 py-1 font-mono text-xs text-muted-foreground border-t border-border bg-background ${vimEnabled ? '' : 'hidden'}`}
+          />
+
+          {/* Toolbar */}
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-border bg-card/80">
+            <Button
+              onClick={run}
+              disabled={!wasmReady || running}
+              size="sm"
+              className="gap-1.5"
+            >
+              {running ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
+              {wasmReady ? 'Run' : 'Loading...'}
+            </Button>
+
+            {/* Divider */}
+            <div className="h-5 w-px bg-border" />
+
+            {/* Extension toggles */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <ExtensionToggle
+                checked={base64ExtEnabled}
+                onToggle={handleBase64ExtToggle}
+                icon={Binary}
+                label="Base64"
+                tooltip={
+                  <>
+                    Adds <MdnLink path="Window/atob">atob()</MdnLink> and{' '}
+                    <MdnLink path="Window/btoa">btoa()</MdnLink>
+                  </>
+                }
+              />
+              <ExtensionToggle
+                checked={structuredCloneExtEnabled}
+                onToggle={handleStructuredCloneExtToggle}
+                icon={Copy}
+                label="Clone"
+                tooltip={
+                  <>
+                    Adds{' '}
+                    <MdnLink path="Window/structuredClone">
+                      structuredClone()
+                    </MdnLink>
+                  </>
+                }
+              />
+              <ExtensionToggle
+                checked={encodingExtEnabled}
+                onToggle={handleEncodingExtToggle}
+                icon={Type}
+                label="Encoding"
+                tooltip={
+                  <>
+                    Adds <MdnLink path="TextEncoder">TextEncoder</MdnLink> and{' '}
+                    <MdnLink path="TextDecoder">TextDecoder</MdnLink>
+                  </>
+                }
+              />
+              <ExtensionToggle
+                checked={headersExtEnabled}
+                onToggle={handleHeadersExtToggle}
+                icon={FileText}
+                label="Headers"
+                tooltip={
+                  <>
+                    Adds the <MdnLink path="Headers">Headers</MdnLink> class
+                  </>
+                }
+              />
+              <ExtensionToggle
+                checked={urlExtEnabled}
+                onToggle={handleUrlExtToggle}
+                icon={Globe}
+                label="URL"
+                tooltip={
+                  <>
+                    Adds <MdnLink path="URL">URL</MdnLink> and{' '}
+                    <MdnLink path="URLSearchParams">URLSearchParams</MdnLink>
+                  </>
+                }
+              />
+              <ExtensionToggle
+                checked={cryptoExtEnabled}
+                onToggle={handleCryptoExtToggle}
+                icon={Lock}
+                label="Crypto"
+                tooltip={
+                  <>
+                    Adds <MdnLink path="Crypto">crypto</MdnLink> and{' '}
+                    <MdnLink path="SubtleCrypto">SubtleCrypto</MdnLink>
+                  </>
+                }
+              />
+            </div>
+
+            {/* Spacer + status */}
+            <div className="flex-1" />
+            {status && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] font-mono shrink-0"
+              >
+                {status}
+              </Badge>
+            )}
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Output */}
+        {output.length > 0 && (
+          <div className="mt-4 rounded-xl border border-border bg-card overflow-hidden shadow-lg">
+            <div className="px-4 py-2.5 border-b border-border bg-card/80">
+              <span className="text-sm font-medium text-muted-foreground">
+                Output
+              </span>
+            </div>
+            <div
+              ref={outputRef}
+              className="p-4 font-mono text-[13px] leading-relaxed max-h-96 overflow-y-auto"
+            >
+              {output.map((entry, i) => (
+                <OutputEntryView key={i} entry={entry} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </TooltipProvider>
   );
 }
