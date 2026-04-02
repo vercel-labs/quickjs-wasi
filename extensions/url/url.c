@@ -736,6 +736,20 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
     JS_SetPropertyFunctionList(ctx, sp_proto, js_search_params_proto_funcs,
                                sizeof(js_search_params_proto_funcs) / sizeof(js_search_params_proto_funcs[0]));
     JS_SetPropertyStr(ctx, sp_proto, "constructor", JS_DupValue(ctx, sp_ctor));
+
+    /* Set Symbol.iterator = entries (per WHATWG URL spec) */
+    {
+        JSValue symbol = JS_GetPropertyStr(ctx, global, "Symbol");
+        JSValue iter_sym = JS_GetPropertyStr(ctx, symbol, "iterator");
+        JSAtom atom = JS_ValueToAtom(ctx, iter_sym);
+        JS_FreeValue(ctx, iter_sym);
+        JS_FreeValue(ctx, symbol);
+
+        JSValue entries_fn = JS_GetPropertyStr(ctx, sp_proto, "entries");
+        JS_SetProperty(ctx, sp_proto, atom, entries_fn);
+        JS_FreeAtom(ctx, atom);
+    }
+
     JS_SetClassProto(ctx, js_search_params_class_id, sp_proto);
 
     JSValue sp_proto_ref = JS_GetClassProto(ctx, js_search_params_class_id);

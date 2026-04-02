@@ -348,6 +348,41 @@ describe('WPT URLSearchParams', () => {
     expect(JSON.parse(r.toString())).toEqual(['1', '2', '3']);
     r.dispose();
   });
+
+  it('should have Symbol.iterator aliased to entries', () => {
+    const r = vm.evalCode(`URLSearchParams.prototype[Symbol.iterator] === URLSearchParams.prototype.entries`);
+    expect(r.toString()).toBe('true');
+    r.dispose();
+  });
+
+  it('should be iterable with for...of via Symbol.iterator', () => {
+    const r = vm.evalCode(`
+      var e=[];for(var p of new URLSearchParams('x=1&y=2'))e.push(p);JSON.stringify(e)
+    `);
+    expect(JSON.parse(r.toString())).toEqual([['x', '1'], ['y', '2']]);
+    r.dispose();
+  });
+
+  it('should be iterable with spread via Symbol.iterator', () => {
+    const r = vm.evalCode(`JSON.stringify([...new URLSearchParams('a=1&b=2&c=3')])`);
+    expect(JSON.parse(r.toString())).toEqual([['a', '1'], ['b', '2'], ['c', '3']]);
+    r.dispose();
+  });
+
+  it('should be iterable with Array.from via Symbol.iterator', () => {
+    const r = vm.evalCode(`JSON.stringify(Array.from(new URLSearchParams('k=v')))`);
+    expect(JSON.parse(r.toString())).toEqual([['k', 'v']]);
+    r.dispose();
+  });
+
+  it('should destructure via Symbol.iterator', () => {
+    const r = vm.evalCode(`
+      const [[k1,v1],[k2,v2]] = new URLSearchParams('a=1&b=2');
+      JSON.stringify({k1,v1,k2,v2})
+    `);
+    expect(JSON.parse(r.toString())).toEqual({k1:'a',v1:'1',k2:'b',v2:'2'});
+    r.dispose();
+  });
 });
 
 // ─── URL property setters ────────────────────────────────────────────────────
