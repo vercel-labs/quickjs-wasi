@@ -99,9 +99,21 @@ const jsValueAccessor: DataAccessor = {
     if (h.isArray) return false;
     const sym = getSymbolIterator(h.vm);
     const method = h.vm.getProp(h, sym);
-    const result = method.isFunction;
-    method.dispose();
-    return result;
+    if (!method.isFunction) {
+      method.dispose();
+      return false;
+    }
+    // Verify the iterator actually works — prototype objects have
+    // Symbol.iterator but throw when called without instance data.
+    try {
+      const iterator = h.vm.callFunction(method, h);
+      iterator.dispose();
+      method.dispose();
+      return true;
+    } catch {
+      method.dispose();
+      return false;
+    }
   },
 
   iterate(value: unknown): Iterable<unknown> {
@@ -112,27 +124,34 @@ const jsValueAccessor: DataAccessor = {
       method.dispose();
       return [];
     }
-    const iterator = h.vm.callFunction(method, h);
-    method.dispose();
-    const entries: JSValueHandle[] = [];
-    const nextFn = iterator.getProp('next');
-    for (;;) {
-      const result = h.vm.callFunction(nextFn, iterator);
-      const doneProp = result.getProp('done');
-      const done = doneProp.toString() === 'true';
-      doneProp.dispose();
-      if (done) {
+    // Calling Symbol.iterator on a prototype object (rather than an instance)
+    // will throw because there is no opaque instance data. Catch and bail out.
+    try {
+      const iterator = h.vm.callFunction(method, h);
+      method.dispose();
+      const entries: JSValueHandle[] = [];
+      const nextFn = iterator.getProp('next');
+      for (;;) {
+        const result = h.vm.callFunction(nextFn, iterator);
+        const doneProp = result.getProp('done');
+        const done = doneProp.toString() === 'true';
+        doneProp.dispose();
+        if (done) {
+          result.dispose();
+          break;
+        }
+        const val = result.getProp('value');
+        entries.push(val.dup());
+        val.dispose();
         result.dispose();
-        break;
       }
-      const val = result.getProp('value');
-      entries.push(val.dup());
-      val.dispose();
-      result.dispose();
+      nextFn.dispose();
+      iterator.dispose();
+      return entries;
+    } catch {
+      method.dispose();
+      return [];
     }
-    nextFn.dispose();
-    iterator.dispose();
-    return entries;
   },
 
   length(value: unknown): number {
