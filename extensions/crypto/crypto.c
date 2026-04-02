@@ -2302,6 +2302,13 @@ static const JSCFunctionListEntry js_crypto_proto_funcs[] = {
     JS_CFUNC_DEF("randomUUID", 0, js_crypto_randomUUID),
 };
 
+/* Illegal constructor — throws TypeError matching browser behavior */
+static JSValue js_illegal_constructor(JSContext *ctx, JSValueConst new_target,
+                                       int argc, JSValueConst *argv)
+{
+    return JS_ThrowTypeError(ctx, "Illegal constructor");
+}
+
 /* ================================================================
  * Extension entry point
  * ================================================================ */
@@ -2400,8 +2407,28 @@ int qjs_ext_crypto_init(JSContext *ctx, JSRuntime *rt) {
     JS_DefinePropertyValueStr(ctx, global, "crypto", crypto_obj,
                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 
+    /* Expose Crypto as a global constructor (throws TypeError on new) */
+    JSValue crypto_ctor = JS_NewCFunction2(ctx, js_illegal_constructor, "Crypto", 0,
+                                            JS_CFUNC_constructor, 0);
+    {
+        JSValue proto_ref = JS_GetClassProto(ctx, js_crypto_class_id);
+        JS_DefinePropertyValueStr(ctx, crypto_ctor, "prototype", proto_ref, 0);
+    }
+    JS_DefinePropertyValueStr(ctx, global, "Crypto", crypto_ctor,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+
+    /* Expose SubtleCrypto as a global constructor (throws TypeError on new) */
+    JSValue subtle_ctor = JS_NewCFunction2(ctx, js_illegal_constructor, "SubtleCrypto", 0,
+                                            JS_CFUNC_constructor, 0);
+    {
+        JSValue proto_ref = JS_GetClassProto(ctx, js_subtle_class_id);
+        JS_DefinePropertyValueStr(ctx, subtle_ctor, "prototype", proto_ref, 0);
+    }
+    JS_DefinePropertyValueStr(ctx, global, "SubtleCrypto", subtle_ctor,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+
     /* Also expose CryptoKey as a global (for instanceof checks) */
-    JSValue ck_ctor = JS_NewCFunction2(ctx, NULL, "CryptoKey", 0,
+    JSValue ck_ctor = JS_NewCFunction2(ctx, js_illegal_constructor, "CryptoKey", 0,
                                         JS_CFUNC_constructor, 0);
     JSValue ck_proto_ref = JS_GetClassProto(ctx, js_cryptokey_class_id);
     JS_DefinePropertyValueStr(ctx, ck_ctor, "prototype", ck_proto_ref, 0);

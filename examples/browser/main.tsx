@@ -444,7 +444,8 @@ declare function structuredClone<T>(value: T): T;
 
 const CRYPTO_TYPE_DEFS = `
 /** The CryptoKey interface represents a cryptographic key. */
-interface CryptoKey {
+declare class CryptoKey {
+  private constructor();
   readonly type: "secret" | "public" | "private";
   readonly extractable: boolean;
   readonly algorithm: KeyAlgorithm;
@@ -457,7 +458,8 @@ interface CryptoKeyPair { publicKey: CryptoKey; privateKey: CryptoKey; }
 interface Algorithm { name: string; [key: string]: any; }
 
 /** The SubtleCrypto interface provides cryptographic primitives. */
-interface SubtleCrypto {
+declare class SubtleCrypto {
+  private constructor();
   digest(algorithm: string | Algorithm, data: BufferSource): Promise<ArrayBuffer>;
   generateKey(algorithm: any, extractable: boolean, keyUsages: KeyUsage[]): Promise<CryptoKey | CryptoKeyPair>;
   importKey(format: KeyFormat, keyData: BufferSource, algorithm: any, extractable: boolean, keyUsages: KeyUsage[]): Promise<CryptoKey>;
@@ -473,7 +475,8 @@ interface SubtleCrypto {
 }
 
 /** The Crypto interface provides basic cryptography features. */
-interface Crypto {
+declare class Crypto {
+  private constructor();
   readonly subtle: SubtleCrypto;
   getRandomValues<T extends ArrayBufferView>(array: T): T;
   randomUUID(): string;

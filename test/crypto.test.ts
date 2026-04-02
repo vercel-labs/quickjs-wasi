@@ -61,7 +61,76 @@ async function evalJSON(code: string) {
 // Crypto interface existence
 // ═══════════════════════════════════════════════════════════════════════════════
 
+describe('Crypto global constructor', () => {
+  it('should define Crypto on globalThis as a function', async () => {
+    expect(await evalStr('typeof Crypto')).toBe('function');
+  });
+
+  it('Crypto should be writable, non-enumerable, configurable on globalThis', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(globalThis, 'Crypto')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
+  it('Crypto.prototype should be non-writable, non-enumerable, non-configurable', async () => {
+    const desc = await evalJSON(`(() => {
+      const d = Object.getOwnPropertyDescriptor(Crypto, 'prototype');
+      return { writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+    })()`);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
+  });
+
+  it('new Crypto() should throw TypeError', async () => {
+    expect(await evalStr('(() => { try { new Crypto(); return "no error"; } catch(e) { return e.constructor.name + ": " + e.message; } })()')).toBe('TypeError: Illegal constructor');
+  });
+
+  it('crypto instanceof Crypto should be true', async () => {
+    expect(await evalStr('crypto instanceof Crypto')).toBe('true');
+  });
+});
+
+describe('SubtleCrypto global constructor', () => {
+  it('should define SubtleCrypto on globalThis as a function', async () => {
+    expect(await evalStr('typeof SubtleCrypto')).toBe('function');
+  });
+
+  it('SubtleCrypto should be writable, non-enumerable, configurable on globalThis', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(globalThis, 'SubtleCrypto')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
+  it('SubtleCrypto.prototype should be non-writable, non-enumerable, non-configurable', async () => {
+    const desc = await evalJSON(`(() => {
+      const d = Object.getOwnPropertyDescriptor(SubtleCrypto, 'prototype');
+      return { writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+    })()`);
+    expect(desc.writable).toBe(false);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(false);
+  });
+
+  it('new SubtleCrypto() should throw TypeError', async () => {
+    expect(await evalStr('(() => { try { new SubtleCrypto(); return "no error"; } catch(e) { return e.constructor.name + ": " + e.message; } })()')).toBe('TypeError: Illegal constructor');
+  });
+
+  it('crypto.subtle instanceof SubtleCrypto should be true', async () => {
+    expect(await evalStr('crypto.subtle instanceof SubtleCrypto')).toBe('true');
+  });
+});
+
 describe('CryptoKey property descriptors', () => {
+  it('CryptoKey should be writable, non-enumerable, configurable on globalThis', async () => {
+    const desc = await evalJSON(`Object.getOwnPropertyDescriptor(globalThis, 'CryptoKey')`);
+    expect(desc.writable).toBe(true);
+    expect(desc.enumerable).toBe(false);
+    expect(desc.configurable).toBe(true);
+  });
+
   it('CryptoKey.prototype should be non-writable, non-enumerable, non-configurable', async () => {
     const desc = await evalJSON(`(() => {
       const d = Object.getOwnPropertyDescriptor(CryptoKey, 'prototype');
@@ -70,6 +139,10 @@ describe('CryptoKey property descriptors', () => {
     expect(desc.writable).toBe(false);
     expect(desc.enumerable).toBe(false);
     expect(desc.configurable).toBe(false);
+  });
+
+  it('new CryptoKey() should throw TypeError', async () => {
+    expect(await evalStr('(() => { try { new CryptoKey(); return "no error"; } catch(e) { return e.constructor.name + ": " + e.message; } })()')).toBe('TypeError: Illegal constructor');
   });
 });
 
