@@ -304,151 +304,18 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 | `--export-dynamic` | Export all non-hidden symbols |
 | `--allow-undefined` | Allow unresolved symbols (resolved at load time against the main module) |
 
-## Included Extensions
+## Built-in Extensions
 
-### `quickjs-wasi/url`
+| Extension | Import | Provides |
+|-----------|--------|----------|
+| [URL](extensions/url/README.md) | `quickjs-wasi/url` | `URL`, `URLSearchParams` |
+| [Encoding](extensions/encoding/README.md) | `quickjs-wasi/encoding` | `TextEncoder`, `TextDecoder` |
+| [Base64](extensions/base64/README.md) | `quickjs-wasi/base64` | `atob()`, `btoa()`, `Uint8Array.fromBase64()`, `Uint8Array.fromHex()`, `.toBase64()`, `.toHex()`, `.setFromBase64()`, `.setFromHex()` |
+| [Structured Clone](extensions/structured-clone/README.md) | `quickjs-wasi/structured-clone` | `structuredClone()` |
+| [Crypto](extensions/crypto/README.md) | `quickjs-wasi/crypto` | `crypto`, `SubtleCrypto`, `CryptoKey` |
+| [Headers](extensions/headers/README.md) | `quickjs-wasi/headers` | `Headers` |
 
-A fully WHATWG URL Standard compliant implementation of `URL` and `URLSearchParams`, backed by the [ada-url](https://github.com/ada-url/ada) library (the same URL parser used by Node.js).
-
-```typescript
-import { urlExtension } from 'quickjs-wasi/url';
-
-const vm = await QuickJS.create({
-  extensions: [urlExtension],
-});
-```
-
-**`URL`** class:
-- Constructor: `new URL(url)`, `new URL(url, base)` — full base URL resolution support
-- Getters/Setters: `href`, `protocol`, `username`, `password`, `host`, `hostname`, `port`, `pathname`, `search`, `hash`
-- Read-only: `origin`
-- Methods: `toString()`, `toJSON()`
-- Static: `URL.canParse(url)`, `URL.canParse(url, base)`
-- Full WHATWG compliance: percent-encoding, IDNA hostname normalization, default port stripping, path normalization
-
-**`URLSearchParams`** class:
-- Constructor: `new URLSearchParams(init)` — parses query strings
-- Methods: `get()`, `getAll()`, `set()`, `has()`, `delete()`, `append()`, `sort()`, `toString()`, `forEach()`, `entries()`, `keys()`, `values()`
-- Property: `size`
-- Full WHATWG compliance: proper percent-encoding (spaces as `+`), key sorting
-
-Build from source with:
-
-```bash
-make  # builds both quickjs.wasm and extensions/url/url.so
-```
-
-### `quickjs-wasi/encoding`
-
-A WHATWG Encoding Standard compliant implementation of `TextEncoder` and `TextDecoder`. Supports UTF-8 encoding/decoding, and UTF-16LE/UTF-16BE decoding.
-
-```typescript
-import { encodingExtension } from 'quickjs-wasi/encoding';
-
-const vm = await QuickJS.create({
-  extensions: [encodingExtension],
-});
-```
-
-**`TextEncoder`** class:
-- Constructor: `new TextEncoder()` — always UTF-8 (per spec, encoding argument is ignored)
-- Property: `encoding` (always `"utf-8"`)
-- Methods: `encode(input)` → `Uint8Array`, `encodeInto(source, destination)` → `{ read, written }`
-- USVString semantics: lone surrogates are replaced with U+FFFD
-
-**`TextDecoder`** class:
-- Constructor: `new TextDecoder(label?, options?)` — supports UTF-8, UTF-16LE, UTF-16BE
-- Options: `{ fatal: boolean, ignoreBOM: boolean }`
-- Properties: `encoding`, `fatal`, `ignoreBOM`
-- Method: `decode(input?, options?)` — supports streaming via `{ stream: true }`
-- Accepts `ArrayBuffer`, `TypedArray`, and `DataView` as input
-- BOM handling: UTF-8 BOM (EF BB BF), UTF-16LE BOM (FF FE), UTF-16BE BOM (FE FF) are stripped by default
-- Fatal mode: throws `TypeError` on invalid byte sequences
-- Replacement mode (default): invalid sequences produce U+FFFD
-- All UTF-8 label aliases: `utf-8`, `utf8`, `unicode-1-1-utf-8`, etc.
-- All UTF-16 label aliases: `utf-16le`, `utf-16`, `utf-16be`, `ucs-2`, etc.
-- Unsupported encoding labels throw `RangeError`
-
-Build from source with:
-
-```bash
-make  # builds quickjs.wasm, extensions/url/url.so, and extensions/encoding/encoding.so
-```
-
-### `quickjs-wasi/base64`
-
-WHATWG HTML Standard compliant implementation of `atob()` and `btoa()` global functions, using the "forgiving-base64" decode algorithm from the Infra Standard.
-
-```typescript
-import { base64Extension } from 'quickjs-wasi/base64';
-
-const vm = await QuickJS.create({
-  extensions: [base64Extension],
-});
-```
-
-**`btoa(data)`**: Encodes a binary string (each char code 0-255) to base64. Throws `InvalidCharacterError` DOMException for characters > U+00FF.
-
-**`atob(data)`**: Decodes a base64 string to a binary string. Supports forgiving decode (strips ASCII whitespace, allows missing padding). Throws `InvalidCharacterError` for invalid input.
-
-### `quickjs-wasi/structured-clone`
-
-WHATWG HTML Standard compliant `structuredClone()` global function. Deep clones values following the Structured Clone algorithm with circular reference detection.
-
-```typescript
-import { structuredCloneExtension } from 'quickjs-wasi/structured-clone';
-
-const vm = await QuickJS.create({
-  extensions: [structuredCloneExtension],
-});
-```
-
-**`structuredClone(value, options?)`**: Deep clones a value. Handles:
-- Primitives: undefined, null, boolean, number, bigint, string
-- Date, RegExp
-- ArrayBuffer, TypedArrays (Uint8Array, Int32Array, Float64Array, etc.), DataView
-- Map, Set
-- Array (including sparse arrays)
-- Error (Error, TypeError, RangeError, etc.)
-- Plain objects
-- Circular references and shared references (preserved in the clone graph)
-
-Throws `DataCloneError` DOMException for:
-- Functions, Symbols, Proxies, Promises, WeakMap, WeakSet
-
-**Note**: Transfer semantics (`options.transfer`) are not supported.
-
-### `quickjs-wasi/crypto`
-
-A W3C Web Cryptography API implementation backed by [mbedTLS 4.0](https://github.com/Mbed-TLS/mbedtls) (PSA Crypto). Provides the `crypto` global with `SubtleCrypto` for cryptographic operations.
-
-```typescript
-import { cryptoExtension } from 'quickjs-wasi/crypto';
-
-const vm = await QuickJS.create({
-  extensions: [cryptoExtension],
-});
-```
-
-**`crypto`** global:
-- `crypto.getRandomValues(typedArray)` — fill with cryptographically strong random values (max 65536 bytes)
-- `crypto.randomUUID()` — generate a v4 UUID string
-
-**`crypto.subtle`** (SubtleCrypto):
-- `digest(algorithm, data)` — SHA-1, SHA-256, SHA-384, SHA-512
-- `generateKey(algorithm, extractable, keyUsages)` — HMAC, AES-CBC/CTR/GCM/KW, ECDSA (P-256/P-384/P-521), ECDH, Ed25519, X25519, RSA-OAEP/PKCS1v1.5/PSS
-- `importKey(format, keyData, algorithm, extractable, keyUsages)` — raw, pkcs8, spki formats
-- `exportKey(format, key)` — raw, pkcs8, spki formats
-- `sign(algorithm, key, data)` / `verify(algorithm, key, signature, data)` — HMAC, ECDSA, Ed25519, RSA
-- `encrypt(algorithm, key, data)` / `decrypt(algorithm, key, data)` — AES-GCM, AES-CBC, AES-CTR, RSA-OAEP
-- `deriveBits(algorithm, baseKey, length)` / `deriveKey(...)` — HKDF, PBKDF2, ECDH, X25519
-- `wrapKey(format, key, wrappingKey, algorithm)` / `unwrapKey(...)` — key wrapping via encrypt/decrypt
-
-**`CryptoKey`** class:
-- Properties: `type` (`"secret"`, `"public"`, `"private"`), `extractable`, `algorithm` (frozen), `usages` (frozen)
-- `Symbol.toStringTag` = `"CryptoKey"`
-
-The extension uses WASI `random_get` as its entropy source, which means user-provided `wasi` overrides of `random_get` flow through to all crypto operations. This enables deterministic crypto output for testing.
+See each extension's README for full API documentation.
 
 ## WASI Override Layering
 
