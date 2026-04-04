@@ -32,7 +32,7 @@ import { QuickJS } from 'quickjs-wasi';
   using vm = await QuickJS.create(wasmBytes);
 
   // Evaluate code — handles are auto-disposed with `using`
-  using result = vm.unwrapResult(vm.evalCode('1 + 2'));
+  using result = vm.evalCode('1 + 2');
   console.log(result.toNumber()); // 3
 } // vm and result are automatically disposed here
 ```
@@ -51,7 +51,7 @@ using vm = await QuickJS.create(wasmBytes);
 }
 
 // Read back the value
-using msg = vm.unwrapResult(vm.evalCode('message'));
+using msg = vm.evalCode('message');
 console.log(msg.toString()); // "hello"
 
 // Convert host values to QuickJS handles (and back)
@@ -77,7 +77,7 @@ using vm = await QuickJS.create(wasmBytes);
   vm.setProp(vm.global, 'add', add);
 }
 
-using result = vm.unwrapResult(vm.evalCode('add(3, 4)'));
+using result = vm.evalCode('add(3, 4)');
 console.log(result.toNumber()); // 7
 ```
 
@@ -117,9 +117,9 @@ using vm = await QuickJS.create(wasmBytes);
 ```typescript
 using vm = await QuickJS.create(wasmBytes);
 
-// unwrapResult() throws a host Error if the eval/call produced an exception
+// evalCode() throws a JSException if the evaluated code throws
 try {
-  vm.unwrapResult(vm.evalCode('throw new TypeError("bad")'));
+  vm.evalCode('throw new TypeError("bad")');
 } catch (err) {
   console.log(err.name);    // "TypeError"
   console.log(err.message); // "bad"
@@ -226,15 +226,18 @@ using vm = await QuickJS.create({
   },
 });
 
-const result = vm.evalCode('while (true) {}');
-result.isException; // true — interrupted
-result.dispose();
+try {
+  vm.evalCode('while (true) {}');
+} catch (err) {
+  // JSException — interrupted
+  err.dispose();
+}
 
 // VM is still usable after an interrupt
 vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
 ```
 
-The handler is called approximately once per JS bytecode instruction, so it should be fast. When it returns `true`, the current execution is interrupted and returns an exception result. The VM remains usable after an interrupt.
+The handler is called approximately once per JS bytecode instruction, so it should be fast. When it returns `true`, the current execution is interrupted and throws a `JSException`. The VM remains usable after an interrupt.
 
 ### Timezone Offset
 
@@ -285,7 +288,7 @@ let snapshot: Snapshot;
   using vm = await QuickJS.create(wasmBytes);
 
   // Build up some state, including a pending promise
-  vm.unwrapResult(vm.evalCode(`
+  vm.evalCode(`
     globalThis.counter = 0;
 
     let __resolve;
@@ -295,7 +298,7 @@ let snapshot: Snapshot;
     globalThis.pendingWork.then(value => {
       globalThis.counter = value;
     });
-  `)).dispose();
+  `).dispose();
   vm.executePendingJobs();
 
   // Take a snapshot
@@ -351,7 +354,7 @@ let snapshot: Snapshot;
   });
 
   // hostAdd() works again
-  using result = vm.unwrapResult(vm.evalCode('hostAdd(100, 200)'));
+  using result = vm.evalCode('hostAdd(100, 200)');
   console.log(result.toNumber()); // 300
 }
 ```
@@ -372,10 +375,10 @@ using vm = await QuickJS.create({
   extensions: [{ name: 'url', wasm: urlExt }],
 });
 
-using result = vm.unwrapResult(vm.evalCode(`
+using result = vm.evalCode(`
   const url = new URL('https://example.com:8080/api?key=value#section');
   url.hostname // 'example.com'
-`));
+`);
 ```
 
 Extensions survive snapshot/restore — provide the same extensions when restoring:
@@ -401,9 +404,8 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic li
 | `QuickJS.restore(snapshot, options?)` | Restore a VM from a snapshot |
 | `QuickJS.serializeSnapshot(snapshot)` | Serialize a snapshot to a versioned binary `Uint8Array` |
 | `QuickJS.deserializeSnapshot(data)` | Deserialize a snapshot from a binary `Uint8Array` |
-| `vm.evalCode(code, filename?)` | Evaluate JS code, returns `JSValueHandle` |
-| `vm.unwrapResult(handle)` | Returns the handle if not an exception, otherwise throws |
-| `vm.callFunction(fn, this, ...args)` | Call a QuickJS function |
+| `vm.evalCode(code, filename?)` | Evaluate JS code, returns `JSValueHandle` (throws `JSException` on error) |
+| `vm.callFunction(fn, this, ...args)` | Call a QuickJS function (throws `JSException` on error) |
 | `vm.executePendingJobs()` | Drain the promise microtask queue |
 | `vm.newString(str)` | Create a string value |
 | `vm.newNumber(num)` | Create a number value |
@@ -463,7 +465,6 @@ These are singleton handles — do **not** dispose them:
 
 | Method / Property | Description |
 |-------------------|-------------|
-| `handle.isException` | `true` if this is an exception result |
 | `handle.isUndefined` | `true` if this is `undefined` |
 | `handle.isNull` | `true` if this is `null` |
 | `handle.promiseState` | `0` pending, `1` fulfilled, `2` rejected |

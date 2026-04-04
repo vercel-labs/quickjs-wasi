@@ -18,14 +18,14 @@ const vm = await QuickJS.create({
   extensions: [urlExtension],
 });
 
-vm.unwrapResult(vm.evalCode(`
+vm.evalCode(`
   const url = new URL('https://example.com:8080/api?key=value');
   console.log(url.hostname); // 'example.com'
   console.log(url.port);     // '8080'
 
   const params = new URLSearchParams('a=1&b=2');
   console.log(params.get('a')); // '1'
-`)).dispose();
+`).dispose();
 ```
 
 You can also load extensions manually from WASM bytes:
@@ -165,9 +165,9 @@ This means:
 const vm1 = await QuickJS.create({
   extensions: [{ name: 'url', wasm: urlExtBytes }],
 });
-vm1.unwrapResult(vm1.evalCode(`
+vm1.evalCode(`
   globalThis.myUrl = new URL('https://example.com/api');
-`)).dispose();
+`).dispose();
 
 // Snapshot
 const bytes = QuickJS.serializeSnapshot(vm1.snapshot());
