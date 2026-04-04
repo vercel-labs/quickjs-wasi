@@ -2,17 +2,6 @@
 
 A snapshotable JavaScript runtime via WebAssembly. Runs [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WASM, with the ability to **snapshot the entire VM state** (including pending promises) and **restore it in a fresh WASM instance**.
 
-## Motivation
-
-The [Workflow SDK](https://useworkflow.dev) project implements durable function execution for TypeScript using an event-replay technique: workflow code is re-executed from the beginning on every resumption, with the full event log used as the source of truth for previously completed work. This approach has scaling limitations:
-
-- As the event log grows, re-fetching it becomes expensive
-- Replaying the full log takes increasingly longer
-- There is an effective upper bound on how much work a workflow can do
-- Running "forever" workflows is impractical
-
-This project explores a fundamentally different approach: **VM snapshotting**. Instead of replaying from the beginning, we snapshot the JavaScript execution environment at each suspension point and restore it on resumption. The restored VM already has the correct state — only events since the last snapshot need to be fetched and applied.
-
 ## Install
 
 ```sh
@@ -557,17 +546,6 @@ Host (Node.js / Deno / Bun / Browser)
 When `vm.newFunction(name, fn)` is called, a QuickJS C function is created via `JS_NewCFunctionData2` with the function name stored as a JS string in `func_data[0]`. When QuickJS code calls the function, the C trampoline extracts the name and calls the imported `host_call(name_ptr, name_len, this_ptr, argc, argv_ptr)` function, which dispatches to the registered host callback by name.
 
 This design survives snapshot/restore: the name string is stored in QuickJS's heap (part of the snapshot), and after restore, `registerHostCallback(name, fn)` re-maps the name to a new host function. Because callbacks are keyed by name rather than sequential integer IDs, the registration order doesn't matter and adding or removing host functions won't silently break restore.
-
-## Implications for Durable Workflows
-
-| | Event Replay (current) | VM Snapshot (this project) |
-|---|---|---|
-| **Resumption cost** | O(n) — replay full event log | O(1) — restore snapshot + fetch delta |
-| **Event log growth** | Unbounded, all events needed | Can be trimmed after snapshot |
-| **Long-running workflows** | Impractical at scale | No degradation over time |
-| **State representation** | Implicit (derived from log) | Explicit (WASM memory snapshot) |
-| **Snapshot size** | N/A | ~256 KB baseline, grows with JS heap |
-| **Determinism requirement** | Yes (seeded PRNG, frozen time) | No (state is captured, not re-derived) |
 
 ## Development
 
