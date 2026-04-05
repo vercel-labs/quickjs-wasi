@@ -1,5 +1,41 @@
 # quickjs-wasi
 
+## 2.2.0
+
+### Minor Changes
+
+- [`4b6f034`](https://github.com/vercel-labs/quickjs-wasi/commit/4b6f034a4689d72d09decaa8e0b35586a28977fe) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.compile()` and `vm.evalBytecode()` for bytecode compilation. Compile JavaScript source to a portable `Uint8Array` bytecode without executing it, then execute it later — even in a different VM instance. Also adds `CompileFlags.STRIP_SOURCE` and `CompileFlags.STRIP_DEBUG` for smaller bytecode output.
+
+- [`f3f9556`](https://github.com/vercel-labs/quickjs-wasi/commit/f3f95565314a9119398c4b1dca05ec9f6ebaa075) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `timezoneOffset` option to `QuickJS.create()` for configuring the timezone used by `Date` inside the sandbox. Defaults to `'host'` which mirrors the host environment's timezone. Can also be set to a fixed offset in minutes or a callback for DST-aware logic.
+
+- [`c37f38a`](https://github.com/vercel-labs/quickjs-wasi/commit/c37f38a1603cce5f5c4e216347ff73a47cc4fc04) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Expose `Crypto` and `SubtleCrypto` as global constructors in the crypto extension, matching the Web Crypto API spec. All three crypto constructors (`Crypto`, `SubtleCrypto`, `CryptoKey`) now throw `TypeError: Illegal constructor` when called with `new`, and support `instanceof` checks (e.g. `crypto instanceof Crypto`).
+
+- [`6b99128`](https://github.com/vercel-labs/quickjs-wasi/commit/6b99128ff33c1ba26e927b2d48257928b5c4302b) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.gcThreshold` getter/setter for controlling when automatic garbage collection triggers. When allocated memory exceeds the threshold, GC runs automatically. Set to 0 to disable.
+
+- [`d82e66d`](https://github.com/vercel-labs/quickjs-wasi/commit/d82e66d6169d7842eb3e5258902ba5862963c9b2) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add introspection methods to `JSValueHandle` for inspecting QuickJS values without dumping them to host values. New type-checking getters: `isBool`, `isNumber`, `isString`, `isSymbol`, `isBigInt`, `isObject`, `isArray`, `isFunction`, `isError`, `isPromise`, `isArrayBuffer`. New convenience properties: `typeof`, `length`, `constructorName`. New methods: `keys()`, `getOwnPropertyNames()`, `hasOwnProperty()`, `propertyIsEnumerable()`, `getPrototypeOf()`.
+
+- [`4811892`](https://github.com/vercel-labs/quickjs-wasi/commit/4811892474f85b083584129d93a89ba8892d227d) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `intrinsics` option to `QuickJS.create()` for controlling which built-in JavaScript features are available in the VM. Pass a bitmask of `Intrinsics.*` flags to create a minimal sandbox — for example, omit `Intrinsics.PROXY` to disallow `Proxy`, or omit `Intrinsics.DATE` to remove `Date`. Useful for security hardening or reducing memory usage. Note: `Intrinsics.EVAL` must be included for `vm.evalCode()` to work; without it, only pre-compiled bytecode via `vm.evalBytecode()` can be executed.
+
+- [`ad61f8b`](https://github.com/vercel-labs/quickjs-wasi/commit/ad61f8b99d5fcb905f37a8761c88ac8c87726090) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.getMemoryUsage()` method returning detailed memory statistics from the QuickJS runtime, including counts and sizes for atoms, strings, objects, properties, shapes, functions, arrays, and binary objects.
+
+- [`59bc5b5`](https://github.com/vercel-labs/quickjs-wasi/commit/59bc5b570bc3f37a88dfaa75ffb793d1743f2626) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `moduleLoader` option for ES module support. Provides `normalize` and `load` callbacks that enable `import` statements to resolve and load modules. The callbacks are synchronous — for async module resolution, pre-fetch sources before creating the VM. Works with `QuickJS.create()` and `QuickJS.restore()`, and is compatible with snapshots (loaded modules survive, but the loader must be re-provided on restore for future imports).
+
+- [`72d571b`](https://github.com/vercel-labs/quickjs-wasi/commit/72d571bc2895c67c40113d888b60077614be635c) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `onUnhandledRejection` option for tracking unhandled promise rejections. The callback receives the promise, rejection reason, and whether a handler was just attached. Works with both `QuickJS.create()` and `QuickJS.restore()`.
+
+- [`f10db4d`](https://github.com/vercel-labs/quickjs-wasi/commit/f10db4d03d3debd12adf7a113e050f9be149c9d8) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.runGC()` method for explicitly triggering garbage collection. QuickJS runs GC automatically, but this is useful for reclaiming memory at a known point or before taking a snapshot.
+
+- [`e127479`](https://github.com/vercel-labs/quickjs-wasi/commit/e127479408195cbc2eae9ef699625598f154f070) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.versions` property returning version information for the runtime and loaded native libraries. Always includes `quickjs-wasi` (package version) and `quickjs` (engine version). Extensions can contribute additional entries by exporting a `qjs_ext_<name>_versions()` function — the built-in URL extension reports `ada` and the crypto extension reports `mbedtls`.
+
+### Patch Changes
+
+- [`309ec0b`](https://github.com/vercel-labs/quickjs-wasi/commit/309ec0b8b501edbd4c5789933ddd9a57bff037f9) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Make `prototype.constructor` non-enumerable on all extension classes (`URL`, `URLSearchParams`, `Headers`, `TextEncoder`, `TextDecoder`), matching the Web IDL spec. The property remains writable and configurable.
+
+- [`32b1c38`](https://github.com/vercel-labs/quickjs-wasi/commit/32b1c3883e7c0cb2b9b25221a55ee4105c01f54c) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Make `JSValueHandle.vm` a public readonly property, allowing external code to access the QuickJS VM instance from any handle.
+
+- [`7242e5d`](https://github.com/vercel-labs/quickjs-wasi/commit/7242e5d5d52308463097b033418fa46865bf4782) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Make `Constructor.prototype` non-writable, non-enumerable, and non-configurable on all extension constructors (`URL`, `URLSearchParams`, `Headers`, `TextEncoder`, `TextDecoder`, `CryptoKey`), matching the Web IDL spec for built-in interface objects.
+
+- [`fbb40ee`](https://github.com/vercel-labs/quickjs-wasi/commit/fbb40ee87763adec3ee2370970d52c72756f5f21) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `Symbol.iterator` to `URLSearchParams.prototype`, aliased to `entries()` per the WHATWG URL spec. This makes `URLSearchParams` instances iterable with `for...of` and spread syntax.
+
 ## 2.1.0
 
 ### Minor Changes
