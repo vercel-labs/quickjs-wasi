@@ -310,6 +310,58 @@ JSValue *qjs_eval(const char *code, size_t len, const char *filename, int eval_f
     return jsvalue_to_heap(result);
 }
 
+/* ---- Bytecode compilation ---- */
+
+/*
+ * Compile JS source to bytecode without executing it.
+ * Returns a pointer to the serialized bytecode buffer, and writes the
+ * buffer length to *out_len. The caller must free the returned pointer
+ * with wasm_free().
+ *
+ * Returns NULL on compilation error (exception is set on the context).
+ *
+ * write_flags controls what is included in the bytecode:
+ *   JS_WRITE_OBJ_BYTECODE (1)  - allow function/module (required)
+ *   JS_WRITE_OBJ_STRIP_SOURCE (16) - omit source code
+ *   JS_WRITE_OBJ_STRIP_DEBUG (32)  - omit debug info
+ */
+__attribute__((export_name("qjs_compile")))
+uint8_t *qjs_compile(const char *code, size_t code_len, const char *filename,
+                      int eval_flags, int write_flags, size_t *out_len) {
+    JSValue obj = JS_Eval(ctx, code, code_len, filename,
+                          eval_flags | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (JS_IsException(obj)) {
+        *out_len = 0;
+        return NULL;
+    }
+    uint8_t *buf = JS_WriteObject(ctx, out_len, obj, write_flags | JS_WRITE_OBJ_BYTECODE);
+    JS_FreeValue(ctx, obj);
+    return buf; /* caller frees with js_free(ctx, buf) or wasm_free() */
+}
+
+/*
+ * Load and evaluate previously compiled bytecode.
+ * buf/buf_len is the serialized bytecode from qjs_compile.
+ * Returns a heap-allocated JSValue* with the evaluation result.
+ */
+__attribute__((export_name("qjs_eval_bytecode")))
+JSValue *qjs_eval_bytecode(const uint8_t *buf, size_t buf_len) {
+    JSValue obj = JS_ReadObject(ctx, buf, buf_len, JS_READ_OBJ_BYTECODE);
+    if (JS_IsException(obj)) {
+        return jsvalue_to_heap(obj);
+    }
+    /* For modules, resolve dependencies first */
+    if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+        if (JS_ResolveModule(ctx, obj) < 0) {
+            JS_FreeValue(ctx, obj);
+            return jsvalue_to_heap(JS_EXCEPTION);
+        }
+    }
+    JSValue result = JS_EvalFunction(ctx, obj);
+    /* JS_EvalFunction consumes obj, no need to free it */
+    return jsvalue_to_heap(result);
+}
+
 /* ---- Value Creation ---- */
 
 __attribute__((export_name("qjs_new_string")))

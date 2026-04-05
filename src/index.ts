@@ -53,6 +53,17 @@ export const EvalFlags = {
   ASYNC: (1 << 7) as 128,
 } as const;
 
+/**
+ * Flags for `vm.compile()` controlling what is included in the bytecode output.
+ * These can be combined with bitwise OR.
+ */
+export const CompileFlags = {
+  /** Strip source code from the bytecode (smaller output, no source in errors). */
+  STRIP_SOURCE: (1 << 4) as 16,
+  /** Strip debug information (line numbers, etc.) from the bytecode. */
+  STRIP_DEBUG: (1 << 5) as 32,
+} as const;
+
 /** Memory usage statistics from the QuickJS runtime. */
 export interface MemoryUsage {
   /** Total bytes allocated via malloc */
@@ -183,6 +194,8 @@ interface QuickJSExports {
 
   // Evaluation
   qjs_eval(codePtr: number, codeLen: number, filenamePtr: number, flags: number): number;
+  qjs_compile(codePtr: number, codeLen: number, filenamePtr: number, evalFlags: number, writeFlags: number, outLenPtr: number): number;
+  qjs_eval_bytecode(bufPtr: number, bufLen: number): number;
 
   // Value creation
   qjs_new_string(strPtr: number, strLen: number): number;
@@ -897,6 +910,57 @@ export class QuickJS {
     const resultPtr = this.exports.qjs_eval(codeStr.ptr, codeStr.len, fnStr.ptr, flags);
     this.exports.wasm_free(codeStr.ptr);
     this.exports.wasm_free(fnStr.ptr);
+    return this.throwIfException(new JSValueHandle(this, resultPtr));
+  }
+
+  /**
+   * Compile JavaScript source code to bytecode without executing it.
+   * The returned `Uint8Array` can be stored, transferred, or later executed
+   * with `evalBytecode()`.
+   *
+   * @param code - The JavaScript source code to compile.
+   * @param filename - Optional filename for error stack traces (default `'<compile>'`).
+   * @param evalFlags - Optional bitwise OR of `EvalFlags.*` constants.
+   *   Use `EvalFlags.TYPE_MODULE` to compile as a module.
+   * @param compileFlags - Optional bitwise OR of `CompileFlags.*` constants.
+   *   Use `CompileFlags.STRIP_SOURCE` and/or `CompileFlags.STRIP_DEBUG` to
+   *   reduce bytecode size.
+   */
+  compile(code: string, filename: string = '<compile>', evalFlags: number = 0, compileFlags: number = 0): Uint8Array {
+    this.assertNotDisposed();
+    const codeStr = this.writeString(code);
+    const fnStr = this.writeString(filename);
+    // Allocate space for the output length (size_t = 4 bytes in wasm32)
+    const outLenPtr = this.exports.wasm_malloc(4);
+    const bufPtr = this.exports.qjs_compile(codeStr.ptr, codeStr.len, fnStr.ptr, evalFlags, compileFlags, outLenPtr);
+    this.exports.wasm_free(codeStr.ptr);
+    this.exports.wasm_free(fnStr.ptr);
+    if (bufPtr === 0) {
+      this.exports.wasm_free(outLenPtr);
+      // Compilation failed — throw the QuickJS exception
+      const exc = this.getException();
+      throw new Error(`Compilation error: ${exc.toString()}`);
+    }
+    const outLen = new Uint32Array(this.exports.memory.buffer, outLenPtr, 1)[0];
+    this.exports.wasm_free(outLenPtr);
+    // Copy the bytecode out of WASM memory before freeing
+    const bytecode = new Uint8Array(this.exports.memory.buffer, bufPtr, outLen).slice();
+    this.exports.wasm_free(bufPtr);
+    return bytecode;
+  }
+
+  /**
+   * Execute previously compiled bytecode (from `compile()`).
+   * Returns the evaluation result as a handle.
+   *
+   * @param bytecode - The bytecode `Uint8Array` from `compile()`.
+   */
+  evalBytecode(bytecode: Uint8Array): JSValueHandle {
+    this.assertNotDisposed();
+    const bufPtr = this.exports.wasm_malloc(bytecode.byteLength);
+    new Uint8Array(this.exports.memory.buffer, bufPtr, bytecode.byteLength).set(bytecode);
+    const resultPtr = this.exports.qjs_eval_bytecode(bufPtr, bytecode.byteLength);
+    this.exports.wasm_free(bufPtr);
     return this.throwIfException(new JSValueHandle(this, resultPtr));
   }
 
