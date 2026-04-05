@@ -194,6 +194,34 @@ export interface QuickJSOptions {
    */
   onUnhandledRejection?: (promise: JSValueHandle, reason: JSValueHandle, isHandled: boolean) => void;
   /**
+   * Module loader for ES module `import` statements. When provided, the VM
+   * can resolve and load modules.
+   *
+   * Both callbacks are **synchronous** — they must return their result
+   * immediately. For async module resolution, pre-fetch all module sources
+   * before creating the VM and return them from a `Map` in the `load` callback.
+   */
+  moduleLoader?: {
+    /**
+     * Resolve a module specifier relative to the importing module.
+     * Called when an `import` statement is encountered.
+     *
+     * @param baseName - The name of the module containing the `import` statement
+     * @param specifier - The raw specifier string (e.g. `"./foo.js"`, `"lodash"`)
+     * @returns The normalized/canonical module name
+     *
+     * If omitted, specifiers are passed through to `load` unchanged.
+     */
+    normalize?: (baseName: string, specifier: string) => string;
+    /**
+     * Load the source code for a module.
+     *
+     * @param moduleName - The normalized module name (from `normalize`, or the raw specifier)
+     * @returns The module source code as a string
+     */
+    load: (moduleName: string) => string;
+  };
+  /**
    * Bitmask of `Intrinsics.*` flags controlling which built-in JavaScript
    * features are available. By default all intrinsics are enabled.
    *
@@ -343,6 +371,7 @@ interface QuickJSExports {
   qjs_set_max_stack_size(size: number): void;
   qjs_set_interrupt_handler(enable: number): void;
   qjs_set_promise_rejection_handler(enable: number): void;
+  qjs_set_module_loader(enable: number): void;
   qjs_run_gc(): void;
   qjs_set_gc_threshold(threshold: number): void;
   qjs_get_gc_threshold(): number;
@@ -436,6 +465,8 @@ export class QuickJS {
   private nextInternalId = 1;
   private interruptHandler: (() => boolean) | null = null;
   private unhandledRejectionHandler: ((promise: JSValueHandle, reason: JSValueHandle, isHandled: boolean) => void) | null = null;
+  private moduleNormalizeHandler: ((baseName: string, specifier: string) => string) | null = null;
+  private moduleLoadHandler: ((moduleName: string) => string) | null = null;
   private timezoneOffsetHandler: ((timeSecs: number) => number) | null = null;
 
   // Cached singleton handles
@@ -758,7 +789,7 @@ export class QuickJS {
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
     if (!options) return {};
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'intrinsics' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'moduleLoader' in options || 'intrinsics' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
   }
@@ -774,6 +805,11 @@ export class QuickJS {
     if (opts.onUnhandledRejection) {
       vm.unhandledRejectionHandler = opts.onUnhandledRejection;
       vm.exports.qjs_set_promise_rejection_handler(1);
+    }
+    if (opts.moduleLoader) {
+      vm.moduleLoadHandler = opts.moduleLoader.load;
+      vm.moduleNormalizeHandler = opts.moduleLoader.normalize ?? null;
+      vm.exports.qjs_set_module_loader(1);
     }
     // Configure timezone handler.
     // The internal handler always returns the UTC offset in *seconds*
@@ -858,6 +894,39 @@ export class QuickJS {
       }
     };
 
+    // Module normalizer: resolve a specifier relative to a base name.
+    // Returns a malloc'd null-terminated string in WASM memory, or 0 (NULL) on error.
+    const hostModuleNormalize = (baseNamePtr: number, namePtr: number): number => {
+      if (!vm.moduleNormalizeHandler) {
+        // No normalize handler — return a copy of the specifier as-is
+        const name = vm.readCString(namePtr);
+        return vm.writeString(name).ptr;
+      }
+      const baseName = vm.readCString(baseNamePtr);
+      const specifier = vm.readCString(namePtr);
+      try {
+        const normalized = vm.moduleNormalizeHandler(baseName, specifier);
+        return vm.writeString(normalized).ptr;
+      } catch {
+        return 0;
+      }
+    };
+
+    // Module loader: return source code for a module.
+    // Returns a malloc'd string pointer, writes length to *outLenPtr.
+    const hostModuleLoad = (namePtr: number, outLenPtr: number): number => {
+      if (!vm.moduleLoadHandler) return 0;
+      const name = vm.readCString(namePtr);
+      try {
+        const source = vm.moduleLoadHandler(name);
+        const { ptr, len } = vm.writeString(source);
+        new Uint32Array(vm.exports.memory.buffer, outLenPtr, 1)[0] = len;
+        return ptr;
+      } catch {
+        return 0;
+      }
+    };
+
     // host_get_timezone_offset receives time as split i32 (hi, lo) and
     // returns the UTC offset in seconds.
     const hostGetTimezoneOffset = (hi: number, lo: number): number => {
@@ -866,7 +935,14 @@ export class QuickJS {
     };
 
     const instance = await WebAssembly.instantiate(module, {
-      env: { host_call: hostCall, host_interrupt: hostInterrupt, host_promise_rejection: hostPromiseRejection, host_get_timezone_offset: hostGetTimezoneOffset },
+      env: {
+        host_call: hostCall,
+        host_interrupt: hostInterrupt,
+        host_promise_rejection: hostPromiseRejection,
+        host_module_normalize: hostModuleNormalize,
+        host_module_load: hostModuleLoad,
+        host_get_timezone_offset: hostGetTimezoneOffset,
+      },
       wasi_snapshot_preview1: wasiShim,
     });
 

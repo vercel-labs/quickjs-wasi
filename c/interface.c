@@ -60,6 +60,75 @@ static int interrupt_handler_trampoline(JSRuntime *rt, void *opaque)
 }
 
 /*
+ * Imported from the host environment. Called to normalize a module specifier
+ * (e.g. resolve "./foo" relative to a base module name).
+ *
+ * Returns a pointer to a null-terminated string in WASM memory (allocated
+ * with malloc). The caller frees it with js_free(). Returns NULL on error.
+ */
+__attribute__((import_module("env"), import_name("host_module_normalize")))
+extern char *host_module_normalize(const char *base_name, const char *name);
+
+/*
+ * Imported from the host environment. Called to load module source code.
+ * The host writes the source code into WASM memory and returns a pointer
+ * to a null-terminated source string (allocated with malloc).
+ * The caller frees it. Returns NULL on error.
+ */
+__attribute__((import_module("env"), import_name("host_module_load")))
+extern char *host_module_load(const char *module_name, size_t *out_len);
+
+/*
+ * Module normalizer trampoline: dispatches to the host_module_normalize import.
+ * Returns a js_malloc'd string with the normalized module name.
+ */
+static char *module_normalizer_trampoline(JSContext *ctx,
+                                           const char *module_base_name,
+                                           const char *module_name, void *opaque)
+{
+    (void)ctx;
+    (void)opaque;
+    char *result = host_module_normalize(module_base_name, module_name);
+    if (!result) {
+        JS_ThrowReferenceError(ctx, "could not normalize module '%s'", module_name);
+        return NULL;
+    }
+    /* The host allocated with malloc; QuickJS expects js_malloc'd memory.
+       Since we're using the same allocator (wasi libc malloc), this is fine. */
+    return result;
+}
+
+/*
+ * Module loader trampoline: dispatches to the host_module_load import.
+ * Receives source code from the host, compiles it, and returns the JSModuleDef.
+ */
+static JSModuleDef *module_loader_trampoline(JSContext *ctx,
+                                              const char *module_name, void *opaque)
+{
+    (void)opaque;
+    size_t source_len = 0;
+    char *source = host_module_load(module_name, &source_len);
+    if (!source) {
+        JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
+        return NULL;
+    }
+
+    /* Compile the module source (COMPILE_ONLY so it returns the module def) */
+    JSValue func_val = JS_Eval(ctx, source, source_len, module_name,
+                                JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    free(source);
+
+    if (JS_IsException(func_val)) {
+        return NULL;
+    }
+
+    /* Extract the JSModuleDef from the compiled module function */
+    JSModuleDef *m = (JSModuleDef *)JS_VALUE_GET_PTR(func_val);
+    /* Don't free func_val — the module is owned by the runtime */
+    return m;
+}
+
+/*
  * Imported from the host environment. Called when a promise is rejected
  * without a handler, or when a handler is attached to a previously
  * unhandled rejection.
@@ -277,6 +346,18 @@ void qjs_set_promise_rejection_handler(int enable) {
             JS_SetHostPromiseRejectionTracker(rt, promise_rejection_trampoline, NULL);
         } else {
             JS_SetHostPromiseRejectionTracker(rt, NULL, NULL);
+        }
+    }
+}
+
+__attribute__((export_name("qjs_set_module_loader")))
+void qjs_set_module_loader(int enable) {
+    if (rt) {
+        if (enable) {
+            JS_SetModuleLoaderFunc(rt, module_normalizer_trampoline,
+                                    module_loader_trampoline, NULL);
+        } else {
+            JS_SetModuleLoaderFunc(rt, NULL, NULL, NULL);
         }
     }
 }
