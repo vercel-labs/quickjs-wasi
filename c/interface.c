@@ -190,6 +190,56 @@ void qjs_run_gc(void) {
     if (rt) JS_RunGC(rt);
 }
 
+/*
+ * Compute memory usage statistics and write them into a caller-provided
+ * buffer as an array of int64_t values. The buffer must hold at least
+ * QJS_MEMORY_USAGE_FIELD_COUNT int64_t values (currently 24 fields).
+ *
+ * Fields (in order):
+ *   0: malloc_size       1: malloc_limit      2: memory_used_size
+ *   3: malloc_count      4: memory_used_count  5: atom_count
+ *   6: atom_size         7: str_count          8: str_size
+ *   9: obj_count        10: obj_size          11: prop_count
+ *  12: prop_size        13: shape_count       14: shape_size
+ *  15: js_func_count    16: js_func_size      17: js_func_code_size
+ *  18: js_func_pc2line_count  19: js_func_pc2line_size
+ *  20: c_func_count     21: array_count       22: fast_array_count
+ *  23: fast_array_elements
+ *  24: binary_object_count  25: binary_object_size
+ */
+__attribute__((export_name("qjs_compute_memory_usage")))
+void qjs_compute_memory_usage(int64_t *out) {
+    if (!rt) return;
+    JSMemoryUsage s;
+    JS_ComputeMemoryUsage(rt, &s);
+    out[0]  = s.malloc_size;
+    out[1]  = s.malloc_limit;
+    out[2]  = s.memory_used_size;
+    out[3]  = s.malloc_count;
+    out[4]  = s.memory_used_count;
+    out[5]  = s.atom_count;
+    out[6]  = s.atom_size;
+    out[7]  = s.str_count;
+    out[8]  = s.str_size;
+    out[9]  = s.obj_count;
+    out[10] = s.obj_size;
+    out[11] = s.prop_count;
+    out[12] = s.prop_size;
+    out[13] = s.shape_count;
+    out[14] = s.shape_size;
+    out[15] = s.js_func_count;
+    out[16] = s.js_func_size;
+    out[17] = s.js_func_code_size;
+    out[18] = s.js_func_pc2line_count;
+    out[19] = s.js_func_pc2line_size;
+    out[20] = s.c_func_count;
+    out[21] = s.array_count;
+    out[22] = s.fast_array_count;
+    out[23] = s.fast_array_elements;
+    out[24] = s.binary_object_count;
+    out[25] = s.binary_object_size;
+}
+
 __attribute__((export_name("qjs_destroy")))
 void qjs_destroy(void) {
     if (ctx) {

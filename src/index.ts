@@ -53,6 +53,62 @@ export const EvalFlags = {
   ASYNC: (1 << 7) as 128,
 } as const;
 
+/** Memory usage statistics from the QuickJS runtime. */
+export interface MemoryUsage {
+  /** Total bytes allocated via malloc */
+  mallocSize: number;
+  /** Current malloc limit (0 for unlimited) */
+  mallocLimit: number;
+  /** Total memory used (including overhead) */
+  memoryUsedSize: number;
+  /** Number of malloc calls */
+  mallocCount: number;
+  /** Number of memory-using objects */
+  memoryUsedCount: number;
+  /** Number of atoms */
+  atomCount: number;
+  /** Atom memory size */
+  atomSize: number;
+  /** Number of strings */
+  strCount: number;
+  /** String memory size */
+  strSize: number;
+  /** Number of objects */
+  objCount: number;
+  /** Object memory size */
+  objSize: number;
+  /** Number of properties */
+  propCount: number;
+  /** Property memory size */
+  propSize: number;
+  /** Number of shapes */
+  shapeCount: number;
+  /** Shape memory size */
+  shapeSize: number;
+  /** Number of JS functions */
+  jsFuncCount: number;
+  /** JS function memory size */
+  jsFuncSize: number;
+  /** JS function code size */
+  jsFuncCodeSize: number;
+  /** Number of PC-to-line mappings */
+  jsFuncPc2lineCount: number;
+  /** PC-to-line mapping memory size */
+  jsFuncPc2lineSize: number;
+  /** Number of C functions */
+  cFuncCount: number;
+  /** Number of arrays */
+  arrayCount: number;
+  /** Number of fast arrays */
+  fastArrayCount: number;
+  /** Number of fast array elements */
+  fastArrayElements: number;
+  /** Number of binary objects (ArrayBuffer, etc.) */
+  binaryObjectCount: number;
+  /** Binary object memory size */
+  binaryObjectSize: number;
+}
+
 export interface QuickJSOptions {
   /** WASM module bytes or pre-compiled module. If omitted, loads from the package. */
   wasm?: BufferSource | WebAssembly.Module;
@@ -208,6 +264,7 @@ interface QuickJSExports {
   qjs_set_max_stack_size(size: number): void;
   qjs_set_interrupt_handler(enable: number): void;
   qjs_run_gc(): void;
+  qjs_compute_memory_usage(outPtr: number): void;
 
   // Snapshot support
   qjs_get_runtime_ptr(): number;
@@ -831,6 +888,48 @@ export class QuickJS {
   runGC(): void {
     this.assertNotDisposed();
     this.exports.qjs_run_gc();
+  }
+
+  /**
+   * Get detailed memory usage statistics from the QuickJS runtime.
+   * Returns counts and sizes for atoms, strings, objects, functions, etc.
+   */
+  getMemoryUsage(): MemoryUsage {
+    this.assertNotDisposed();
+    // Allocate a buffer for 26 int64 fields (26 * 8 = 208 bytes)
+    const bufPtr = this.exports.wasm_malloc(26 * 8);
+    this.exports.qjs_compute_memory_usage(bufPtr);
+    const view = new BigInt64Array(this.exports.memory.buffer, bufPtr, 26);
+    const result: MemoryUsage = {
+      mallocSize: Number(view[0]),
+      mallocLimit: Number(view[1]),
+      memoryUsedSize: Number(view[2]),
+      mallocCount: Number(view[3]),
+      memoryUsedCount: Number(view[4]),
+      atomCount: Number(view[5]),
+      atomSize: Number(view[6]),
+      strCount: Number(view[7]),
+      strSize: Number(view[8]),
+      objCount: Number(view[9]),
+      objSize: Number(view[10]),
+      propCount: Number(view[11]),
+      propSize: Number(view[12]),
+      shapeCount: Number(view[13]),
+      shapeSize: Number(view[14]),
+      jsFuncCount: Number(view[15]),
+      jsFuncSize: Number(view[16]),
+      jsFuncCodeSize: Number(view[17]),
+      jsFuncPc2lineCount: Number(view[18]),
+      jsFuncPc2lineSize: Number(view[19]),
+      cFuncCount: Number(view[20]),
+      arrayCount: Number(view[21]),
+      fastArrayCount: Number(view[22]),
+      fastArrayElements: Number(view[23]),
+      binaryObjectCount: Number(view[24]),
+      binaryObjectSize: Number(view[25]),
+    };
+    this.exports.wasm_free(bufPtr);
+    return result;
   }
 
   /**
