@@ -2439,3 +2439,15 @@ int qjs_ext_crypto_init(JSContext *ctx, JSRuntime *rt) {
     return 0;
 }
 
+/*
+ * Version reporting: returns a null-terminated string of key=value pairs
+ * (separated by newlines) describing native library versions bundled
+ * by this extension. Surfaced via vm.versions on the host side.
+ */
+#include "mbedtls/build_info.h"
+
+__attribute__((visibility("default")))
+const char *qjs_ext_crypto_versions(void) {
+    return "mbedtls=" MBEDTLS_VERSION_STRING;
+}
+

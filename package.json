@@ -63,7 +63,7 @@
     "bench:headers": "bun run bench/headers-benchmark.ts",
     "bench:emscripten": "bun run bench/emscripten-benchmark.ts",
     "changeset": "changeset",
-    "ci:version": "changeset version",
+    "ci:version": "changeset version && node -e \"fs.writeFileSync('src/version.ts', '// Auto-synced with package.json version. Do not edit manually.\\nexport const VERSION = ' + JSON.stringify(require('./package.json').version) + ';\\n')\"",
     "ci:publish": "pnpm run build && changeset publish"
   },
   "pnpm": {

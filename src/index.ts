@@ -16,6 +16,7 @@ import {
   type LoadedExtension,
   type WasiImports,
 } from './extensions.js';
+import { VERSION } from './version.js';
 
 // ---- Public types ----
 
@@ -268,6 +269,9 @@ interface QuickJSExports {
   __indirect_function_table: WebAssembly.Table;
   _initialize(): void;
 
+  // Version
+  qjs_get_quickjs_version(): number;
+
   // Lifecycle
   qjs_init(): number;
   qjs_init2(intrinsics: number): number;
@@ -471,6 +475,7 @@ export class QuickJS {
 
   // Cached singleton handles
   private _global: JSValueHandle | null = null;
+  private _versions: Record<string, string> | null = null;
   private _undefined: JSValueHandle | null = null;
   private _null: JSValueHandle | null = null;
   private _true: JSValueHandle | null = null;
@@ -494,6 +499,29 @@ export class QuickJS {
   }
 
   // ---- Cached property accessors ----
+
+  /**
+   * Version information for the runtime and loaded native libraries.
+   * Always includes `"quickjs-wasi"` (the npm package version) and
+   * `"quickjs"` (the QuickJS engine version). Extensions may contribute
+   * additional entries for their native dependencies (e.g. `"ada"`, `"mbedtls"`).
+   */
+  get versions(): Record<string, string> {
+    this.assertNotDisposed();
+    if (!this._versions) {
+      const result: Record<string, string> = {
+        'quickjs-wasi': VERSION,
+        quickjs: this.readCString(this.exports.qjs_get_quickjs_version()),
+      };
+      for (const ext of this.loadedExtensions) {
+        if (ext.versions) {
+          Object.assign(result, ext.versions);
+        }
+      }
+      this._versions = result;
+    }
+    return this._versions;
+  }
 
   /** The global object. Cached — do not dispose. */
   get global(): JSValueHandle {

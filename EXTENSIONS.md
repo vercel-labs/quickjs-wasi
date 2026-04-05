@@ -141,6 +141,42 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 }
 ```
 
+### Version Reporting
+
+Extensions can optionally export a `qjs_ext_<name>_versions` function to report version information for native libraries they bundle. This information is surfaced via `vm.versions` on the host side.
+
+The function takes no arguments and returns a pointer to a static null-terminated string containing `key=value` pairs separated by newlines:
+
+```c
+__attribute__((visibility("default")))
+const char *qjs_ext_myext_versions(void) {
+    return "some_lib=2.3.4\n"
+           "another_lib=1.0.0";
+}
+```
+
+The naming convention follows `qjs_ext_<name>_versions`, matching the init function pattern (with `-` replaced by `_`). If the export is not found, the extension simply contributes no version entries to `vm.versions`.
+
+On the host side, version entries from all loaded extensions are merged into the `vm.versions` object alongside the always-present `quickjs-wasi` and `quickjs` entries:
+
+```typescript
+import { QuickJS } from 'quickjs-wasi';
+import { urlExtension } from 'quickjs-wasi/url';
+import { cryptoExtension } from 'quickjs-wasi/crypto';
+
+const vm = await QuickJS.create({
+  extensions: [urlExtension, cryptoExtension],
+});
+
+console.log(vm.versions);
+// {
+//   'quickjs-wasi': '2.1.0',
+//   quickjs: '0.13.0',
+//   ada: '3.4.3',
+//   mbedtls: '4.0.0',
+// }
+```
+
 ### Snapshot/Restore with Extensions
 
 Extensions are fully compatible with the snapshot/restore system. The snapshot includes:

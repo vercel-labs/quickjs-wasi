@@ -13,6 +13,43 @@
  * - Extensions export an init function (e.g., `qjs_ext_url_init`)
  */
 
+const decoder = new TextDecoder();
+
+/**
+ * Parse a null-terminated "key=value\nkey=value" string from WASM memory
+ * into a Record<string, string>. Used to read version info from extensions.
+ */
+function parseVersionString(memory: WebAssembly.Memory, ptr: number): Record<string, string> {
+  const mem = new Uint8Array(memory.buffer);
+  let end = ptr;
+  while (mem[end] !== 0) end++;
+  if (end === ptr) return {};
+  const str = decoder.decode(mem.slice(ptr, end));
+  const result: Record<string, string> = {};
+  for (const line of str.split('\n')) {
+    const eq = line.indexOf('=');
+    if (eq > 0) {
+      result[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+  }
+  return result;
+}
+
+/**
+ * Check if an extension exports a versions function and parse the result.
+ */
+function extractExtensionVersions(
+  ext: LoadedExtension,
+  memory: WebAssembly.Memory,
+): Record<string, string> | undefined {
+  const versionsFnName = `qjs_ext_${ext.name.replace(/-/g, '_')}_versions`;
+  const versionsFn = ext.instance.exports[versionsFnName];
+  if (typeof versionsFn !== 'function') return undefined;
+  const ptr = (versionsFn as Function)() as number;
+  if (ptr === 0) return undefined;
+  return parseVersionString(memory, ptr);
+}
+
 // ---- Types ----
 
 /** Parsed content of a dylink.0 custom section */
@@ -40,6 +77,8 @@ export interface LoadedExtension {
   tableBase: number;
   /** Name of the init function exported by the extension */
   initFn: string;
+  /** Version info from the extension's qjs_ext_<name>_versions() export (if any) */
+  versions?: Record<string, string>;
 }
 
 /**
@@ -386,7 +425,7 @@ export async function loadExtension(
   const initFn =
     descriptor.initFn ?? `qjs_ext_${descriptor.name.replace(/-/g, '_')}_init`;
 
-  return {
+  const ext: LoadedExtension = {
     name: descriptor.name,
     module,
     instance,
@@ -395,6 +434,11 @@ export async function loadExtension(
     tableBase,
     initFn,
   };
+
+  // Check for version reporting
+  ext.versions = extractExtensionVersions(ext, memory);
+
+  return ext;
 }
 
 /**

@@ -238,6 +238,13 @@ void __wrap___secs_to_zone(long long t, int local, int *isdst, int *offset,
     if (zonename) *zonename = off == 0 ? __utc : "LMT";
 }
 
+/* ---- Version ---- */
+
+__attribute__((export_name("qjs_get_quickjs_version")))
+const char *qjs_get_quickjs_version(void) {
+    return JS_GetVersion();
+}
+
 /* ---- Lifecycle ---- */
 
 /* Intrinsic bitmask flags — must match the TypeScript Intrinsics constants */

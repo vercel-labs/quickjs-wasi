@@ -20,6 +20,7 @@
 #include "ada/ada_c.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* ---- Helper: create a JS string from an ada_string (non-owning view) ---- */
 
@@ -763,4 +764,17 @@ int qjs_ext_url_init(JSContext *ctx, JSRuntime *rt) {
     JS_FreeValue(ctx, global);
 
     return 0;
+}
+
+/*
+ * Version reporting: returns a null-terminated string of key=value pairs
+ * (separated by newlines) describing native library versions bundled
+ * by this extension. Surfaced via vm.versions on the host side.
+ */
+__attribute__((visibility("default")))
+const char *qjs_ext_url_versions(void) {
+    /* ada_get_version() returns a static string like "3.4.3" */
+    static char buf[64];
+    snprintf(buf, sizeof(buf), "ada=%s", ada_get_version());
+    return buf;
 }
