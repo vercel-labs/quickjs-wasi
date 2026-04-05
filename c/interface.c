@@ -185,6 +185,11 @@ void qjs_set_max_stack_size(size_t size) {
     if (rt) JS_SetMaxStackSize(rt, size);
 }
 
+__attribute__((export_name("qjs_run_gc")))
+void qjs_run_gc(void) {
+    if (rt) JS_RunGC(rt);
+}
+
 __attribute__((export_name("qjs_destroy")))
 void qjs_destroy(void) {
     if (ctx) {

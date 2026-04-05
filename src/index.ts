@@ -207,6 +207,7 @@ interface QuickJSExports {
   qjs_set_memory_limit(limit: number): void;
   qjs_set_max_stack_size(size: number): void;
   qjs_set_interrupt_handler(enable: number): void;
+  qjs_run_gc(): void;
 
   // Snapshot support
   qjs_get_runtime_ptr(): number;
@@ -820,6 +821,16 @@ export class QuickJS {
       count++;
     }
     return count;
+  }
+
+  /**
+   * Explicitly trigger garbage collection. QuickJS runs GC automatically,
+   * but this can be useful to reclaim memory at a known point or before
+   * taking a snapshot.
+   */
+  runGC(): void {
+    this.assertNotDisposed();
+    this.exports.qjs_run_gc();
   }
 
   /**
