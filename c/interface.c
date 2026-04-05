@@ -60,6 +60,32 @@ static int interrupt_handler_trampoline(JSRuntime *rt, void *opaque)
 }
 
 /*
+ * Imported from the host environment. Called when a promise is rejected
+ * without a handler, or when a handler is attached to a previously
+ * unhandled rejection.
+ *   promise_ptr - pointer to heap-allocated JSValue for the promise
+ *   reason_ptr  - pointer to heap-allocated JSValue for the rejection reason
+ *   is_handled  - 1 if a handler was just attached, 0 if newly unhandled
+ */
+__attribute__((import_module("env"), import_name("host_promise_rejection")))
+extern void host_promise_rejection(JSValue *promise_ptr, JSValue *reason_ptr, int is_handled);
+
+/*
+ * Promise rejection tracker trampoline: heap-allocates the promise and reason
+ * values and dispatches to the host_promise_rejection import.
+ */
+static void promise_rejection_trampoline(JSContext *ctx, JSValueConst promise,
+                                          JSValueConst reason,
+                                          bool is_handled, void *opaque)
+{
+    (void)opaque;
+    JSValue *promise_ptr = jsvalue_to_heap(JS_DupValue(ctx, promise));
+    JSValue *reason_ptr = jsvalue_to_heap(JS_DupValue(ctx, reason));
+    host_promise_rejection(promise_ptr, reason_ptr, is_handled ? 1 : 0);
+    /* The host is responsible for freeing these via qjs_free_value */
+}
+
+/*
  * Trampoline: a JSCFunctionData callback that dispatches to the host.
  * The function name is stored in func_data[0] as a JS string.
  */
@@ -171,6 +197,17 @@ void qjs_set_interrupt_handler(int enable) {
             JS_SetInterruptHandler(rt, interrupt_handler_trampoline, NULL);
         } else {
             JS_SetInterruptHandler(rt, NULL, NULL);
+        }
+    }
+}
+
+__attribute__((export_name("qjs_set_promise_rejection_handler")))
+void qjs_set_promise_rejection_handler(int enable) {
+    if (rt) {
+        if (enable) {
+            JS_SetHostPromiseRejectionTracker(rt, promise_rejection_trampoline, NULL);
+        } else {
+            JS_SetHostPromiseRejectionTracker(rt, NULL, NULL);
         }
     }
 }

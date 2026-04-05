@@ -130,6 +130,19 @@ export interface QuickJSOptions {
    */
   interruptHandler?: () => boolean;
   /**
+   * Called when a promise is rejected without a handler, or when a handler
+   * is attached to a previously unhandled rejection.
+   *
+   * @param promise - The rejected promise
+   * @param reason - The rejection reason/value
+   * @param isHandled - `true` if a handler was just attached (previously unhandled),
+   *   `false` if this is a new unhandled rejection
+   *
+   * Both `promise` and `reason` handles are owned by the caller and will be
+   * disposed automatically after the callback returns.
+   */
+  onUnhandledRejection?: (promise: JSValueHandle, reason: JSValueHandle, isHandled: boolean) => void;
+  /**
    * Native WASM extensions to load. Each extension is a WASM shared library
    * (.so) compiled with wasi-sdk that links against the QuickJS C API.
    *
@@ -263,6 +276,7 @@ interface QuickJSExports {
   qjs_set_memory_limit(limit: number): void;
   qjs_set_max_stack_size(size: number): void;
   qjs_set_interrupt_handler(enable: number): void;
+  qjs_set_promise_rejection_handler(enable: number): void;
   qjs_run_gc(): void;
   qjs_set_gc_threshold(threshold: number): void;
   qjs_get_gc_threshold(): number;
@@ -355,6 +369,7 @@ export class QuickJS {
   /** Counter for internal-only callbacks (e.g. promise settle handlers) */
   private nextInternalId = 1;
   private interruptHandler: (() => boolean) | null = null;
+  private unhandledRejectionHandler: ((promise: JSValueHandle, reason: JSValueHandle, isHandled: boolean) => void) | null = null;
   private timezoneOffsetHandler: ((timeSecs: number) => number) | null = null;
 
   // Cached singleton handles
@@ -675,7 +690,7 @@ export class QuickJS {
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
     if (!options) return {};
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
   }
@@ -687,6 +702,10 @@ export class QuickJS {
     if (opts.interruptHandler) {
       vm.interruptHandler = opts.interruptHandler;
       vm.exports.qjs_set_interrupt_handler(1);
+    }
+    if (opts.onUnhandledRejection) {
+      vm.unhandledRejectionHandler = opts.onUnhandledRejection;
+      vm.exports.qjs_set_promise_rejection_handler(1);
     }
     // Configure timezone handler.
     // The internal handler always returns the UTC offset in *seconds*
@@ -754,6 +773,23 @@ export class QuickJS {
       return vm.interruptHandler ? (vm.interruptHandler() ? 1 : 0) : 0;
     };
 
+    const hostPromiseRejection = (promisePtr: number, reasonPtr: number, isHandled: number): void => {
+      if (!vm.unhandledRejectionHandler) {
+        // No handler registered — free the heap-allocated values
+        vm.exports.qjs_free_value(promisePtr);
+        vm.exports.qjs_free_value(reasonPtr);
+        return;
+      }
+      const promise = new JSValueHandle(vm, promisePtr);
+      const reason = new JSValueHandle(vm, reasonPtr);
+      try {
+        vm.unhandledRejectionHandler(promise, reason, isHandled !== 0);
+      } finally {
+        promise.dispose();
+        reason.dispose();
+      }
+    };
+
     // host_get_timezone_offset receives time as split i32 (hi, lo) and
     // returns the UTC offset in seconds.
     const hostGetTimezoneOffset = (hi: number, lo: number): number => {
@@ -762,7 +798,7 @@ export class QuickJS {
     };
 
     const instance = await WebAssembly.instantiate(module, {
-      env: { host_call: hostCall, host_interrupt: hostInterrupt, host_get_timezone_offset: hostGetTimezoneOffset },
+      env: { host_call: hostCall, host_interrupt: hostInterrupt, host_promise_rejection: hostPromiseRejection, host_get_timezone_offset: hostGetTimezoneOffset },
       wasi_snapshot_preview1: wasiShim,
     });
 
