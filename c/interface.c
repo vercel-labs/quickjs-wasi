@@ -190,6 +190,17 @@ void qjs_run_gc(void) {
     if (rt) JS_RunGC(rt);
 }
 
+__attribute__((export_name("qjs_set_gc_threshold")))
+void qjs_set_gc_threshold(size_t threshold) {
+    if (rt) JS_SetGCThreshold(rt, threshold);
+}
+
+__attribute__((export_name("qjs_get_gc_threshold")))
+size_t qjs_get_gc_threshold(void) {
+    if (!rt) return 0;
+    return JS_GetGCThreshold(rt);
+}
+
 /*
  * Compute memory usage statistics and write them into a caller-provided
  * buffer as an array of int64_t values. The buffer must hold at least

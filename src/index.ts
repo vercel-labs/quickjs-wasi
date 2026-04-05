@@ -264,6 +264,8 @@ interface QuickJSExports {
   qjs_set_max_stack_size(size: number): void;
   qjs_set_interrupt_handler(enable: number): void;
   qjs_run_gc(): void;
+  qjs_set_gc_threshold(threshold: number): void;
+  qjs_get_gc_threshold(): number;
   qjs_compute_memory_usage(outPtr: number): void;
 
   // Snapshot support
@@ -888,6 +890,21 @@ export class QuickJS {
   runGC(): void {
     this.assertNotDisposed();
     this.exports.qjs_run_gc();
+  }
+
+  /**
+   * The GC threshold in bytes. When allocated memory exceeds this value,
+   * garbage collection is triggered automatically. Set to 0 to disable
+   * automatic GC.
+   */
+  get gcThreshold(): number {
+    this.assertNotDisposed();
+    return this.exports.qjs_get_gc_threshold();
+  }
+
+  set gcThreshold(threshold: number) {
+    this.assertNotDisposed();
+    this.exports.qjs_set_gc_threshold(threshold);
   }
 
   /**
