@@ -64,6 +64,46 @@ export const CompileFlags = {
   STRIP_DEBUG: (1 << 5) as 32,
 } as const;
 
+/**
+ * Intrinsic flags for `QuickJSOptions.intrinsics` controlling which
+ * built-in JavaScript features are available in the VM.
+ *
+ * By default all intrinsics are enabled. Pass a bitmask of these flags
+ * to create a minimal context — for example, omit `Intrinsics.EVAL` to
+ * prevent `eval()` usage, or omit `Intrinsics.PROXY` to disallow `Proxy`.
+ *
+ * `BaseObjects` (Object, Array, Number, String, Boolean, Error, etc.)
+ * is always included and cannot be disabled.
+ */
+export const Intrinsics = {
+  /** `Date` constructor and prototype methods. */
+  DATE: (1 << 0) as 1,
+  /** `eval()` and `Function()` constructor. */
+  EVAL: (1 << 1) as 2,
+  /** `RegExp` constructor, prototype methods, and regex literals. */
+  REGEXP: (1 << 2) as 4,
+  /** `JSON.parse()` and `JSON.stringify()`. */
+  JSON: (1 << 3) as 8,
+  /** `Proxy` and `Reflect`. */
+  PROXY: (1 << 4) as 16,
+  /** `Map`, `Set`, `WeakMap`, `WeakSet`. */
+  MAP_SET: (1 << 5) as 32,
+  /** `ArrayBuffer`, `TypedArray` variants, `DataView`. */
+  TYPED_ARRAYS: (1 << 6) as 64,
+  /** `Promise`, `async`/`await`. */
+  PROMISE: (1 << 7) as 128,
+  /** `BigInt`. Note: BigInt is part of BaseObjects in quickjs-ng and cannot be fully removed. */
+  BIG_INT: (1 << 8) as 256,
+  /** `WeakRef` and `FinalizationRegistry`. */
+  WEAK_REF: (1 << 9) as 512,
+  /** `performance.now()`. */
+  PERFORMANCE: (1 << 10) as 1024,
+  /** `DOMException` class. */
+  DOM_EXCEPTION: (1 << 11) as 2048,
+  /** All intrinsics enabled (default). */
+  ALL: 0xFFFFFFFF,
+} as const;
+
 /** Memory usage statistics from the QuickJS runtime. */
 export interface MemoryUsage {
   /** Total bytes allocated via malloc */
@@ -154,6 +194,18 @@ export interface QuickJSOptions {
    */
   onUnhandledRejection?: (promise: JSValueHandle, reason: JSValueHandle, isHandled: boolean) => void;
   /**
+   * Bitmask of `Intrinsics.*` flags controlling which built-in JavaScript
+   * features are available. By default all intrinsics are enabled.
+   *
+   * Example: Create a VM without `eval()` or `Proxy`:
+   * ```ts
+   * const vm = await QuickJS.create({
+   *   intrinsics: Intrinsics.ALL & ~Intrinsics.EVAL & ~Intrinsics.PROXY,
+   * });
+   * ```
+   */
+  intrinsics?: number;
+  /**
    * Native WASM extensions to load. Each extension is a WASM shared library
    * (.so) compiled with wasi-sdk that links against the QuickJS C API.
    *
@@ -190,6 +242,7 @@ interface QuickJSExports {
 
   // Lifecycle
   qjs_init(): number;
+  qjs_init2(intrinsics: number): number;
   qjs_destroy(): void;
 
   // Evaluation
@@ -468,7 +521,9 @@ export class QuickJS {
     vm.exports._initialize();
 
     // Initialize QuickJS runtime and context
-    const result = vm.exports.qjs_init();
+    const result = opts.intrinsics !== undefined
+      ? vm.exports.qjs_init2(opts.intrinsics)
+      : vm.exports.qjs_init();
     if (result !== 0) {
       throw new Error('Failed to initialize QuickJS runtime');
     }
@@ -703,7 +758,7 @@ export class QuickJS {
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
     if (!options) return {};
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'intrinsics' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
   }

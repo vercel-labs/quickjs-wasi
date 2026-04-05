@@ -171,6 +171,23 @@ void __wrap___secs_to_zone(long long t, int local, int *isdst, int *offset,
 
 /* ---- Lifecycle ---- */
 
+/* Intrinsic bitmask flags — must match the TypeScript Intrinsics constants */
+#define QJS_INTRINSIC_DATE           (1 << 0)
+#define QJS_INTRINSIC_EVAL           (1 << 1)
+#define QJS_INTRINSIC_REGEXP         (1 << 2)
+#define QJS_INTRINSIC_JSON           (1 << 3)
+#define QJS_INTRINSIC_PROXY          (1 << 4)
+#define QJS_INTRINSIC_MAP_SET        (1 << 5)
+#define QJS_INTRINSIC_TYPED_ARRAYS   (1 << 6)
+#define QJS_INTRINSIC_PROMISE        (1 << 7)
+#define QJS_INTRINSIC_BIG_INT        (1 << 8)
+#define QJS_INTRINSIC_WEAK_REF       (1 << 9)
+#define QJS_INTRINSIC_PERFORMANCE    (1 << 10)
+#define QJS_INTRINSIC_DOM_EXCEPTION  (1 << 11)
+
+/* All intrinsics enabled (same as JS_NewContext) */
+#define QJS_INTRINSIC_ALL 0xFFFFFFFF
+
 __attribute__((export_name("qjs_init")))
 int qjs_init(void) {
     if (rt) return -1; /* already initialized */
@@ -179,6 +196,58 @@ int qjs_init(void) {
     if (!rt) return -1;
 
     ctx = JS_NewContext(rt);
+    if (!ctx) {
+        JS_FreeRuntime(rt);
+        rt = NULL;
+        return -1;
+    }
+
+    return 0;
+}
+
+/*
+ * Initialize with selective intrinsics. Pass QJS_INTRINSIC_ALL for all
+ * intrinsics (same as qjs_init), or a bitmask of QJS_INTRINSIC_* flags
+ * to create a minimal context.
+ *
+ * Note: BaseObjects is always included — it provides fundamental types
+ * (Object, Array, Number, String, etc.) without which nothing works.
+ */
+__attribute__((export_name("qjs_init2")))
+int qjs_init2(unsigned int intrinsics) {
+    if (rt) return -1; /* already initialized */
+
+    rt = JS_NewRuntime();
+    if (!rt) return -1;
+
+    if (intrinsics == QJS_INTRINSIC_ALL) {
+        ctx = JS_NewContext(rt);
+    } else {
+        ctx = JS_NewContextRaw(rt);
+        if (!ctx) {
+            JS_FreeRuntime(rt);
+            rt = NULL;
+            return -1;
+        }
+        /* BaseObjects is always required */
+        JS_AddIntrinsicBaseObjects(ctx);
+        if (intrinsics & QJS_INTRINSIC_DATE)          JS_AddIntrinsicDate(ctx);
+        if (intrinsics & QJS_INTRINSIC_EVAL)          JS_AddIntrinsicEval(ctx);
+        if (intrinsics & QJS_INTRINSIC_REGEXP) {
+            JS_AddIntrinsicRegExpCompiler(ctx);
+            JS_AddIntrinsicRegExp(ctx);
+        }
+        if (intrinsics & QJS_INTRINSIC_JSON)          JS_AddIntrinsicJSON(ctx);
+        if (intrinsics & QJS_INTRINSIC_PROXY)         JS_AddIntrinsicProxy(ctx);
+        if (intrinsics & QJS_INTRINSIC_MAP_SET)        JS_AddIntrinsicMapSet(ctx);
+        if (intrinsics & QJS_INTRINSIC_TYPED_ARRAYS)   JS_AddIntrinsicTypedArrays(ctx);
+        if (intrinsics & QJS_INTRINSIC_PROMISE)        JS_AddIntrinsicPromise(ctx);
+        if (intrinsics & QJS_INTRINSIC_BIG_INT)        JS_AddIntrinsicBigInt(ctx);
+        if (intrinsics & QJS_INTRINSIC_WEAK_REF)       JS_AddIntrinsicWeakRef(ctx);
+        if (intrinsics & QJS_INTRINSIC_PERFORMANCE)    JS_AddPerformance(ctx);
+        if (intrinsics & QJS_INTRINSIC_DOM_EXCEPTION)  JS_AddIntrinsicDOMException(ctx);
+    }
+
     if (!ctx) {
         JS_FreeRuntime(rt);
         rt = NULL;
