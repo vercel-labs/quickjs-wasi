@@ -47,7 +47,7 @@ console.log(msg.toString()); // "hello"
 using handle = vm.hostToHandle({ x: 1, y: [2, 3] });
 const dumped = vm.dump(handle); // { x: 1, y: [2, 3] }
 
-// consume() is still useful for inline one-liners
+// `consume()` is useful for inline one-liners
 const value = vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
 ```
 
