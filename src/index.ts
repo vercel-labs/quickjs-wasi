@@ -162,8 +162,17 @@ export interface MemoryUsage {
 }
 
 export interface QuickJSOptions {
-  /** WASM module bytes or pre-compiled module. If omitted, loads from the package. */
-  wasm?: BufferSource | WebAssembly.Module;
+  /**
+   * WASM module bytes or pre-compiled module.
+   *
+   * The caller is responsible for loading the WASM binary using whichever
+   * mechanism is appropriate for their environment (e.g. `fetch()`,
+   * `node:fs/promises`, a bundler-specific import). For convenience the
+   * package ships the binary at the `quickjs-wasi/quickjs.wasm` subpath,
+   * which can be resolved by bundlers (e.g. Vite's `?url` loader) or read
+   * directly from disk.
+   */
+  wasm: BufferSource | WebAssembly.Module;
   /** Custom WASI function implementations. */
   wasi?: WasiOptions;
   /**
@@ -815,7 +824,10 @@ export class QuickJS {
   // ---- Internal instantiation helpers ----
 
   private static normalizeOptions(options?: QuickJSOptions | BufferSource | WebAssembly.Module): QuickJSOptions {
-    if (!options) return {};
+    if (!options) {
+      // resolveModule() will throw a helpful error.
+      return { wasm: undefined as unknown as BufferSource };
+    }
     if (options instanceof WebAssembly.Module) return { wasm: options };
     if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'moduleLoader' in options || 'intrinsics' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
     // BufferSource (ArrayBuffer or ArrayBufferView)
@@ -862,13 +874,16 @@ export class QuickJS {
   private static async resolveModule(wasmInput?: BufferSource | WebAssembly.Module): Promise<WebAssembly.Module> {
     if (wasmInput instanceof WebAssembly.Module) {
       return wasmInput;
-    } else if (wasmInput) {
-      return WebAssembly.compile(wasmInput);
-    } else {
-      const { readFile } = await import('node:fs/promises');
-      const buf = await readFile(new URL('../quickjs.wasm', import.meta.url));
-      return WebAssembly.compile(buf);
     }
+    if (wasmInput) {
+      return WebAssembly.compile(wasmInput);
+    }
+    throw new TypeError(
+      'QuickJS: `wasm` option is required. Provide WASM bytes or a compiled ' +
+      '`WebAssembly.Module`. The binary is shipped at `quickjs-wasi/quickjs.wasm` ' +
+      'and can be loaded via your environment\'s preferred mechanism (e.g. ' +
+      "`fetch()`, `node:fs/promises`, or a bundler import like Vite's `?url`).",
+    );
   }
 
   private static async instantiate(module: WebAssembly.Module, vm: QuickJS, wasiOptions?: WasiOptions): Promise<{

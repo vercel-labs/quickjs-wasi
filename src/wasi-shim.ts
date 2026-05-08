@@ -45,7 +45,7 @@
  *       return 0;
  *     },
  *   }),
- *   extensions: [cryptoExtension],
+ *   extensions: [{ name: 'crypto', wasm: cryptoSoBytes }],
  * });
  * ```
  */

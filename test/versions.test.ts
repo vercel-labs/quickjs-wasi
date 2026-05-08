@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { QuickJS } from '../src/index.ts';
+import { readFileSync } from 'node:fs';
+import { QuickJS, type ExtensionDescriptor } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
+
+const urlExtension: ExtensionDescriptor = {
+  name: 'url',
+  wasm: readFileSync(new URL('../extensions/url/url.so', import.meta.url)),
+};
+const cryptoExtension: ExtensionDescriptor = {
+  name: 'crypto',
+  wasm: readFileSync(new URL('../extensions/crypto/crypto.so', import.meta.url)),
+};
 
 describe('vm.versions', () => {
   it('should include quickjs-wasi version', async () => {
@@ -34,11 +44,7 @@ describe('vm.versions', () => {
   });
 });
 
-describe('vm.versions with extensions', async () => {
-  // Dynamically import extensions — they read .so files from disk
-  const { urlExtension } = await import('../src/url.ts');
-  const { cryptoExtension } = await import('../src/crypto.ts');
-
+describe('vm.versions with extensions', () => {
   it('should include ada version with url extension', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,

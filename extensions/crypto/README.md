@@ -3,10 +3,14 @@
 A W3C Web Cryptography API implementation backed by [mbedTLS 4.0](https://github.com/Mbed-TLS/mbedtls) (PSA Crypto). Provides the `crypto` global with `SubtleCrypto` for cryptographic operations.
 
 ```typescript
-import { cryptoExtension } from 'quickjs-wasi/crypto';
+import { readFile } from 'node:fs/promises';
+
+const wasm = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+const cryptoSo = await readFile(new URL(import.meta.resolve('quickjs-wasi/crypto.so')));
 
 const vm = await QuickJS.create({
-  extensions: [cryptoExtension],
+  wasm,
+  extensions: [{ name: 'crypto', wasm: cryptoSo }],
 });
 ```
 

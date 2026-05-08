@@ -10,6 +10,36 @@ npm install quickjs-wasi
 
 ## Usage
 
+### Loading the WASM Binary
+
+The caller is responsible for providing the WASM bytes (or a pre-compiled `WebAssembly.Module`) — quickjs-wasi does no implicit filesystem or network I/O. The package ships the binary at the `quickjs-wasi/quickjs.wasm` subpath, which can be resolved by your environment's preferred mechanism.
+
+Node.js (read from disk):
+
+```typescript
+import { readFile } from 'node:fs/promises';
+
+const wasmBytes = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+// or with require.resolve in CJS:
+//   readFileSync(require.resolve('quickjs-wasi/quickjs.wasm'))
+```
+
+Browser (`fetch` + streaming compile):
+
+```typescript
+const wasmModule = await WebAssembly.compileStreaming(fetch('/quickjs.wasm'));
+```
+
+Vite / bundlers using the `?url` import suffix:
+
+```typescript
+import wasmUrl from 'quickjs-wasi/quickjs.wasm?url';
+
+const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
+```
+
+Compiling a `WebAssembly.Module` once and reusing it across many VMs is highly recommended — instantiation from a compiled module is much faster than re-compiling bytes for each call to `QuickJS.create()`.
+
 ### Basic Evaluation
 
 Both `QuickJS` and `JSValueHandle` implement `Symbol.dispose`, so you can use `using` declarations for automatic cleanup:
@@ -18,7 +48,7 @@ Both `QuickJS` and `JSValueHandle` implement `Symbol.dispose`, so you can use `u
 import { QuickJS } from 'quickjs-wasi';
 
 {
-  using vm = await QuickJS.create(wasmBytes);
+  using vm = await QuickJS.create({ wasm: wasmBytes });
 
   // Evaluate code — handles are auto-disposed with `using`
   using result = vm.evalCode('1 + 2');
@@ -354,14 +384,30 @@ Note: each call to `newFunction()` must use a unique name. Attempting to registe
 
 Load C-based extensions compiled as WASM shared libraries. Extensions link directly against the QuickJS C API with zero marshalling overhead — they share the same linear memory and can register custom classes, prototypes, and globals.
 
-```typescript
-import { QuickJS } from 'quickjs-wasi';
-import { readFileSync } from 'fs';
+The package ships six pre-built extensions, each available as a subpath export. As with the main `quickjs.wasm` binary, the caller is responsible for loading the bytes:
 
-const urlExt = readFileSync('./extensions/url/url.so');
+| Extension | Subpath | Adds |
+|-----------|---------|------|
+| URL | `quickjs-wasi/url.so` | `URL`, `URLSearchParams` (ada-url) |
+| Encoding | `quickjs-wasi/encoding.so` | `TextEncoder`, `TextDecoder` |
+| Base64 | `quickjs-wasi/base64.so` | `atob`, `btoa`, `Uint8Array` base64/hex |
+| Headers | `quickjs-wasi/headers.so` | `Headers` |
+| Crypto | `quickjs-wasi/crypto.so` | `crypto.subtle`, `crypto.getRandomValues` |
+| Structured Clone | `quickjs-wasi/structured-clone.so` | `structuredClone` |
+
+Node.js:
+
+```typescript
+import { readFile } from 'node:fs/promises';
+import { QuickJS } from 'quickjs-wasi';
+
+const urlExtBytes = await readFile(
+  new URL(import.meta.resolve('quickjs-wasi/url.so')),
+);
 
 using vm = await QuickJS.create({
-  extensions: [{ name: 'url', wasm: urlExt }],
+  wasm: wasmBytes,
+  extensions: [{ name: 'url', wasm: urlExtBytes }],
 });
 
 using result = vm.evalCode(`
@@ -370,18 +416,27 @@ using result = vm.evalCode(`
 `);
 ```
 
+Vite / bundlers:
+
+```typescript
+import urlSoUrl from 'quickjs-wasi/url.so?url';
+
+const urlExtBytes = await fetch(urlSoUrl).then((r) => r.arrayBuffer());
+```
+
 Extensions survive snapshot/restore — provide the same extensions when restoring:
 
 ```typescript
 const snapshot = vm.snapshot();
 
 using vm2 = await QuickJS.restore(snapshot, {
-  extensions: [{ name: 'url', wasm: urlExt }],
+  wasm: wasmBytes,
+  extensions: [{ name: 'url', wasm: urlExtBytes }],
 });
 // URL objects created before the snapshot still work
 ```
 
-See [EXTENSIONS.md](./EXTENSIONS.md) for how to build extensions, how dynamic linking works, and known limitations.
+See [EXTENSIONS.md](./EXTENSIONS.md) for how to build your own extensions, how dynamic linking works, and known limitations.
 
 ## API Reference
 
@@ -610,14 +665,14 @@ Plus the `__stack_pointer` WASM global (a single i32).
 
 ### Browser Usage
 
-quickjs-wasi works in browsers — the TypeScript API uses only the standard `WebAssembly` API and the WASI shim is environment-agnostic. The only Node.js-specific code is the default WASM loading fallback (which uses `node:fs`). In the browser, pass the WASM bytes directly:
+quickjs-wasi works in browsers — the TypeScript API uses only the standard `WebAssembly` API and the WASI shim is environment-agnostic. The package does no implicit I/O, so loading the WASM binary is up to you. See [Loading the WASM Binary](#loading-the-wasm-binary) above for `fetch()` and bundler-based examples.
 
 ```typescript
 import { QuickJS } from 'quickjs-wasi';
+import wasmUrl from 'quickjs-wasi/quickjs.wasm?url'; // Vite
 
 // Fetch the .wasm file and compile it once
-const response = await fetch('/quickjs.wasm');
-const wasmModule = await WebAssembly.compileStreaming(response);
+const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
 
 // Create VMs from the pre-compiled module (fast — no re-compilation)
 using vm = await QuickJS.create({ wasm: wasmModule });

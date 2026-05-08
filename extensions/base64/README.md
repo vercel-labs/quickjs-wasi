@@ -3,10 +3,14 @@
 WHATWG HTML Standard compliant `atob()` and `btoa()` global functions, plus the [TC39 Uint8Array Base64/Hex proposal](https://github.com/tc39/proposal-arraybuffer-base64) methods on `Uint8Array`. Uses the "forgiving-base64" decode algorithm from the Infra Standard.
 
 ```typescript
-import { base64Extension } from 'quickjs-wasi/base64';
+import { readFile } from 'node:fs/promises';
+
+const wasm = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+const base64So = await readFile(new URL(import.meta.resolve('quickjs-wasi/base64.so')));
 
 const vm = await QuickJS.create({
-  extensions: [base64Extension],
+  wasm,
+  extensions: [{ name: 'base64', wasm: base64So }],
 });
 ```
 

@@ -3,10 +3,14 @@
 A WHATWG Encoding Standard compliant implementation of `TextEncoder` and `TextDecoder`. Supports UTF-8 encoding/decoding, and UTF-16LE/UTF-16BE decoding.
 
 ```typescript
-import { encodingExtension } from 'quickjs-wasi/encoding';
+import { readFile } from 'node:fs/promises';
+
+const wasm = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+const encodingSo = await readFile(new URL(import.meta.resolve('quickjs-wasi/encoding.so')));
 
 const vm = await QuickJS.create({
-  extensions: [encodingExtension],
+  wasm,
+  extensions: [{ name: 'encoding', wasm: encodingSo }],
 });
 ```
 

@@ -3,10 +3,14 @@
 A fully WHATWG URL Standard compliant implementation of `URL` and `URLSearchParams`, backed by the [ada-url](https://github.com/ada-url/ada) library (the same URL parser used by Node.js).
 
 ```typescript
-import { urlExtension } from 'quickjs-wasi/url';
+import { readFile } from 'node:fs/promises';
+
+const wasm = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+const urlSo = await readFile(new URL(import.meta.resolve('quickjs-wasi/url.so')));
 
 const vm = await QuickJS.create({
-  extensions: [urlExtension],
+  wasm,
+  extensions: [{ name: 'url', wasm: urlSo }],
 });
 
 vm.evalCode(`

@@ -3,10 +3,14 @@
 A WHATWG Fetch Standard compliant `Headers` class, providing HTTP header manipulation with case-insensitive name matching, value normalization, and sorted iteration.
 
 ```typescript
-import { headersExtension } from 'quickjs-wasi/headers';
+import { readFile } from 'node:fs/promises';
+
+const wasm = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+const headersSo = await readFile(new URL(import.meta.resolve('quickjs-wasi/headers.so')));
 
 const vm = await QuickJS.create({
-  extensions: [headersExtension],
+  wasm,
+  extensions: [{ name: 'headers', wasm: headersSo }],
 });
 
 vm.evalCode(`

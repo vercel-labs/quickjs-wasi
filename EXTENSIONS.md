@@ -8,14 +8,22 @@ This enables implementing Web API polyfills (URL, FormData, Blob, etc.) and othe
 
 ### Using a Built-in Extension
 
-The URL extension is available as a package sub-export:
+Each pre-built extension's compiled `.so` is exposed as a package sub-export. The caller is responsible for loading the bytes — quickjs-wasi never reads from disk or fetches over the network on your behalf:
 
 ```typescript
+import { readFile } from 'node:fs/promises';
 import { QuickJS } from 'quickjs-wasi';
-import { urlExtension } from 'quickjs-wasi/url';
+
+const wasm = await readFile(
+  new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')),
+);
+const urlSo = await readFile(
+  new URL(import.meta.resolve('quickjs-wasi/url.so')),
+);
 
 const vm = await QuickJS.create({
-  extensions: [urlExtension],
+  wasm,
+  extensions: [{ name: 'url', wasm: urlSo }],
 });
 
 vm.evalCode(`
@@ -26,6 +34,16 @@ vm.evalCode(`
   const params = new URLSearchParams('a=1&b=2');
   console.log(params.get('a')); // '1'
 `).dispose();
+```
+
+In bundlers that support a `?url` import suffix (Vite, etc.), use that to get a URL you can `fetch()`:
+
+```typescript
+import wasmUrl from 'quickjs-wasi/quickjs.wasm?url';
+import urlSoUrl from 'quickjs-wasi/url.so?url';
+
+const wasm = await WebAssembly.compileStreaming(fetch(wasmUrl));
+const urlSo = await fetch(urlSoUrl).then((r) => r.arrayBuffer());
 ```
 
 You can also load extensions manually from WASM bytes:
@@ -160,12 +178,19 @@ The naming convention follows `qjs_ext_<name>_versions`, matching the init funct
 On the host side, version entries from all loaded extensions are merged into the `vm.versions` object alongside the always-present `quickjs-wasi` and `quickjs` entries:
 
 ```typescript
+import { readFile } from 'node:fs/promises';
 import { QuickJS } from 'quickjs-wasi';
-import { urlExtension } from 'quickjs-wasi/url';
-import { cryptoExtension } from 'quickjs-wasi/crypto';
+
+const wasm = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+const urlSo = await readFile(new URL(import.meta.resolve('quickjs-wasi/url.so')));
+const cryptoSo = await readFile(new URL(import.meta.resolve('quickjs-wasi/crypto.so')));
 
 const vm = await QuickJS.create({
-  extensions: [urlExtension, cryptoExtension],
+  wasm,
+  extensions: [
+    { name: 'url', wasm: urlSo },
+    { name: 'crypto', wasm: cryptoSo },
+  ],
 });
 
 console.log(vm.versions);
@@ -342,14 +367,14 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 
 ## Built-in Extensions
 
-| Extension | Import | Provides |
-|-----------|--------|----------|
-| [URL](extensions/url/README.md) | `quickjs-wasi/url` | `URL`, `URLSearchParams` |
-| [Encoding](extensions/encoding/README.md) | `quickjs-wasi/encoding` | `TextEncoder`, `TextDecoder` |
-| [Base64](extensions/base64/README.md) | `quickjs-wasi/base64` | `atob()`, `btoa()`, `Uint8Array.fromBase64()`, `Uint8Array.fromHex()`, `.toBase64()`, `.toHex()`, `.setFromBase64()`, `.setFromHex()` |
-| [Structured Clone](extensions/structured-clone/README.md) | `quickjs-wasi/structured-clone` | `structuredClone()` |
-| [Crypto](extensions/crypto/README.md) | `quickjs-wasi/crypto` | `crypto`, `SubtleCrypto`, `CryptoKey` |
-| [Headers](extensions/headers/README.md) | `quickjs-wasi/headers` | `Headers` |
+| Extension | Subpath | Provides |
+|-----------|---------|----------|
+| [URL](extensions/url/README.md) | `quickjs-wasi/url.so` | `URL`, `URLSearchParams` |
+| [Encoding](extensions/encoding/README.md) | `quickjs-wasi/encoding.so` | `TextEncoder`, `TextDecoder` |
+| [Base64](extensions/base64/README.md) | `quickjs-wasi/base64.so` | `atob()`, `btoa()`, `Uint8Array.fromBase64()`, `Uint8Array.fromHex()`, `.toBase64()`, `.toHex()`, `.setFromBase64()`, `.setFromHex()` |
+| [Structured Clone](extensions/structured-clone/README.md) | `quickjs-wasi/structured-clone.so` | `structuredClone()` |
+| [Crypto](extensions/crypto/README.md) | `quickjs-wasi/crypto.so` | `crypto`, `SubtleCrypto`, `CryptoKey` |
+| [Headers](extensions/headers/README.md) | `quickjs-wasi/headers.so` | `Headers` |
 
 See each extension's README for full API documentation.
 

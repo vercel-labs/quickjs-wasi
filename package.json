@@ -11,30 +11,13 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./url": {
-      "types": "./dist/url.d.ts",
-      "default": "./dist/url.js"
-    },
-    "./encoding": {
-      "types": "./dist/encoding.d.ts",
-      "default": "./dist/encoding.js"
-    },
-    "./base64": {
-      "types": "./dist/base64.d.ts",
-      "default": "./dist/base64.js"
-    },
-    "./structured-clone": {
-      "types": "./dist/structured-clone.d.ts",
-      "default": "./dist/structured-clone.js"
-    },
-    "./headers": {
-      "types": "./dist/headers.d.ts",
-      "default": "./dist/headers.js"
-    },
-    "./crypto": {
-      "types": "./dist/crypto.d.ts",
-      "default": "./dist/crypto.js"
-    },
+    "./quickjs.wasm": "./quickjs.wasm",
+    "./url.so": "./extensions/url/url.so",
+    "./encoding.so": "./extensions/encoding/encoding.so",
+    "./base64.so": "./extensions/base64/base64.so",
+    "./headers.so": "./extensions/headers/headers.so",
+    "./crypto.so": "./extensions/crypto/crypto.so",
+    "./structured-clone.so": "./extensions/structured-clone/structured-clone.so",
     "./package.json": "./package.json"
   },
   "files": [

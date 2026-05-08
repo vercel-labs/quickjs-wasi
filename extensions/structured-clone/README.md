@@ -3,10 +3,14 @@
 WHATWG HTML Standard compliant `structuredClone()` global function. Deep clones values following the Structured Clone algorithm with circular reference detection.
 
 ```typescript
-import { structuredCloneExtension } from 'quickjs-wasi/structured-clone';
+import { readFile } from 'node:fs/promises';
+
+const wasm = await readFile(new URL(import.meta.resolve('quickjs-wasi/quickjs.wasm')));
+const structuredCloneSo = await readFile(new URL(import.meta.resolve('quickjs-wasi/structured-clone.so')));
 
 const vm = await QuickJS.create({
-  extensions: [structuredCloneExtension],
+  wasm,
+  extensions: [{ name: 'structured-clone', wasm: structuredCloneSo }],
 });
 ```
 
