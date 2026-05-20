@@ -196,7 +196,7 @@ const vm = await QuickJS.create({
 console.log(vm.versions);
 // {
 //   'quickjs-wasi': '2.1.0',
-//   quickjs: '0.13.0',
+//   quickjs: '0.14.0',
 //   ada: '3.4.3',
 //   mbedtls: '4.0.0',
 // }
@@ -429,7 +429,7 @@ The `dylink.0` section format and GOT conventions could change in a future wasi-
 
 The main module and all extensions **must be compiled with the same wasi-sdk version**. If you upgrade wasi-sdk and rebuild `quickjs.wasm`, you must also rebuild all extensions. There is no versioning mechanism to detect mismatches — struct layouts, calling conventions, and symbol mangling could silently differ between toolchain versions.
 
-The current build uses **wasi-sdk 30** (clang 21.1.4).
+The current build uses **wasi-sdk 32** (clang 22.1.0).
 
 ### No LTO for Extensions
 
