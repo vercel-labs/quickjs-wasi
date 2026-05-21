@@ -101,6 +101,11 @@ export const Intrinsics = {
   PERFORMANCE: (1 << 10) as 1024,
   /** `DOMException` class. */
   DOM_EXCEPTION: (1 << 11) as 2048,
+  /**
+   * `atob()` and `btoa()` global functions. Also pulls in `DOMException` as
+   * a dependency (errors thrown by these functions are `DOMException`s).
+   */
+  ATOB_BTOA: (1 << 12) as 4096,
   /** All intrinsics enabled (default). */
   ALL: 0xFFFFFFFF,
 } as const;

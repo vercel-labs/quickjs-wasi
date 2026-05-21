@@ -384,13 +384,12 @@ Note: each call to `newFunction()` must use a unique name. Attempting to registe
 
 Load C-based extensions compiled as WASM shared libraries. Extensions link directly against the QuickJS C API with zero marshalling overhead — they share the same linear memory and can register custom classes, prototypes, and globals.
 
-The package ships six pre-built extensions, each available as a subpath export. As with the main `quickjs.wasm` binary, the caller is responsible for loading the bytes:
+The package ships five pre-built extensions, each available as a subpath export. As with the main `quickjs.wasm` binary, the caller is responsible for loading the bytes:
 
 | Extension | Subpath | Adds |
 |-----------|---------|------|
 | URL | `quickjs-wasi/url.so` | `URL`, `URLSearchParams` (ada-url) |
 | Encoding | `quickjs-wasi/encoding.so` | `TextEncoder`, `TextDecoder` |
-| Base64 | `quickjs-wasi/base64.so` | `atob`, `btoa`, `Uint8Array` base64/hex |
 | Headers | `quickjs-wasi/headers.so` | `Headers` |
 | Crypto | `quickjs-wasi/crypto.so` | `crypto.subtle`, `crypto.getRandomValues` |
 | Structured Clone | `quickjs-wasi/structured-clone.so` | `structuredClone` |

@@ -1,15 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
-import { readFileSync } from 'node:fs';
 
-const base64ExtBytes = readFileSync(new URL('../extensions/base64/base64.so', import.meta.url));
+// atob/btoa and Uint8Array base64/hex methods are now native built-ins in
+// quickjs-ng v0.15.0+. These tests exercise the native implementation and no
+// longer rely on an extension.
 
 async function createVM() {
-  return QuickJS.create({
-    wasm: wasmBytes,
-    extensions: [{ name: 'base64', wasm: base64ExtBytes }],
-  });
+  return QuickJS.create({ wasm: wasmBytes });
 }
 
 async function evalStr(code: string) {

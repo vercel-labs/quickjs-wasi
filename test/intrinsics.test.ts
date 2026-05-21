@@ -171,4 +171,30 @@ describe('Intrinsics', () => {
     expect(vm.evalCode('typeof performance').consume(h => h.toString())).toBe('object');
     expect(vm.evalCode('typeof performance.now').consume(h => h.toString())).toBe('function');
   });
+
+  it('should enable atob/btoa with ATOB_BTOA flag (default)', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    expect(vm.evalCode('typeof atob').consume(h => h.toString())).toBe('function');
+    expect(vm.evalCode('typeof btoa').consume(h => h.toString())).toBe('function');
+    expect(vm.evalCode("btoa('hi')").consume(h => h.toString())).toBe('aGk=');
+    expect(vm.evalCode("atob('aGk=')").consume(h => h.toString())).toBe('hi');
+  });
+
+  it('should disable atob/btoa when ATOB_BTOA is omitted', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      intrinsics: Intrinsics.ALL & ~Intrinsics.ATOB_BTOA,
+    });
+    expect(vm.evalCode('typeof atob').consume(h => h.toString())).toBe('undefined');
+    expect(vm.evalCode('typeof btoa').consume(h => h.toString())).toBe('undefined');
+  });
+
+  it('should pull in DOMException as a dependency when ATOB_BTOA is enabled', async () => {
+    // JS_AddIntrinsicAToB also adds DOMException if not already present.
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      intrinsics: Intrinsics.EVAL | Intrinsics.ATOB_BTOA,
+    });
+    expect(vm.evalCode('typeof DOMException').consume(h => h.toString())).toBe('function');
+  });
 });

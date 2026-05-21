@@ -21,11 +21,6 @@ if (existsSync(encodingExtSrc)) {
   copyFileSync(encodingExtSrc, resolve(publicDir, 'encoding.so'));
 }
 
-const base64ExtSrc = resolve(repoRoot, 'extensions/base64/base64.so');
-if (existsSync(base64ExtSrc)) {
-  copyFileSync(base64ExtSrc, resolve(publicDir, 'base64.so'));
-}
-
 const headersExtSrc = resolve(repoRoot, 'extensions/headers/headers.so');
 if (existsSync(headersExtSrc)) {
   copyFileSync(headersExtSrc, resolve(publicDir, 'headers.so'));

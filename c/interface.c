@@ -260,6 +260,7 @@ const char *qjs_get_quickjs_version(void) {
 #define QJS_INTRINSIC_WEAK_REF       (1 << 9)
 #define QJS_INTRINSIC_PERFORMANCE    (1 << 10)
 #define QJS_INTRINSIC_DOM_EXCEPTION  (1 << 11)
+#define QJS_INTRINSIC_ATOB_BTOA      (1 << 12)
 
 /* All intrinsics enabled (same as JS_NewContext) */
 #define QJS_INTRINSIC_ALL 0xFFFFFFFF
@@ -322,6 +323,8 @@ int qjs_init2(unsigned int intrinsics) {
         if (intrinsics & QJS_INTRINSIC_WEAK_REF)       JS_AddIntrinsicWeakRef(ctx);
         if (intrinsics & QJS_INTRINSIC_PERFORMANCE)    JS_AddPerformance(ctx);
         if (intrinsics & QJS_INTRINSIC_DOM_EXCEPTION)  JS_AddIntrinsicDOMException(ctx);
+        /* JS_AddIntrinsicAToB also adds DOMException if not already present. */
+        if (intrinsics & QJS_INTRINSIC_ATOB_BTOA)      JS_AddIntrinsicAToB(ctx);
     }
 
     if (!ctx) {

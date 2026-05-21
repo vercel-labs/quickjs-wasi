@@ -152,9 +152,14 @@ EXT_CFLAGS = \
 	-I$(QJS_DIR)
 
 # Extension compiler flags (C++20, PIC, no LTO)
+#
+# Note: wasi-sdk 32 does not auto-add the libc++ include path on clang++ for
+# wasm32-wasip1 (it only adds the libc include dirs), so we add it explicitly
+# with -isystem. This keeps the order correct (libc++ before sysroot's libc).
 EXT_CXXFLAGS = \
 	--target=wasm32-wasip1 \
 	--sysroot=$(SYSROOT) \
+	-isystem $(SYSROOT)/include/wasm32-wasip1/c++/v1 \
 	-fPIC -O2 -std=c++20 \
 	-fno-exceptions -fno-rtti \
 	-D_LIBCPP_HAS_NO_THREADS \
@@ -178,10 +183,6 @@ EXT_URL_SO = $(EXT_URL_DIR)/url.so
 # Pure C extension — no C++ dependencies needed.
 EXT_ENC_DIR = extensions/encoding
 EXT_ENC_SO = $(EXT_ENC_DIR)/encoding.so
-
-# Extensions: Base64 (atob / btoa)
-EXT_B64_DIR = extensions/base64
-EXT_B64_SO = $(EXT_B64_DIR)/base64.so
 
 # Extensions: Headers
 EXT_HDR_DIR = extensions/headers
@@ -303,7 +304,7 @@ EXT_CRYPTO_SO = $(EXT_CRYPTO_DIR)/crypto.so
 
 .PHONY: all clean setup check-wasi-sdk
 
-all: check-wasi-sdk $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_B64_SO) $(EXT_HDR_SO) $(EXT_SC_SO) $(EXT_CRYPTO_SO)
+all: check-wasi-sdk $(OUTPUT) $(EXT_URL_SO) $(EXT_ENC_SO) $(EXT_HDR_SO) $(EXT_SC_SO) $(EXT_CRYPTO_SO)
 
 # Verify wasi-sdk is installed and matches the required version
 check-wasi-sdk:
@@ -390,15 +391,6 @@ $(EXT_ENC_SO): $(EXT_ENC_DIR)/encoding.o
 		--shared --no-entry --export-dynamic --allow-undefined \
 		-o $@ $<
 
-# Base64 extension: compile and link
-$(EXT_B64_DIR)/base64.o: $(EXT_B64_DIR)/base64.c
-	$(CC) $(EXT_CFLAGS) -c -o $@ $<
-
-$(EXT_B64_SO): $(EXT_B64_DIR)/base64.o
-	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
-		-o $@ $<
-
 # Headers extension: compile and link
 $(EXT_HDR_DIR)/headers.o: $(EXT_HDR_DIR)/headers.c
 	$(CC) $(EXT_CFLAGS) -c -o $@ $<
@@ -449,7 +441,6 @@ clean:
 		$(EXT_URL_DIR)/cxxstubs.o $(EXT_URL_BUILD) \
 		$(EXT_URL_SO) \
 		$(EXT_ENC_DIR)/encoding.o $(EXT_ENC_SO) \
-		$(EXT_B64_DIR)/base64.o $(EXT_B64_SO) \
 		$(EXT_HDR_DIR)/headers.o $(EXT_HDR_SO) \
 		$(EXT_SC_DIR)/structured-clone.o $(EXT_SC_SO) \
 		$(EXT_CRYPTO_BUILD) $(EXT_CRYPTO_SO)

@@ -19,7 +19,6 @@ import {
   Globe,
   Terminal,
   Type,
-  Binary,
   FileText,
   Copy,
   Github,
@@ -215,7 +214,6 @@ const STORAGE_KEYS = {
   code: 'qjs-playground:code',
   urlExt: 'qjs-playground:urlExt',
   encodingExt: 'qjs-playground:encodingExt',
-  base64Ext: 'qjs-playground:base64Ext',
   headersExt: 'qjs-playground:headersExt',
   structuredCloneExt: 'qjs-playground:structuredCloneExt',
   cryptoExt: 'qjs-playground:cryptoExt',
@@ -376,7 +374,11 @@ declare class TextDecoder {
 }
 `;
 
-// ─── atob / btoa type definitions ────────────────────────────────────────────
+// ─── atob / btoa + Uint8Array base64/hex type definitions ───────────────────
+//
+// These APIs are built-in to quickjs-ng v0.15.0+ — `atob`, `btoa` are global
+// functions and the Uint8Array methods are part of the TypedArrays intrinsic.
+// We always surface their types in Monaco so users get autocomplete.
 
 const BASE64_TYPE_DEFS = `
 /** Encodes a binary string (each char code 0-255) to base64. */
@@ -628,7 +630,7 @@ function OutputEntryView({ entry }: { entry: OutputEntry }) {
 
 const URL_TYPES_URI = 'ts:url-extension/url.d.ts';
 const ENCODING_TYPES_URI = 'ts:encoding-extension/encoding.d.ts';
-const BASE64_TYPES_URI = 'ts:base64-extension/base64.d.ts';
+const BASE64_TYPES_URI = 'ts:quickjs-env/base64.d.ts';
 const HEADERS_TYPES_URI = 'ts:headers-extension/headers.d.ts';
 const STRUCTUREDCLONE_TYPES_URI =
   'ts:structured-clone-extension/structured-clone.d.ts';
@@ -646,9 +648,6 @@ function App() {
   const [encodingExtEnabled, setEncodingExtEnabled] = useState(() =>
     loadBool(STORAGE_KEYS.encodingExt, false),
   );
-  const [base64ExtEnabled, setBase64ExtEnabled] = useState(() =>
-    loadBool(STORAGE_KEYS.base64Ext, false),
-  );
   const [headersExtEnabled, setHeadersExtEnabled] = useState(() =>
     loadBool(STORAGE_KEYS.headersExt, false),
   );
@@ -664,7 +663,6 @@ function App() {
   const wasmModuleRef = useRef<WebAssembly.Module | null>(null);
   const urlExtBytesRef = useRef<ArrayBuffer | null>(null);
   const encodingExtBytesRef = useRef<ArrayBuffer | null>(null);
-  const base64ExtBytesRef = useRef<ArrayBuffer | null>(null);
   const headersExtBytesRef = useRef<ArrayBuffer | null>(null);
   const structuredCloneExtBytesRef = useRef<ArrayBuffer | null>(null);
   const cryptoExtBytesRef = useRef<ArrayBuffer | null>(null);
@@ -674,7 +672,6 @@ function App() {
   const vimStatusRef = useRef<HTMLDivElement | null>(null);
   const urlTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const encodingTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
-  const base64TypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const headersTypesDisposableRef = useRef<{ dispose(): void } | null>(null);
   const structuredCloneTypesDisposableRef = useRef<{ dispose(): void } | null>(
     null,
@@ -689,9 +686,6 @@ function App() {
   useEffect(() => {
     save(STORAGE_KEYS.encodingExt, encodingExtEnabled);
   }, [encodingExtEnabled]);
-  useEffect(() => {
-    save(STORAGE_KEYS.base64Ext, base64ExtEnabled);
-  }, [base64ExtEnabled]);
   useEffect(() => {
     save(STORAGE_KEYS.headersExt, headersExtEnabled);
   }, [headersExtEnabled]);
@@ -726,9 +720,6 @@ function App() {
         if (encodingExtEnabled && !encodingExtBytesRef.current) {
           fetches.push(fetch('/encoding.so').then((r) => r.arrayBuffer()));
         }
-        if (base64ExtEnabled && !base64ExtBytesRef.current) {
-          fetches.push(fetch('/base64.so').then((r) => r.arrayBuffer()));
-        }
         if (headersExtEnabled && !headersExtBytesRef.current) {
           fetches.push(fetch('/headers.so').then((r) => r.arrayBuffer()));
         }
@@ -752,13 +743,6 @@ function App() {
           extBytes[extIdx]
         ) {
           encodingExtBytesRef.current = extBytes[extIdx++];
-        }
-        if (
-          base64ExtEnabled &&
-          !base64ExtBytesRef.current &&
-          extBytes[extIdx]
-        ) {
-          base64ExtBytesRef.current = extBytes[extIdx++];
         }
         if (
           headersExtEnabled &&
@@ -856,28 +840,6 @@ function App() {
       encodingTypesDisposableRef.current = null;
     };
   }, [encodingExtEnabled]);
-
-  // Base64 extension types: add/remove type definitions in Monaco
-  useEffect(() => {
-    const monaco = monacoRef.current;
-    if (!monaco) return;
-
-    if (base64ExtEnabled) {
-      base64TypesDisposableRef.current =
-        monaco.languages.typescript.javascriptDefaults.addExtraLib(
-          BASE64_TYPE_DEFS,
-          BASE64_TYPES_URI,
-        );
-    } else {
-      base64TypesDisposableRef.current?.dispose();
-      base64TypesDisposableRef.current = null;
-    }
-
-    return () => {
-      base64TypesDisposableRef.current?.dispose();
-      base64TypesDisposableRef.current = null;
-    };
-  }, [base64ExtEnabled]);
 
   // Headers extension types: add/remove type definitions in Monaco
   useEffect(() => {
@@ -978,26 +940,6 @@ function App() {
           },
         ]);
         setEncodingExtEnabled(false);
-      }
-    }
-  }, []);
-
-  // Lazily fetch the Base64 extension binary on first enable
-  const handleBase64ExtToggle = useCallback(async (checked: boolean) => {
-    setBase64ExtEnabled(checked);
-    if (checked && !base64ExtBytesRef.current) {
-      try {
-        const response = await fetch('/base64.so');
-        base64ExtBytesRef.current = await response.arrayBuffer();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setOutput([
-          {
-            type: 'error',
-            text: `Failed to load Base64 extension: ${message}`,
-          },
-        ]);
-        setBase64ExtEnabled(false);
       }
     }
   }, []);
@@ -1117,12 +1059,6 @@ function App() {
           wasm: new Uint8Array(encodingExtBytesRef.current),
         });
       }
-      if (base64ExtEnabled && base64ExtBytesRef.current) {
-        extensions.push({
-          name: 'base64',
-          wasm: new Uint8Array(base64ExtBytesRef.current),
-        });
-      }
       if (headersExtEnabled && headersExtBytesRef.current) {
         extensions.push({
           name: 'headers',
@@ -1227,7 +1163,6 @@ function App() {
   }, [
     urlExtEnabled,
     encodingExtEnabled,
-    base64ExtEnabled,
     headersExtEnabled,
     structuredCloneExtEnabled,
     cryptoExtEnabled,
@@ -1269,6 +1204,9 @@ function App() {
       'ts:quickjs-env/domexception.d.ts',
     );
 
+    // Add atob/btoa + Uint8Array base64/hex types (built-in QuickJS-NG, always available)
+    jsDefaults.addExtraLib(BASE64_TYPE_DEFS, BASE64_TYPES_URI);
+
     // If extensions were persisted as enabled, add types immediately
     if (loadBool(STORAGE_KEYS.urlExt, false)) {
       urlTypesDisposableRef.current = jsDefaults.addExtraLib(
@@ -1280,12 +1218,6 @@ function App() {
       encodingTypesDisposableRef.current = jsDefaults.addExtraLib(
         ENCODING_TYPE_DEFS,
         ENCODING_TYPES_URI,
-      );
-    }
-    if (loadBool(STORAGE_KEYS.base64Ext, false)) {
-      base64TypesDisposableRef.current = jsDefaults.addExtraLib(
-        BASE64_TYPE_DEFS,
-        BASE64_TYPES_URI,
       );
     }
     if (loadBool(STORAGE_KEYS.headersExt, false)) {
@@ -1466,18 +1398,6 @@ function App() {
 
             {/* Extension toggles */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <ExtensionToggle
-                checked={base64ExtEnabled}
-                onToggle={handleBase64ExtToggle}
-                icon={Binary}
-                label="Base64"
-                tooltip={
-                  <>
-                    Adds <MdnLink path="Window/atob">atob()</MdnLink> and{' '}
-                    <MdnLink path="Window/btoa">btoa()</MdnLink>
-                  </>
-                }
-              />
               <ExtensionToggle
                 checked={structuredCloneExtEnabled}
                 onToggle={handleStructuredCloneExtToggle}

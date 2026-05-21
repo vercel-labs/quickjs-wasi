@@ -196,7 +196,7 @@ const vm = await QuickJS.create({
 console.log(vm.versions);
 // {
 //   'quickjs-wasi': '2.1.0',
-//   quickjs: '0.14.0',
+//   quickjs: '0.15.0',
 //   ada: '3.4.3',
 //   mbedtls: '4.0.0',
 // }
@@ -371,10 +371,11 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 |-----------|---------|----------|
 | [URL](extensions/url/README.md) | `quickjs-wasi/url.so` | `URL`, `URLSearchParams` |
 | [Encoding](extensions/encoding/README.md) | `quickjs-wasi/encoding.so` | `TextEncoder`, `TextDecoder` |
-| [Base64](extensions/base64/README.md) | `quickjs-wasi/base64.so` | `atob()`, `btoa()`, `Uint8Array.fromBase64()`, `Uint8Array.fromHex()`, `.toBase64()`, `.toHex()`, `.setFromBase64()`, `.setFromHex()` |
 | [Structured Clone](extensions/structured-clone/README.md) | `quickjs-wasi/structured-clone.so` | `structuredClone()` |
 | [Crypto](extensions/crypto/README.md) | `quickjs-wasi/crypto.so` | `crypto`, `SubtleCrypto`, `CryptoKey` |
 | [Headers](extensions/headers/README.md) | `quickjs-wasi/headers.so` | `Headers` |
+
+> **Note:** `atob()`, `btoa()`, and the `Uint8Array` base64/hex methods (`.toBase64()`, `.fromBase64()`, `.toHex()`, `.fromHex()`, `.setFromBase64()`, `.setFromHex()`) are built into QuickJS-NG as of v0.15.0 and no longer need an extension. They are controlled by the `Intrinsics.ATOB_BTOA` and `Intrinsics.TYPED_ARRAYS` flags respectively, both enabled by default.
 
 See each extension's README for full API documentation.
 
