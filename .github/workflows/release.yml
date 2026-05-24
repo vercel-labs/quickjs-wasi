@@ -20,10 +20,14 @@ jobs:
       id-token: write
 
     steps:
+      # NOTE: submodules are intentionally not checked out here. The
+      # changesets/action (commitMode: github-api) walks the working tree to
+      # build the commit and fails on the executable files inside the
+      # quickjs-ng submodule. Submodules + wasi-sdk are initialized inside
+      # `ci:publish` instead, which only runs after the version commit/push.
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
 
       - name: Setup pnpm
@@ -38,9 +42,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Setup wasi-sdk
-        run: make setup
 
       - name: Create Release Pull Request or Publish to npm
         id: changesets
