@@ -332,4 +332,48 @@ describe('hostToHandle', () => {
     expect(vm.evalCode('e.name').consume(h => h.toString())).toBe('TypeError');
     expect(vm.evalCode('e.message').consume(h => h.toString())).toBe('boom');
   });
+
+  // Regression test for https://github.com/vercel-labs/quickjs-wasi/issues/14
+  // Singleton primitive values (false/true/null/undefined) used as object or
+  // array members must not be corrupted. The object/array branches dispose
+  // each value handle after setProp; disposing a cached singleton handle used
+  // to free its shared heap JSValue and corrupt subsequent reads.
+  it('should not corrupt singleton primitives nested in objects', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const value = {
+      pinned: false,
+      tts: true,
+      nonce: null,
+      member: {
+        deaf: false,
+        pending: false,
+        nick: null,
+        flags: 0,
+      },
+      mentions: [false, true, null, undefined],
+    };
+    const result = vm.hostToHandle(value).consume(h => vm.dump(h));
+    expect(result).toEqual({
+      pinned: false,
+      tts: true,
+      nonce: null,
+      member: {
+        deaf: false,
+        pending: false,
+        nick: null,
+        flags: 0,
+      },
+      mentions: [false, true, null, undefined],
+    });
+  });
+
+  it('should keep cached singleton handles usable after object conversion', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    // Converting an object containing `false` previously disposed vm.false.
+    vm.hostToHandle({ a: false, b: null, c: true }).dispose();
+    // The cached singletons must still resolve correctly afterwards.
+    expect(vm.dump(vm.false)).toBe(false);
+    expect(vm.dump(vm.true)).toBe(true);
+    expect(vm.dump(vm.null)).toBe(null);
+  });
 });
