@@ -1,5 +1,13 @@
 # quickjs-wasi
 
+## 3.0.1
+
+### Patch Changes
+
+- [#16](https://github.com/vercel-labs/quickjs-wasi/pull/16) [`5f80c0e`](https://github.com/vercel-labs/quickjs-wasi/commit/5f80c0eb44f521f866bb5ba223b00c1fbfcd4e99) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Fix value corruption when transferring objects/arrays containing `false`, `true`, `null`, or `undefined` into the VM via `hostToHandle`. These primitives resolve to cached singleton handles, and the object/array conversion disposed each value handle after `setProp`, freeing the singleton's shared heap `JSValue` and corrupting later reads (e.g. `false` showing up as `NaN`). Disposing a cached singleton handle is now a no-op.
+
+- [`8944284`](https://github.com/vercel-labs/quickjs-wasi/commit/89442847cb984ee6d1eadc410d391143cba6f6c0) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Update QuickJS-ng from v0.15.0 to v0.15.1. This is an upstream bug-fix release: uncaught error dumps now walk the `cause` chain, and growable `SharedArrayBuffer`s are rejected when no SAB hooks are configured. No public API changes.
+
 ## 3.0.0
 
 ### Major Changes
