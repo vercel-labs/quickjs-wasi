@@ -196,7 +196,7 @@ const vm = await QuickJS.create({
 console.log(vm.versions);
 // {
 //   'quickjs-wasi': '2.1.0',
-//   quickjs: '0.15.0',
+//   quickjs: '0.15.1',
 //   ada: '3.4.3',
 //   mbedtls: '4.0.0',
 // }
