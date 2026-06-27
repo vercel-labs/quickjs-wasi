@@ -3,3 +3,16 @@ packages:
   - examples/*
 
 approveBuilds: bun
+
+onlyBuiltDependencies:
+  - bun
+  - esbuild
+
+# Security overrides for transitive dependencies pinned to vulnerable versions
+# by their parents (monaco-editor pins dompurify@3.2.7; next pins postcss@8.4.31).
+# These are dev/demo-only and are never shipped in the published package, which
+# has no JS dependencies.
+overrides:
+  dompurify: ">=3.4.11"
+  postcss: ">=8.5.10"
+  "esbuild@>=0.27.3 <0.28.1": ">=0.28.1"
