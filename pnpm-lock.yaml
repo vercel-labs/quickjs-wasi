@@ -20,6 +20,9 @@ importers:
       '@vercel/nft':
         specifier: ^1.3.2
         version: 1.3.2(rollup@4.59.0)
+      binaryen:
+        specifier: ^130.0.0
+        version: 130.0.0
       bun:
         specifier: ^1.3.10
         version: 1.3.10
@@ -1555,6 +1558,10 @@ packages:
   better-path-resolve@1.0.0:
     resolution: {integrity: sha512-pbnl5XzGBdrFU/wT4jqmJVPn2B6UHPBOhzMQkY/SPUPB6QtUXtmBHBIwCbXJol93mOpGMnQyP/+BB19q04xj7g==}
     engines: {node: '>=4'}
+
+  binaryen@130.0.0:
+    resolution: {integrity: sha512-XDrb+zql0RbFPKgj7MuH9zOc78R3Fa/P/VSGnnpdwYsvNZPWjcMYMdAkKCOQEL2A7yqgjSMTDRFp6gfSDW+/QQ==}
+    hasBin: true
 
   bindings@1.5.0:
     resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
@@ -4574,6 +4581,8 @@ snapshots:
   better-path-resolve@1.0.0:
     dependencies:
       is-windows: 1.0.2
+
+  binaryen@130.0.0: {}
 
   bindings@1.5.0:
     dependencies:

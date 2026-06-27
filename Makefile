@@ -26,11 +26,39 @@ INTERFACE_SRC = c/interface.c
 BUILD_DIR = build
 OUTPUT = quickjs.wasm
 
+# Optimization level for the main quickjs.wasm build.
+# -Oz (optimize aggressively for size) shrinks the binary substantially with
+# no measurable runtime regression for our workloads. Override with e.g.
+# `make OPT=-O2` to trade size for a bit more speed.
+OPT ?= -Oz
+
+# Post-process a linked wasm binary with binaryen's wasm-opt for a further
+# size reduction (strips debug info + size-optimizes the code). This is applied
+# to both quickjs.wasm and the extension .so files.
+#
+# `binaryen` is a devDependency, so after `pnpm install` it is available at
+# node_modules/.bin/wasm-opt. Fall back to a wasm-opt on PATH otherwise. If
+# wasm-opt isn't found at all, the build continues (with a warning) rather than
+# hard-failing.
+WASM_OPT ?= $(shell if [ -x node_modules/.bin/wasm-opt ]; then echo node_modules/.bin/wasm-opt; else echo wasm-opt; fi)
+
+# $(call wasm_opt,<file>) — optimize <file> in place.
+define wasm_opt
+	@if command -v $(WASM_OPT) >/dev/null 2>&1; then \
+		before=$$(wc -c < $(1)); \
+		$(WASM_OPT) -Oz --strip-debug --strip-producers $(1) -o $(1); \
+		after=$$(wc -c < $(1)); \
+		echo "wasm-opt: $(1) $$before -> $$after bytes"; \
+	else \
+		echo "wasm-opt: not found, skipping $(1) (install binaryen for a smaller binary)"; \
+	fi
+endef
+
 # Compiler flags
 CFLAGS = \
 	--target=wasm32-wasip1 \
 	--sysroot=$(SYSROOT) \
-	-O2 \
+	$(OPT) \
 	-flto \
 	-I$(QJS_DIR) \
 	-D_GNU_SOURCE \
@@ -49,10 +77,12 @@ CFLAGS = \
 LDFLAGS = \
 	--target=wasm32-wasip1 \
 	--sysroot=$(SYSROOT) \
+	$(OPT) \
 	-flto \
 	-mexec-model=reactor \
 	-lwasi-emulated-process-clocks \
 	-lwasi-emulated-signal \
+	-Wl,--strip-debug \
 	-Wl,--wrap=__secs_to_zone \
 	-Wl,--export-dynamic \
 	-Wl,--export=__stack_pointer \
@@ -148,7 +178,7 @@ ALL_OBJS = $(QJS_OBJS) $(INTERFACE_OBJ)
 EXT_CFLAGS = \
 	--target=wasm32-wasip1 \
 	--sysroot=$(SYSROOT) \
-	-fPIC -O2 \
+	-fPIC $(OPT) \
 	-I$(QJS_DIR)
 
 # Extension compiler flags (C++20, PIC, no LTO)
@@ -160,7 +190,7 @@ EXT_CXXFLAGS = \
 	--target=wasm32-wasip1 \
 	--sysroot=$(SYSROOT) \
 	-isystem $(SYSROOT)/include/wasm32-wasip1/c++/v1 \
-	-fPIC -O2 -std=c++20 \
+	-fPIC $(OPT) -std=c++20 \
 	-fno-exceptions -fno-rtti \
 	-D_LIBCPP_HAS_NO_THREADS \
 	-D_LIBCPP_DISABLE_EXTERN_TEMPLATE
@@ -349,6 +379,7 @@ setup:
 
 $(OUTPUT): $(ALL_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
+	$(call wasm_opt,$@)
 
 $(BUILD_DIR)/%.o: $(QJS_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -378,8 +409,9 @@ $(EXT_URL_BUILD):
 # URL extension: link as shared library
 $(EXT_URL_SO): $(EXT_URL_OBJS)
 	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
+		--shared --no-entry --export-dynamic --allow-undefined --strip-debug \
 		-o $@ $(EXT_URL_OBJS)
+	$(call wasm_opt,$@)
 
 # Encoding extension: compile C source
 $(EXT_ENC_DIR)/encoding.o: $(EXT_ENC_DIR)/encoding.c
@@ -388,8 +420,9 @@ $(EXT_ENC_DIR)/encoding.o: $(EXT_ENC_DIR)/encoding.c
 # Encoding extension: link as shared library
 $(EXT_ENC_SO): $(EXT_ENC_DIR)/encoding.o
 	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
+		--shared --no-entry --export-dynamic --allow-undefined --strip-debug \
 		-o $@ $<
+	$(call wasm_opt,$@)
 
 # Headers extension: compile and link
 $(EXT_HDR_DIR)/headers.o: $(EXT_HDR_DIR)/headers.c
@@ -397,8 +430,9 @@ $(EXT_HDR_DIR)/headers.o: $(EXT_HDR_DIR)/headers.c
 
 $(EXT_HDR_SO): $(EXT_HDR_DIR)/headers.o
 	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
+		--shared --no-entry --export-dynamic --allow-undefined --strip-debug \
 		-o $@ $<
+	$(call wasm_opt,$@)
 
 # structuredClone extension: compile and link
 $(EXT_SC_DIR)/structured-clone.o: $(EXT_SC_DIR)/structured-clone.c
@@ -406,8 +440,9 @@ $(EXT_SC_DIR)/structured-clone.o: $(EXT_SC_DIR)/structured-clone.c
 
 $(EXT_SC_SO): $(EXT_SC_DIR)/structured-clone.o
 	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
+		--shared --no-entry --export-dynamic --allow-undefined --strip-debug \
 		-o $@ $<
+	$(call wasm_opt,$@)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -432,8 +467,9 @@ $(foreach src,$(MBEDTLS_ALL_SRCS),$(eval $(call MBEDTLS_COMPILE_RULE,$(src))))
 # Link crypto extension as shared library
 $(EXT_CRYPTO_SO): $(EXT_CRYPTO_ALL_OBJS)
 	$(WASI_SDK)/bin/wasm-ld \
-		--shared --no-entry --export-dynamic --allow-undefined \
+		--shared --no-entry --export-dynamic --allow-undefined --strip-debug \
 		-o $@ $(EXT_CRYPTO_ALL_OBJS)
+	$(call wasm_opt,$@)
 
 clean:
 	rm -rf $(BUILD_DIR) $(OUTPUT) \
