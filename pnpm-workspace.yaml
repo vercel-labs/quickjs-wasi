@@ -16,3 +16,9 @@ overrides:
   dompurify: ">=3.4.11"
   postcss: ">=8.5.10"
   "esbuild@>=0.27.3 <0.28.1": ">=0.28.1"
+  # @changesets/cli -> @manypkg/get-packages@1 -> read-yaml-file@1 -> js-yaml@3,
+  # which is vulnerable with no patched 3.x release. read-yaml-file@2.1.0 keeps
+  # the same CJS API (incl. .sync) but uses js-yaml@4, so it's a drop-in fix that
+  # doesn't break changesets (bumping @manypkg/get-packages to 2.x changes its API
+  # and breaks the changesets CLI).
+  "read-yaml-file": "^2.1.0"
