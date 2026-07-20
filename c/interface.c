@@ -464,8 +464,77 @@ void qjs_destroy(void) {
 
 /* ---- Evaluation ---- */
 
+/*
+ * JSCFunctionData callback that ignores its arguments and returns
+ * func_data[0]. Used to map the module evaluation promise to the
+ * module namespace object.
+ */
+static JSValue resolve_to_func_data(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv,
+                                    int magic, JSValueConst *func_data)
+{
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    return JS_DupValue(ctx, func_data[0]);
+}
+
+/*
+ * Evaluate a compiled module (a JS_TAG_MODULE value from a COMPILE_ONLY
+ * eval) and return a promise that resolves to the module's namespace
+ * object (its exports) instead of undefined.
+ *
+ * Per spec, module evaluation produces a promise that resolves to
+ * undefined, so we chain it: eval_promise.then(() => namespace).
+ * Rejections (e.g. a throw during module evaluation) propagate through
+ * the chained promise unchanged.
+ *
+ * Consumes func_obj.
+ */
+static JSValue eval_module_to_namespace(JSValue func_obj)
+{
+    JSModuleDef *m = (JSModuleDef *)JS_VALUE_GET_PTR(func_obj);
+
+    JSValue eval_result = JS_EvalFunction(ctx, func_obj); /* consumes func_obj */
+    if (JS_IsException(eval_result))
+        return eval_result;
+
+    JSValue ns = JS_GetModuleNamespace(ctx, m);
+    if (JS_IsException(ns)) {
+        JS_FreeValue(ctx, eval_result);
+        return ns;
+    }
+
+    JSValue then_fn = JS_NewCFunctionData(ctx, resolve_to_func_data, 0, 0, 1, &ns);
+    JS_FreeValue(ctx, ns); /* dup'd into func_data */
+    if (JS_IsException(then_fn)) {
+        JS_FreeValue(ctx, eval_result);
+        return then_fn;
+    }
+
+    JSAtom then_atom = JS_NewAtom(ctx, "then");
+    JSValue result = JS_Invoke(ctx, eval_result, then_atom, 1, &then_fn);
+    JS_FreeAtom(ctx, then_atom);
+    JS_FreeValue(ctx, then_fn);
+    JS_FreeValue(ctx, eval_result);
+    return result;
+}
+
 __attribute__((export_name("qjs_eval")))
 JSValue *qjs_eval(const char *code, size_t len, const char *filename, int eval_flags) {
+    /* For module evaluation (without COMPILE_ONLY), compile first so we
+       can access the JSModuleDef, then evaluate and return a promise that
+       resolves to the module namespace (the module's exports) rather than
+       undefined. */
+    if ((eval_flags & JS_EVAL_TYPE_MASK) == JS_EVAL_TYPE_MODULE &&
+        !(eval_flags & JS_EVAL_FLAG_COMPILE_ONLY)) {
+        JSValue func_obj = JS_Eval(ctx, code, len, filename,
+                                   eval_flags | JS_EVAL_FLAG_COMPILE_ONLY);
+        if (JS_IsException(func_obj))
+            return jsvalue_to_heap(func_obj);
+        return jsvalue_to_heap(eval_module_to_namespace(func_obj));
+    }
     JSValue result = JS_Eval(ctx, code, len, filename, eval_flags);
     return jsvalue_to_heap(result);
 }
@@ -510,12 +579,14 @@ JSValue *qjs_eval_bytecode(const uint8_t *buf, size_t buf_len) {
     if (JS_IsException(obj)) {
         return jsvalue_to_heap(obj);
     }
-    /* For modules, resolve dependencies first */
+    /* For modules, resolve dependencies first, then evaluate and return
+       a promise that resolves to the module namespace (the exports) */
     if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
         if (JS_ResolveModule(ctx, obj) < 0) {
             JS_FreeValue(ctx, obj);
             return jsvalue_to_heap(JS_EXCEPTION);
         }
+        return jsvalue_to_heap(eval_module_to_namespace(obj));
     }
     JSValue result = JS_EvalFunction(ctx, obj);
     /* JS_EvalFunction consumes obj, no need to free it */

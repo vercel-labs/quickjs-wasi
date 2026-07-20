@@ -87,6 +87,65 @@ describe('moduleLoader', () => {
     expect(vm.evalCode('chain').consume(h => h.toString())).toBe('a+b+c');
   });
 
+  it('should expose entry module exports via the returned promise', async () => {
+    const modules = new Map<string, string>([
+      ['math.js', 'export const add = (a, b) => a + b;'],
+    ]);
+
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        load: (name) => {
+          const src = modules.get(name);
+          if (!src) throw new Error(`Module not found: ${name}`);
+          return src;
+        },
+      },
+    });
+
+    using promise = vm.evalCode(`
+      import { add } from 'math.js';
+      export const sum = add(3, 4);
+      export default 'entry';
+    `, '<entry>', EvalFlags.TYPE_MODULE);
+    vm.executePendingJobs();
+
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('sum').consume(h => h.toNumber())).toBe(7);
+    expect(ns.getProp('default').consume(h => h.toString())).toBe('entry');
+  });
+
+  it('should support dynamic import() from script mode', async () => {
+    const modules = new Map<string, string>([
+      ['math.js', 'export const add = (a, b) => a + b;'],
+    ]);
+
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        load: (name) => {
+          const src = modules.get(name);
+          if (!src) throw new Error(`Module not found: ${name}`);
+          return src;
+        },
+      },
+    });
+
+    using promise = vm.evalCode(`import('math.js').then(m => m.add(1, 2))`);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('dynamic import should not reject');
+    }
+    expect(resolved.value.consume(h => h.toNumber())).toBe(3);
+  });
+
   it('should throw on module not found', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,

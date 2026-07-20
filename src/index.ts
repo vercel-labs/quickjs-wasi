@@ -38,7 +38,12 @@ export type { ExtensionDescriptor, LoadedExtension, DylinkInfo, WasiImports } fr
 export const EvalFlags = {
   /** Global script mode (default). */
   TYPE_GLOBAL: 0 as const,
-  /** Module mode. */
+  /**
+   * Module mode. `evalCode()` returns a handle to a Promise that resolves
+   * to the module's namespace object (its exports), or rejects if module
+   * evaluation throws. Use together with `executePendingJobs()` and
+   * `resolvePromise()`.
+   */
   TYPE_MODULE: (1 << 0) as 1,
   /** Force strict mode. */
   STRICT: (1 << 3) as 8,
@@ -1081,6 +1086,8 @@ export class QuickJS {
    * @param flags - Optional bitwise OR of `EvalFlags.*` constants.
    *   For example, pass `EvalFlags.ASYNC` to allow top-level `await` — the
    *   returned handle will be a Promise that resolves to the completion value.
+   *   With `EvalFlags.TYPE_MODULE` the returned handle is a Promise that
+   *   resolves to the module's namespace object (its exports).
    */
   evalCode(code: string, filename: string = '<eval>', flags: number = 0): JSValueHandle {
     this.assertNotDisposed();
@@ -1131,6 +1138,10 @@ export class QuickJS {
   /**
    * Execute previously compiled bytecode (from `compile()`).
    * Returns the evaluation result as a handle.
+   *
+   * For module bytecode (compiled with `EvalFlags.TYPE_MODULE`), the
+   * returned handle is a Promise that resolves to the module's namespace
+   * object (its exports).
    *
    * @param bytecode - The bytecode `Uint8Array` from `compile()`.
    */
