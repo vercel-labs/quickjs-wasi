@@ -187,6 +187,57 @@ if ('value' in result) {
 }
 ```
 
+#### Async Module Loading
+
+The `load` and `normalize` callbacks are **synchronous** — the engine calls
+them from inside the WASM call stack, which cannot be suspended to await a
+Promise (returning one throws a `TypeError`). To load module sources
+asynchronously (e.g. over `https://`), use the **fetch-and-retry** pattern:
+throw from `load` on a cache miss, fetch the missing module on the host, and
+re-run the eval. Modules already loaded by the runtime are cached and not
+re-requested, so each attempt makes progress one module deeper into the
+dependency graph:
+
+```typescript
+const cache = new Map<string, string>();
+let missing: string | null = null;
+
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  moduleLoader: {
+    load: (name) => {
+      const src = cache.get(name);
+      if (src === undefined) {
+        missing = name;
+        throw new Error(`module not cached: ${name}`);
+      }
+      return src;
+    },
+  },
+});
+
+async function evalModule(code: string, filename: string) {
+  while (true) {
+    missing = null;
+    try {
+      return vm.evalCode(code, filename, EvalFlags.TYPE_MODULE);
+    } catch (err) {
+      if (missing === null) throw err; // a real error, not a cache miss
+      const response = await fetch(new URL(missing, 'https://example.com/'));
+      if (!response.ok) throw new Error(`failed to fetch ${missing}`);
+      cache.set(missing, await response.text());
+    }
+  }
+}
+
+using promise = await evalModule(`import { x } from 'mod.js'; export { x };`, '<entry>');
+vm.executePendingJobs();
+const result = await vm.resolvePromise(promise);
+```
+
+Alternatively, pre-fetch all module sources up front and serve them from the
+cache directly.
+
 ### Error Handling
 
 ```typescript

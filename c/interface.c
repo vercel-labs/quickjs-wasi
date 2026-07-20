@@ -90,7 +90,10 @@ static char *module_normalizer_trampoline(JSContext *ctx,
     (void)opaque;
     char *result = host_module_normalize(module_base_name, module_name);
     if (!result) {
-        JS_ThrowReferenceError(ctx, "could not normalize module '%s'", module_name);
+        /* The host may have already thrown a more specific error via
+           qjs_throw — only throw the generic error if it did not. */
+        if (!JS_HasException(ctx))
+            JS_ThrowReferenceError(ctx, "could not normalize module '%s'", module_name);
         return NULL;
     }
     /* The host allocated with malloc; QuickJS expects js_malloc'd memory.
@@ -109,7 +112,10 @@ static JSModuleDef *module_loader_trampoline(JSContext *ctx,
     size_t source_len = 0;
     char *source = host_module_load(module_name, &source_len);
     if (!source) {
-        JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
+        /* The host may have already thrown a more specific error via
+           qjs_throw — only throw the generic error if it did not. */
+        if (!JS_HasException(ctx))
+            JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
         return NULL;
     }
 
