@@ -502,6 +502,16 @@ static JSValue eval_module_to_namespace(JSValue func_obj)
 {
     JSModuleDef *m = (JSModuleDef *)JS_VALUE_GET_PTR(func_obj);
 
+    /* Resolve module dependencies before evaluation. JS_Eval with
+       COMPILE_ONLY already resolves the graph, and quickjs-ng's
+       js_resolve_module early-returns for already-resolved modules, so
+       this is a no-op for that caller — but it is required for modules
+       deserialized from bytecode and keeps this helper self-contained. */
+    if (JS_ResolveModule(ctx, func_obj) < 0) {
+        JS_FreeValue(ctx, func_obj);
+        return JS_EXCEPTION;
+    }
+
     JSValue eval_result = JS_EvalFunction(ctx, func_obj); /* consumes func_obj */
     if (JS_IsException(eval_result))
         return eval_result;
@@ -520,6 +530,11 @@ static JSValue eval_module_to_namespace(JSValue func_obj)
     }
 
     JSAtom then_atom = JS_NewAtom(ctx, "then");
+    if (then_atom == JS_ATOM_NULL) {
+        JS_FreeValue(ctx, then_fn);
+        JS_FreeValue(ctx, eval_result);
+        return JS_EXCEPTION;
+    }
     JSValue result = JS_Invoke(ctx, eval_result, then_atom, 1, &then_fn);
     JS_FreeAtom(ctx, then_atom);
     JS_FreeValue(ctx, then_fn);
@@ -585,13 +600,9 @@ JSValue *qjs_eval_bytecode(const uint8_t *buf, size_t buf_len) {
     if (JS_IsException(obj)) {
         return jsvalue_to_heap(obj);
     }
-    /* For modules, resolve dependencies first, then evaluate and return
-       a promise that resolves to the module namespace (the exports) */
+    /* For modules, evaluate (resolving dependencies first) and return a
+       promise that resolves to the module namespace (the exports) */
     if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
-        if (JS_ResolveModule(ctx, obj) < 0) {
-            JS_FreeValue(ctx, obj);
-            return jsvalue_to_heap(JS_EXCEPTION);
-        }
         return jsvalue_to_heap(eval_module_to_namespace(obj));
     }
     JSValue result = JS_EvalFunction(ctx, obj);
