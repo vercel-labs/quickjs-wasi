@@ -87,6 +87,65 @@ describe('moduleLoader', () => {
     expect(vm.evalCode('chain').consume(h => h.toString())).toBe('a+b+c');
   });
 
+  it('should expose entry module exports via the returned promise', async () => {
+    const modules = new Map<string, string>([
+      ['math.js', 'export const add = (a, b) => a + b;'],
+    ]);
+
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        load: (name) => {
+          const src = modules.get(name);
+          if (!src) throw new Error(`Module not found: ${name}`);
+          return src;
+        },
+      },
+    });
+
+    using promise = vm.evalCode(`
+      import { add } from 'math.js';
+      export const sum = add(3, 4);
+      export default 'entry';
+    `, '<entry>', EvalFlags.TYPE_MODULE);
+    vm.executePendingJobs();
+
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('sum').consume(h => h.toNumber())).toBe(7);
+    expect(ns.getProp('default').consume(h => h.toString())).toBe('entry');
+  });
+
+  it('should support dynamic import() from script mode', async () => {
+    const modules = new Map<string, string>([
+      ['math.js', 'export const add = (a, b) => a + b;'],
+    ]);
+
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        load: (name) => {
+          const src = modules.get(name);
+          if (!src) throw new Error(`Module not found: ${name}`);
+          return src;
+        },
+      },
+    });
+
+    using promise = vm.evalCode(`import('math.js').then(m => m.add(1, 2))`);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('dynamic import should not reject');
+    }
+    expect(resolved.value.consume(h => h.toNumber())).toBe(3);
+  });
+
   it('should throw on module not found', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
@@ -178,6 +237,112 @@ describe('moduleLoader', () => {
     vm.executePendingJobs();
 
     expect(vm.evalCode('val').consume(h => h.toNumber())).toBe(42);
+  });
+
+  it('should propagate the host error message from load()', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        load: (name) => {
+          throw new Error(`Module not found: ${name}`);
+        },
+      },
+    });
+
+    expect(() => {
+      vm.evalCode(`import { x } from 'missing.js'`, '<entry>', EvalFlags.TYPE_MODULE).dispose();
+    }).toThrow('Module not found: missing.js');
+  });
+
+  it('should throw a clear error when load() is async', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        // @ts-expect-error — deliberately wrong: load must be synchronous
+        load: async () => 'export const x = 42;',
+      },
+    });
+
+    expect(() => {
+      vm.evalCode(`import { x } from 'math.js'`, '<entry>', EvalFlags.TYPE_MODULE).dispose();
+    }).toThrow('moduleLoader.load must synchronously return a string (got a Promise)');
+  });
+
+  it('should throw a clear error when normalize() is async', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        // @ts-expect-error — deliberately wrong: normalize must be synchronous
+        normalize: async (_base: string, specifier: string) => specifier,
+        load: () => 'export const x = 42;',
+      },
+    });
+
+    expect(() => {
+      vm.evalCode(`import { x } from 'math.js'`, '<entry>', EvalFlags.TYPE_MODULE).dispose();
+    }).toThrow('moduleLoader.normalize must synchronously return a string (got a Promise)');
+  });
+
+  it('should support async module sources via fetch-and-retry', async () => {
+    // Simulated remote (e.g. https://) module registry with nested imports
+    const remote = new Map<string, string>([
+      ['a.js', 'import { b } from "b.js"; export const a = "a+" + b;'],
+      ['b.js', 'import { c } from "c.js"; export const b = "b+" + c;'],
+      ['c.js', 'export const c = "c";'],
+    ]);
+    const fetchModule = async (name: string): Promise<string> => {
+      await new Promise((r) => setTimeout(r, 1)); // simulate network latency
+      const src = remote.get(name);
+      if (src === undefined) throw new Error(`404: ${name}`);
+      return src;
+    };
+
+    const cache = new Map<string, string>();
+    let missing: string | null = null;
+
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      moduleLoader: {
+        load: (name) => {
+          const src = cache.get(name);
+          if (src === undefined) {
+            missing = name;
+            throw new Error(`module not cached: ${name}`);
+          }
+          return src;
+        },
+      },
+    });
+
+    // Retry eval until all (transitive) module sources are cached. Each
+    // attempt gets one module deeper into the dependency graph; modules
+    // already loaded by the runtime are not re-requested.
+    const evalModule = async (code: string, filename: string) => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        missing = null;
+        try {
+          return vm.evalCode(code, filename, EvalFlags.TYPE_MODULE);
+        } catch (err) {
+          if (missing === null) throw err;
+          cache.set(missing, await fetchModule(missing));
+        }
+      }
+      throw new Error('too many retries');
+    };
+
+    using promise = await evalModule(
+      'import { a } from "a.js"; export const chain = a;',
+      '<entry>',
+    );
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      const msg = resolved.error.toString();
+      resolved.error.dispose();
+      expect.unreachable(`module evaluation should not reject: ${msg}`);
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('chain').consume(h => h.toString())).toBe('a+b+c');
   });
 
   it('should work after snapshot restore', async () => {

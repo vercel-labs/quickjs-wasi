@@ -77,9 +77,67 @@ describe('EvalFlags.TYPE_GLOBAL', () => {
 describe('EvalFlags.TYPE_MODULE', () => {
   it('should evaluate code in module mode', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    // Module eval returns an empty object (the module namespace)
+    // Module eval returns a promise that resolves to the module namespace
     using result = vm.evalCode('export const x = 42;', '<eval>', EvalFlags.TYPE_MODULE);
-    expect(vm.typeof(result)).toBe('object');
+    expect(result.isPromise).toBe(true);
+  });
+
+  it('should resolve to the module namespace with named exports', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = vm.evalCode('export const x = 42; export const y = "hi";', '<eval>', EvalFlags.TYPE_MODULE);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(vm.typeof(ns)).toBe('object');
+    expect(ns.getProp('x').consume(h => h.toNumber())).toBe(42);
+    expect(ns.getProp('y').consume(h => h.toString())).toBe('hi');
+  });
+
+  it('should resolve to the module namespace with a default export', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = vm.evalCode('export default 42', '<eval>', EvalFlags.TYPE_MODULE);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('default').consume(h => h.toNumber())).toBe(42);
+  });
+
+  it('should resolve to the module namespace for a top-level-await module', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = vm.evalCode(
+      'const v = await Promise.resolve(7); export const x = v;',
+      '<eval>',
+      EvalFlags.TYPE_MODULE,
+    );
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('x').consume(h => h.toNumber())).toBe(7);
+  });
+
+  it('should reject the promise when module evaluation throws', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = vm.evalCode('throw new Error("boom"); export const x = 1;', '<eval>', EvalFlags.TYPE_MODULE);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('value' in resolved) {
+      resolved.value.dispose();
+      expect.unreachable('module evaluation should reject');
+    }
+    using err = resolved.error;
+    expect(err.toString()).toContain('boom');
   });
 
   it('should scope variables to the module (not globalThis)', async () => {

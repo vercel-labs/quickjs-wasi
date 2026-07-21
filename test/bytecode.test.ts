@@ -82,6 +82,22 @@ describe('vm.compile() / vm.evalBytecode()', () => {
     expect(bytecode.length).toBeGreaterThan(0);
   });
 
+  it('should expose module exports when evaluating module bytecode', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    const bytecode = vm.compile('export const x = 42; export default "hi"', 'mod.js', EvalFlags.TYPE_MODULE);
+    using promise = vm.evalBytecode(bytecode);
+    expect(promise.isPromise).toBe(true);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('x').consume(h => h.toNumber())).toBe(42);
+    expect(ns.getProp('default').consume(h => h.toString())).toBe('hi');
+  });
+
   it('should produce smaller bytecode with STRIP_SOURCE', async () => {
     using vm = await QuickJS.create(wasmBytes);
     const full = vm.compile('function hello() { return "world"; }');

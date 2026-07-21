@@ -38,7 +38,12 @@ export type { ExtensionDescriptor, LoadedExtension, DylinkInfo, WasiImports } fr
 export const EvalFlags = {
   /** Global script mode (default). */
   TYPE_GLOBAL: 0 as const,
-  /** Module mode. */
+  /**
+   * Module mode. `evalCode()` returns a handle to a Promise that resolves
+   * to the module's namespace object (its exports), or rejects if module
+   * evaluation throws. Use together with `executePendingJobs()` and
+   * `resolvePromise()`.
+   */
   TYPE_MODULE: (1 << 0) as 1,
   /** Force strict mode. */
   STRICT: (1 << 3) as 8,
@@ -213,8 +218,19 @@ export interface QuickJSOptions {
    * can resolve and load modules.
    *
    * Both callbacks are **synchronous** — they must return their result
-   * immediately. For async module resolution, pre-fetch all module sources
-   * before creating the VM and return them from a `Map` in the `load` callback.
+   * immediately. The engine calls them from inside the WASM call stack,
+   * which cannot be suspended to await a Promise; returning a Promise
+   * throws a `TypeError`.
+   *
+   * For async module sources (e.g. loading over `https://`), either
+   * pre-fetch all module sources before evaluating and serve them from a
+   * cache, or use the fetch-and-retry pattern: throw from `load` on a
+   * cache miss, fetch the missing module on the host, and re-run
+   * `evalCode()` — already-loaded modules are cached by the runtime and
+   * are not re-requested. See the "ES Modules" section of the README.
+   *
+   * Errors thrown by either callback propagate to the guest as the
+   * module resolution error.
    */
   moduleLoader?: {
     /**
@@ -942,6 +958,31 @@ export class QuickJS {
       }
     };
 
+    // Throw a host-side error into the QuickJS context so module loader
+    // failures surface with their real message instead of the generic
+    // "could not load module" error.
+    const throwIntoContext = (err: unknown): void => {
+      const errHandle = vm.newError(err instanceof Error ? err : String(err));
+      vm.exports.qjs_throw(errHandle.ptr);
+      errHandle.dispose();
+    };
+
+    // Guard against async (or otherwise non-string-returning) module loader
+    // callbacks. The WASM boundary is synchronous — a Promise cannot be
+    // awaited here — so fail with a clear error instead of coercing the
+    // Promise to source text.
+    const assertSyncString = (value: unknown, callbackName: string): string => {
+      if (typeof value === 'string') return value;
+      const got = value !== null && typeof value === 'object' && typeof (value as PromiseLike<unknown>).then === 'function'
+        ? 'a Promise'
+        : `type ${typeof value}`;
+      throw new TypeError(
+        `moduleLoader.${callbackName} must synchronously return a string (got ${got}). ` +
+        `Async module loading is not supported — pre-fetch module sources instead ` +
+        `(see the "ES Modules" section of the quickjs-wasi README).`
+      );
+    };
+
     // Module normalizer: resolve a specifier relative to a base name.
     // Returns a malloc'd null-terminated string in WASM memory, or 0 (NULL) on error.
     const hostModuleNormalize = (baseNamePtr: number, namePtr: number): number => {
@@ -953,9 +994,10 @@ export class QuickJS {
       const baseName = vm.readCString(baseNamePtr);
       const specifier = vm.readCString(namePtr);
       try {
-        const normalized = vm.moduleNormalizeHandler(baseName, specifier);
+        const normalized = assertSyncString(vm.moduleNormalizeHandler(baseName, specifier), 'normalize');
         return vm.writeString(normalized).ptr;
-      } catch {
+      } catch (err) {
+        throwIntoContext(err);
         return 0;
       }
     };
@@ -966,11 +1008,12 @@ export class QuickJS {
       if (!vm.moduleLoadHandler) return 0;
       const name = vm.readCString(namePtr);
       try {
-        const source = vm.moduleLoadHandler(name);
+        const source = assertSyncString(vm.moduleLoadHandler(name), 'load');
         const { ptr, len } = vm.writeString(source);
         new Uint32Array(vm.exports.memory.buffer, outLenPtr, 1)[0] = len;
         return ptr;
-      } catch {
+      } catch (err) {
+        throwIntoContext(err);
         return 0;
       }
     };
@@ -1081,6 +1124,8 @@ export class QuickJS {
    * @param flags - Optional bitwise OR of `EvalFlags.*` constants.
    *   For example, pass `EvalFlags.ASYNC` to allow top-level `await` — the
    *   returned handle will be a Promise that resolves to the completion value.
+   *   With `EvalFlags.TYPE_MODULE` the returned handle is a Promise that
+   *   resolves to the module's namespace object (its exports).
    */
   evalCode(code: string, filename: string = '<eval>', flags: number = 0): JSValueHandle {
     this.assertNotDisposed();
@@ -1131,6 +1176,10 @@ export class QuickJS {
   /**
    * Execute previously compiled bytecode (from `compile()`).
    * Returns the evaluation result as a handle.
+   *
+   * For module bytecode (compiled with `EvalFlags.TYPE_MODULE`), the
+   * returned handle is a Promise that resolves to the module's namespace
+   * object (its exports).
    *
    * @param bytecode - The bytecode `Uint8Array` from `compile()`.
    */

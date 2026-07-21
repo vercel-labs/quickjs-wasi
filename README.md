@@ -131,6 +131,113 @@ using vm = await QuickJS.create(wasmBytes);
 }
 ```
 
+### ES Modules
+
+Evaluate code as an ES module with `EvalFlags.TYPE_MODULE`. Module evaluation
+returns a handle to a Promise that resolves to the module's namespace object
+(its exports):
+
+```typescript
+import { QuickJS, EvalFlags } from 'quickjs-wasi';
+
+using vm = await QuickJS.create(wasmBytes);
+
+using promise = vm.evalCode(
+  'export const x = 42; export default "hi";',
+  '<eval>',
+  EvalFlags.TYPE_MODULE
+);
+vm.executePendingJobs();
+
+const result = await vm.resolvePromise(promise);
+if ('error' in result) {
+  console.error(result.error.consume(h => h.toString()));
+} else {
+  using ns = result.value;
+  ns.getProp('x').consume(h => h.toNumber());        // 42
+  ns.getProp('default').consume(h => h.toString());  // "hi"
+}
+```
+
+`import` statements are resolved through the `moduleLoader` option:
+
+```typescript
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  moduleLoader: {
+    // Optional: resolve relative specifiers against the importing module
+    normalize: (baseName, specifier) => specifier,
+    // Return the module source code for a given (normalized) specifier
+    load: (name) => {
+      if (name === 'math.js') return 'export const add = (a, b) => a + b;';
+      throw new Error(`Module not found: ${name}`);
+    },
+  },
+});
+
+using promise = vm.evalCode(
+  `import { add } from 'math.js'; export const sum = add(3, 4);`,
+  '<entry>',
+  EvalFlags.TYPE_MODULE
+);
+vm.executePendingJobs();
+const result = await vm.resolvePromise(promise);
+if ('value' in result) {
+  result.value.consume(ns => ns.getProp('sum').consume(h => h.toNumber())); // 7
+}
+```
+
+#### Async Module Loading
+
+The `load` and `normalize` callbacks are **synchronous** — the engine calls
+them from inside the WASM call stack, which cannot be suspended to await a
+Promise (returning one throws a `TypeError`). To load module sources
+asynchronously (e.g. over `https://`), use the **fetch-and-retry** pattern:
+throw from `load` on a cache miss, fetch the missing module on the host, and
+re-run the eval. Modules already loaded by the runtime are cached and not
+re-requested, so each attempt makes progress one module deeper into the
+dependency graph:
+
+```typescript
+const cache = new Map<string, string>();
+let missing: string | null = null;
+
+using vm = await QuickJS.create({
+  wasm: wasmBytes,
+  moduleLoader: {
+    load: (name) => {
+      const src = cache.get(name);
+      if (src === undefined) {
+        missing = name;
+        throw new Error(`module not cached: ${name}`);
+      }
+      return src;
+    },
+  },
+});
+
+async function evalModule(code: string, filename: string) {
+  while (true) {
+    missing = null;
+    try {
+      return vm.evalCode(code, filename, EvalFlags.TYPE_MODULE);
+    } catch (err) {
+      if (missing === null) throw err; // a real error, not a cache miss
+      const response = await fetch(new URL(missing, 'https://example.com/'));
+      if (!response.ok) throw new Error(`failed to fetch ${missing}`);
+      cache.set(missing, await response.text());
+    }
+  }
+}
+
+using promise = await evalModule(`import { x } from 'mod.js'; export { x };`, '<entry>');
+vm.executePendingJobs();
+const result = await vm.resolvePromise(promise);
+```
+
+Alternatively, pre-fetch all module sources up front and serve them from the
+cache directly.
+
 ### Error Handling
 
 ```typescript
@@ -659,7 +766,7 @@ Plus the `__stack_pointer` WASM global (a single i32).
 
 - **Snapshot size**: Snapshots capture the entire WASM linear memory (~256 KB baseline, grows with heap). Use `serializeSnapshot()` to get a binary buffer, then apply your own compression (gzip/zstd) — the memory compresses very well due to large zero regions.
 - **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
-- **ES Modules**: Only script-mode eval is supported. `import`/`export` and module loaders are not yet wired through.
+- **ES Modules**: Supported via `EvalFlags.TYPE_MODULE` and the `moduleLoader` option (see [ES Modules](#es-modules)). Dynamic `import()` resolves through the same loader.
 - **Extension ABI**: Native WASM extensions use an experimental dynamic linking ABI that is [not yet stabilized](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md). All extensions must be compiled with the same wasi-sdk version as the main module. See [EXTENSIONS.md](./EXTENSIONS.md) for details.
 
 ### Browser Usage
