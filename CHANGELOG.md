@@ -1,5 +1,49 @@
 # quickjs-wasi
 
+## 3.1.0
+
+### Minor Changes
+
+- [#23](https://github.com/vercel-labs/quickjs-wasi/pull/23) [`dc6d537`](https://github.com/vercel-labs/quickjs-wasi/commit/dc6d537df0d2a3cc0738e60838051b5b32adb6f5) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Module evaluation now resolves to the module namespace object (its exports).
+
+  Previously, evaluating code with `EvalFlags.TYPE_MODULE` (via `evalCode()` or
+  `evalBytecode()`) returned a promise that resolved to `undefined`, making it
+  impossible to access a module's exports from the host. The evaluation promise
+  is now chained so it resolves to the module's namespace object instead —
+  matching quickjs-emscripten's behavior:
+
+  ```typescript
+  using promise = vm.evalCode('export default 42', '<eval>', EvalFlags.TYPE_MODULE);
+  vm.executePendingJobs();
+  const result = await vm.resolvePromise(promise);
+  if ('value' in result) {
+    result.value.getProp('default').consume(h => h.toNumber()); // 42
+  }
+  ```
+
+  Rejections (a throw during module evaluation) propagate through the returned
+  promise unchanged. Fixes [#22](https://github.com/vercel-labs/quickjs-wasi/issues/22).
+
+### Patch Changes
+
+- [#23](https://github.com/vercel-labs/quickjs-wasi/pull/23) [`dc6d537`](https://github.com/vercel-labs/quickjs-wasi/commit/dc6d537df0d2a3cc0738e60838051b5b32adb6f5) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Improve module loader error handling:
+
+  - Errors thrown by `moduleLoader.load` / `moduleLoader.normalize` now propagate
+    to the guest with their real message instead of being swallowed and replaced
+    by a generic `could not load module` error.
+  - Returning a Promise (an `async` callback) from `load` or `normalize` now
+    throws a clear `TypeError` explaining that the callbacks must be synchronous,
+    instead of coercing the Promise to source text and failing with a confusing
+    `SyntaxError`. For async module sources (e.g. loading over `https://`), see
+    the fetch-and-retry pattern documented in the README's "ES Modules" section.
+
+- [#19](https://github.com/vercel-labs/quickjs-wasi/pull/19) [`aee7b81`](https://github.com/vercel-labs/quickjs-wasi/commit/aee7b8102aeaf1f8a1c830a68a92f9ae3a16bfdd) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Resolve Dependabot security advisories by updating dev/demo dependencies and
+  adding pnpm `overrides` for transitive packages pinned to vulnerable versions.
+  Also move the repo-only pnpm configuration (`overrides`, `onlyBuiltDependencies`)
+  out of `package.json` and into `pnpm-workspace.yaml` so it is no longer included
+  in the published package. The published artifact has no JS dependencies, so this
+  does not affect consumers at runtime.
+
 ## 3.0.2
 
 ### Patch Changes
