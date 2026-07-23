@@ -105,8 +105,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       react-inspector:
-        specifier: https://github.com/user-attachments/files/26424093/package.tgz
-        version: https://github.com/user-attachments/files/26424093/package.tgz(react@19.2.7)
+        specifier: file:./vendor/react-inspector-8.1.0.tgz
+        version: file:examples/browser/vendor/react-inspector-8.1.0.tgz(react@19.2.7)
       shadcn:
         specifier: ^4.11.0
         version: 4.11.0(typescript@5.9.3)
@@ -2808,9 +2808,9 @@ packages:
     peerDependencies:
       react: ^19.2.7
 
-  react-inspector@https://github.com/user-attachments/files/26424093/package.tgz:
-    resolution: {tarball: https://github.com/user-attachments/files/26424093/package.tgz}
-    version: 8.0.0
+  react-inspector@file:examples/browser/vendor/react-inspector-8.1.0.tgz:
+    resolution: {integrity: sha512-Gko99Vh6VA40BsfBsOkkNn/x9OQnsdYOI4jh56L6w6JuARqjB1iG8NzVYW0f8Qo3LiyE9s4djipLSBtwcI1dqg==, tarball: file:examples/browser/vendor/react-inspector-8.1.0.tgz}
+    version: 8.1.0
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
 
@@ -5843,7 +5843,7 @@ snapshots:
       react: 19.2.7
       scheduler: 0.27.0
 
-  react-inspector@https://github.com/user-attachments/files/26424093/package.tgz(react@19.2.7):
+  react-inspector@file:examples/browser/vendor/react-inspector-8.1.0.tgz(react@19.2.7):
     dependencies:
       react: 19.2.7
 

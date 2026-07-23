@@ -29,6 +29,28 @@ export interface JSPropertyDescriptor {
   configurable?: boolean;
 }
 
+/**
+ * An own-property descriptor returned by
+ * {@link JSValueHandle.getOwnPropertyDescriptor}. Mirrors the result of
+ * `Object.getOwnPropertyDescriptor()`: a data property carries `value` +
+ * `writable`, an accessor property carries `get` + `set`.
+ *
+ * The `value`/`get`/`set` handles are owned by the caller and must be
+ * disposed.
+ */
+export interface JSOwnPropertyDescriptor {
+  /** Present for data properties. Caller must dispose. */
+  value?: JSValueHandle;
+  /** Present for accessor properties (may be an `undefined` handle). Caller must dispose. */
+  get?: JSValueHandle;
+  /** Present for accessor properties (may be an `undefined` handle). Caller must dispose. */
+  set?: JSValueHandle;
+  /** Present for data properties. */
+  writable?: boolean;
+  enumerable: boolean;
+  configurable: boolean;
+}
+
 export type { WasiOptions };
 export type { ExtensionDescriptor, LoadedExtension, DylinkInfo, WasiImports } from './extensions.js';
 
@@ -347,6 +369,20 @@ interface QuickJSExports {
   qjs_is_array_buffer(valPtr: number): number;
   qjs_get_bool(valPtr: number): number;
 
+  // Brand checks (engine-level, trap-free)
+  qjs_is_proxy(valPtr: number): number;
+  qjs_is_map(valPtr: number): number;
+  qjs_is_set(valPtr: number): number;
+  qjs_is_date(valPtr: number): number;
+  qjs_is_regexp(valPtr: number): number;
+  qjs_is_weak_ref(valPtr: number): number;
+  qjs_is_weak_map(valPtr: number): number;
+  qjs_is_weak_set(valPtr: number): number;
+  qjs_is_data_view(valPtr: number): number;
+  qjs_get_class_id(valPtr: number): number;
+  qjs_get_proxy_target(valPtr: number): number;
+  qjs_get_proxy_handler(valPtr: number): number;
+
   // Symbol
   qjs_new_symbol(descPtr: number, descLen: number, isGlobal: number): number;
   qjs_get_symbol_description(valPtr: number, descOutPtr: number): number;
@@ -375,6 +411,8 @@ interface QuickJSExports {
   qjs_set_prop_uint32(objPtr: number, idx: number, valPtr: number): number;
   qjs_get_own_property_names(objPtr: number): number;
   qjs_get_own_property_names_all(objPtr: number): number;
+  qjs_get_own_property_keys(objPtr: number): number;
+  qjs_get_own_property_descriptor(objPtr: number, keyPtr: number): number;
   qjs_has_own_property(objPtr: number, namePtr: number): number;
   qjs_property_is_enumerable(objPtr: number, namePtr: number): number;
   qjs_get_prototype_of(objPtr: number): number;
@@ -2213,6 +2251,84 @@ export class JSValueHandle {
     return this.vm._getExports().qjs_is_array_buffer(this.ptr) !== 0;
   }
 
+  /**
+   * Whether this value is a Proxy exotic object.
+   *
+   * This is an engine-level check: it never fires proxy traps and cannot
+   * be determined (or spoofed) from within guest JavaScript. Use
+   * {@link getProxyTarget} / {@link getProxyHandler} to introspect a
+   * detected proxy without executing guest code.
+   */
+  get isProxy(): boolean {
+    return this.vm._getExports().qjs_is_proxy(this.ptr) !== 0;
+  }
+
+  /**
+   * Whether this value is a Map (engine brand check — trap-free,
+   * spoof-proof, and unaffected by prototype/constructor mutation).
+   * A Proxy wrapping a Map returns false.
+   */
+  get isMap(): boolean {
+    return this.vm._getExports().qjs_is_map(this.ptr) !== 0;
+  }
+
+  /**
+   * Whether this value is a Set (engine brand check — trap-free,
+   * spoof-proof, and unaffected by prototype/constructor mutation).
+   * A Proxy wrapping a Set returns false.
+   */
+  get isSet(): boolean {
+    return this.vm._getExports().qjs_is_set(this.ptr) !== 0;
+  }
+
+  /**
+   * Whether this value is a Date (engine brand check — trap-free,
+   * spoof-proof, and unaffected by prototype/constructor mutation).
+   * A Proxy wrapping a Date returns false.
+   */
+  get isDate(): boolean {
+    return this.vm._getExports().qjs_is_date(this.ptr) !== 0;
+  }
+
+  /**
+   * Whether this value is a RegExp (engine brand check — trap-free,
+   * spoof-proof, and unaffected by prototype/constructor mutation).
+   * A Proxy wrapping a RegExp returns false.
+   */
+  get isRegExp(): boolean {
+    return this.vm._getExports().qjs_is_regexp(this.ptr) !== 0;
+  }
+
+  /** Whether this value is a WeakRef (engine brand check). */
+  get isWeakRef(): boolean {
+    return this.vm._getExports().qjs_is_weak_ref(this.ptr) !== 0;
+  }
+
+  /** Whether this value is a WeakMap (engine brand check). */
+  get isWeakMap(): boolean {
+    return this.vm._getExports().qjs_is_weak_map(this.ptr) !== 0;
+  }
+
+  /** Whether this value is a WeakSet (engine brand check). */
+  get isWeakSet(): boolean {
+    return this.vm._getExports().qjs_is_weak_set(this.ptr) !== 0;
+  }
+
+  /** Whether this value is a DataView (engine brand check). */
+  get isDataView(): boolean {
+    return this.vm._getExports().qjs_is_data_view(this.ptr) !== 0;
+  }
+
+  /**
+   * The internal QuickJS class ID of this value, or 0 for non-objects.
+   * Useful as a generic engine-level brand when no dedicated `is*`
+   * getter exists. Class IDs are stable within a VM instance but are an
+   * engine implementation detail — prefer the dedicated getters.
+   */
+  get classId(): number {
+    return this.vm._getExports().qjs_get_class_id(this.ptr);
+  }
+
   get promiseState(): number {
     return this.vm._getExports().qjs_promise_state(this.ptr);
   }
@@ -2307,6 +2423,93 @@ export class JSValueHandle {
   }
 
   /**
+   * Get ALL own property keys — strings and symbols, including
+   * non-enumerable (equivalent to Reflect.ownKeys()).
+   *
+   * String keys are returned as strings; symbol keys are returned as
+   * JSValueHandles which the caller must dispose.
+   *
+   * Trap-free for ordinary objects; fires the `ownKeys` trap for a
+   * Proxy (check {@link isProxy} first if that matters).
+   */
+  getOwnPropertyKeys(): Array<string | JSValueHandle> {
+    const e = this.vm._getExports();
+    const keysPtr = e.qjs_get_own_property_keys(this.ptr);
+    const keysHandle = new JSValueHandle(this.vm, keysPtr);
+    if (e.qjs_is_exception(keysHandle.ptr) !== 0) {
+      keysHandle.dispose();
+      return [];
+    }
+    const lenHandle = keysHandle.getProp('length');
+    const len = e.qjs_get_float64(lenHandle.ptr);
+    lenHandle.dispose();
+    const result: Array<string | JSValueHandle> = [];
+    for (let i = 0; i < len; i++) {
+      const keyPtr = e.qjs_get_prop_uint32(keysHandle.ptr, i);
+      const keyHandle = new JSValueHandle(this.vm, keyPtr);
+      if (keyHandle.isSymbol) {
+        result.push(keyHandle);
+      } else {
+        result.push(keyHandle.toString());
+        keyHandle.dispose();
+      }
+    }
+    keysHandle.dispose();
+    return result;
+  }
+
+  /**
+   * Get the own property descriptor for a key WITHOUT invoking getters
+   * (equivalent to Object.getOwnPropertyDescriptor()).
+   *
+   * This is the safe way to inspect a property that may be an accessor:
+   * a data property yields `{ value, writable, enumerable, configurable }`,
+   * an accessor property yields `{ get, set, enumerable, configurable }`
+   * where `get`/`set` are handles to the accessor functions themselves
+   * (never invoked). Returns undefined if there is no such own property.
+   *
+   * The `value`/`get`/`set` handles are owned by the caller and must be
+   * disposed.
+   *
+   * Trap-free for ordinary objects; fires the `getOwnPropertyDescriptor`
+   * trap for a Proxy (check {@link isProxy} first if that matters).
+   */
+  getOwnPropertyDescriptor(key: string | JSValueHandle): JSOwnPropertyDescriptor | undefined {
+    const e = this.vm._getExports();
+    let keyHandle: JSValueHandle | undefined;
+    let keyPtr: number;
+    if (typeof key === 'string') {
+      keyHandle = this.vm.newString(key);
+      keyPtr = keyHandle.ptr;
+    } else {
+      keyPtr = key.ptr;
+    }
+    const descPtr = e.qjs_get_own_property_descriptor(this.ptr, keyPtr);
+    keyHandle?.dispose();
+    if (descPtr === 0) return undefined; /* no such own property */
+    using descHandle = new JSValueHandle(this.vm, descPtr);
+    if (e.qjs_is_exception(descHandle.ptr) !== 0) {
+      throw new JSException(this.vm.getException());
+    }
+    const enumerable = descHandle.getProp('enumerable').consume(h => e.qjs_get_bool(h.ptr) !== 0);
+    const configurable = descHandle.getProp('configurable').consume(h => e.qjs_get_bool(h.ptr) !== 0);
+    if (descHandle.hasOwnProperty('value')) {
+      return {
+        value: descHandle.getProp('value'),
+        writable: descHandle.getProp('writable').consume(h => e.qjs_get_bool(h.ptr) !== 0),
+        enumerable,
+        configurable,
+      };
+    }
+    return {
+      get: descHandle.getProp('get'),
+      set: descHandle.getProp('set'),
+      enumerable,
+      configurable,
+    };
+  }
+
+  /**
    * Check if a property is an own property (equivalent to Object.prototype.hasOwnProperty).
    */
   hasOwnProperty(name: string): boolean {
@@ -2332,6 +2535,36 @@ export class JSValueHandle {
   getPrototypeOf(): JSValueHandle {
     const protoPtr = this.vm._getExports().qjs_get_prototype_of(this.ptr);
     return new JSValueHandle(this.vm, protoPtr);
+  }
+
+  /**
+   * Get the `[[ProxyTarget]]` of this Proxy without firing any traps.
+   * Throws {@link JSException} if this value is not a Proxy — check
+   * {@link isProxy} first. Note the target may itself be a Proxy.
+   */
+  getProxyTarget(): JSValueHandle {
+    const ptr = this.vm._getExports().qjs_get_proxy_target(this.ptr);
+    const handle = new JSValueHandle(this.vm, ptr);
+    if (this.vm._getExports().qjs_is_exception(handle.ptr) !== 0) {
+      handle.dispose();
+      throw new JSException(this.vm.getException());
+    }
+    return handle;
+  }
+
+  /**
+   * Get the `[[ProxyHandler]]` of this Proxy without firing any traps.
+   * Throws {@link JSException} if this value is not a Proxy — check
+   * {@link isProxy} first.
+   */
+  getProxyHandler(): JSValueHandle {
+    const ptr = this.vm._getExports().qjs_get_proxy_handler(this.ptr);
+    const handle = new JSValueHandle(this.vm, ptr);
+    if (this.vm._getExports().qjs_is_exception(handle.ptr) !== 0) {
+      handle.dispose();
+      throw new JSException(this.vm.getException());
+    }
+    return handle;
   }
 
   /**
