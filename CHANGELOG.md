@@ -1,5 +1,11 @@
 # quickjs-wasi
 
+## 3.2.0
+
+### Minor Changes
+
+- [#24](https://github.com/vercel-labs/quickjs-wasi/pull/24) [`a19f86d`](https://github.com/vercel-labs/quickjs-wasi/commit/a19f86d82e8f787f64b3a07c91150589f3d8bb6e) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add trap-free introspection primitives: `isProxy`, `isMap`, `isSet`, `isDate`, `isRegExp`, `isWeakRef`, `isWeakMap`, `isWeakSet`, `isDataView`, and `classId` brand checks; `getProxyTarget()`/`getProxyHandler()` for trap-free Proxy internals access; `getOwnPropertyKeys()` (Reflect.ownKeys semantics, string + symbol keys); and `getOwnPropertyDescriptor()` which reads property descriptors without invoking getters. All primitives are engine-level checks that never execute guest code and cannot be spoofed by prototype/constructor mutation.
+
 ## 3.1.0
 
 ### Minor Changes
