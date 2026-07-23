@@ -180,19 +180,13 @@ describe('proxy introspection', () => {
     using target = proxy.getProxyTarget();
     using handler = proxy.getProxyHandler();
 
-    using sameTarget = vm.callFunction(
-      vm.evalCode('(a, b) => a === b'),
-      vm.undefined,
-      target,
-      vm.evalCode('globalThis.t')
-    );
+    using isSame = vm.evalCode('(a, b) => a === b');
+    using globalTarget = vm.evalCode('globalThis.t');
+    using globalHandler = vm.evalCode('globalThis.h');
+
+    using sameTarget = vm.callFunction(isSame, vm.undefined, target, globalTarget);
     expect(vm.dump(sameTarget)).toBe(true);
-    using sameHandler = vm.callFunction(
-      vm.evalCode('(a, b) => a === b'),
-      vm.undefined,
-      handler,
-      vm.evalCode('globalThis.h')
-    );
+    using sameHandler = vm.callFunction(isSame, vm.undefined, handler, globalHandler);
     expect(vm.dump(sameHandler)).toBe(true);
   });
 

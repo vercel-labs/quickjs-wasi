@@ -632,11 +632,18 @@ These are singleton handles — do **not** dispose them:
 
 #### Trap-free introspection
 
-These use engine-level (internal class) checks, so they never execute guest
-code — no proxy traps, no getters, no `Symbol.hasInstance` — and cannot be
-spoofed or broken by guest-side prototype/constructor mutation. This makes
-them safe to call on hostile or unknown values (e.g. when rendering an
-inspector UI, or implementing side-effect-free serialization).
+These use engine-level (internal class) checks and cannot be spoofed or
+broken by guest-side prototype/constructor mutation. This makes them safe
+to call on hostile or unknown values (e.g. when rendering an inspector UI,
+or implementing side-effect-free serialization).
+
+The brand checks, `classId`, and `getProxyTarget()`/`getProxyHandler()`
+never execute guest code on **any** value — no proxy traps, no getters, no
+`Symbol.hasInstance`. The two property-inspection helpers
+(`getOwnPropertyKeys()` and `getOwnPropertyDescriptor()`) never invoke
+getters and are guest-code free for ordinary objects, but on a Proxy they
+necessarily fire its `ownKeys`/`getOwnPropertyDescriptor` traps — check
+`isProxy` first if that matters.
 
 | Method / Property | Description |
 |-------------------|-------------|

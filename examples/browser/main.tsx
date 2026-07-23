@@ -232,10 +232,20 @@ const jsValueAccessor: DataAccessor = {
     if (desc.get || desc.set) {
       // Accessor property. react-inspector keys off the truthiness of
       // `get`, so translate a guest `undefined` handle (truthy on the
-      // host!) to host undefined.
+      // host!) to host undefined — and dispose the discarded handle.
+      let get = desc.get;
+      if (get?.isUndefined) {
+        get.dispose();
+        get = undefined;
+      }
+      let set = desc.set;
+      if (set?.isUndefined) {
+        set.dispose();
+        set = undefined;
+      }
       return {
-        get: desc.get && !desc.get.isUndefined ? desc.get : undefined,
-        set: desc.set && !desc.set.isUndefined ? desc.set : undefined,
+        get,
+        set,
         enumerable: desc.enumerable,
         configurable: desc.configurable,
       };
