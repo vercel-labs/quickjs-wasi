@@ -21,7 +21,7 @@
     "quickjs-wasi": "workspace:*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-inspector": "https://github.com/user-attachments/files/26424093/package.tgz",
+    "react-inspector": "file:./vendor/react-inspector-8.1.0.tgz",
     "shadcn": "^4.11.0",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.1",

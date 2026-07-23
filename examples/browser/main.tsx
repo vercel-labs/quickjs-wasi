@@ -4,6 +4,7 @@ import {
   ObjectInspector,
   chromeDark,
   type DataAccessor,
+  type InspectedPropertyDescriptor,
 } from 'react-inspector';
 import {
   QuickJS,
@@ -62,13 +63,20 @@ function getSymbolIterator(vm: QuickJS): JSValueHandle {
   return sym;
 }
 
+// Synthetic property names used to render a Proxy's internals
+// (mirrors Chrome DevTools' presentation) without firing any traps.
+const PROXY_INTERNALS = ['[[Target]]', '[[Handler]]'] as const;
+
 const jsValueAccessor: DataAccessor = {
   typeof(value: unknown): string {
     return (value as JSValueHandle).typeof;
   },
 
   toString(value: unknown): string {
-    return (value as JSValueHandle).toString();
+    const h = value as JSValueHandle;
+    // toString() on a Proxy would fire get/apply traps
+    if (h.isProxy) return 'Proxy';
+    return h.toString();
   },
 
   isNull(value: unknown): boolean {
@@ -80,15 +88,14 @@ const jsValueAccessor: DataAccessor = {
   },
 
   isDate(value: unknown): boolean {
-    const h = value as JSValueHandle;
-    if (!h.isObject) return false;
-    return h.constructorName === 'Date';
+    // Engine brand check: trap-free and unspoofable, unlike the previous
+    // constructorName === 'Date' lookup (which fired getters/traps and
+    // was fooled by `{ constructor: Date }`).
+    return (value as JSValueHandle).isDate;
   },
 
   isRegExp(value: unknown): boolean {
-    const h = value as JSValueHandle;
-    if (!h.isObject) return false;
-    return h.constructorName === 'RegExp';
+    return (value as JSValueHandle).isRegExp;
   },
 
   isIterable(value: unknown): boolean {
@@ -96,6 +103,10 @@ const jsValueAccessor: DataAccessor = {
     if (!h.isObject) return false;
     // Arrays are iterable but react-inspector handles them separately
     if (h.isArray) return false;
+    // Never probe a Proxy — it renders via [[Target]]/[[Handler]] instead
+    if (h.isProxy) return false;
+    // Genuine Map/Set: trust the brand, skip the probing call below
+    if (h.isMap || h.isSet) return true;
     const sym = getSymbolIterator(h.vm);
     const method = h.vm.getProp(h, sym);
     if (!method.isFunction) {
@@ -154,39 +165,107 @@ const jsValueAccessor: DataAccessor = {
   },
 
   length(value: unknown): number {
-    return (value as JSValueHandle).length;
+    const h = value as JSValueHandle;
+    // Reading .length on a Proxy would fire its get trap
+    if (h.isProxy) return 0;
+    return h.length;
   },
 
   getOwnPropertyNames(value: unknown): string[] {
-    return (value as JSValueHandle).getOwnPropertyNames();
+    const h = value as JSValueHandle;
+    // Enumerating a Proxy fires its ownKeys trap; render the internal
+    // slots instead (like DevTools' Proxy view).
+    if (h.isProxy) return [...PROXY_INTERNALS];
+    return h.getOwnPropertyNames();
   },
 
   keys(value: unknown): string[] {
-    return (value as JSValueHandle).keys();
+    const h = value as JSValueHandle;
+    if (h.isProxy) return [...PROXY_INTERNALS];
+    return h.keys();
   },
 
   hasOwnProperty(value: unknown, prop: string): boolean {
-    return (value as JSValueHandle).hasOwnProperty(prop);
+    const h = value as JSValueHandle;
+    if (h.isProxy) return (PROXY_INTERNALS as readonly string[]).includes(prop);
+    return h.hasOwnProperty(prop);
   },
 
   propertyIsEnumerable(value: unknown, prop: string): boolean {
-    return (value as JSValueHandle).propertyIsEnumerable(prop);
+    const h = value as JSValueHandle;
+    if (h.isProxy) return (PROXY_INTERNALS as readonly string[]).includes(prop);
+    return h.propertyIsEnumerable(prop);
   },
 
   getProperty(value: unknown, prop: string): unknown {
-    return (value as JSValueHandle).getProp(prop);
+    const h = value as JSValueHandle;
+    if (h.isProxy) {
+      // Trap-free engine access to the proxy's internal slots
+      if (prop === '[[Target]]') return h.getProxyTarget();
+      if (prop === '[[Handler]]') return h.getProxyHandler();
+      return h.vm.getUndefined();
+    }
+    return h.getProp(prop);
+  },
+
+  getOwnPropertyDescriptor(value: unknown, prop: string): InspectedPropertyDescriptor | undefined {
+    const h = value as JSValueHandle;
+    if (h.isProxy) {
+      // The synthetic [[Target]]/[[Handler]] rows are plain data —
+      // resolved through engine internals, no traps fired.
+      if (prop === '[[Target]]') {
+        return { value: h.getProxyTarget(), enumerable: true, configurable: false };
+      }
+      if (prop === '[[Handler]]') {
+        return { value: h.getProxyHandler(), enumerable: true, configurable: false };
+      }
+      return undefined;
+    }
+    let desc;
+    try {
+      // Engine-level descriptor read: never invokes getters
+      desc = h.getOwnPropertyDescriptor(prop);
+    } catch {
+      return undefined; // fall back to getProperty
+    }
+    if (!desc) return undefined;
+    if (desc.get || desc.set) {
+      // Accessor property. react-inspector keys off the truthiness of
+      // `get`, so translate a guest `undefined` handle (truthy on the
+      // host!) to host undefined.
+      return {
+        get: desc.get && !desc.get.isUndefined ? desc.get : undefined,
+        set: desc.set && !desc.set.isUndefined ? desc.set : undefined,
+        enumerable: desc.enumerable,
+        configurable: desc.configurable,
+      };
+    }
+    return {
+      value: desc.value,
+      writable: desc.writable,
+      enumerable: desc.enumerable,
+      configurable: desc.configurable,
+    };
   },
 
   getPrototypeOf(value: unknown): unknown {
-    return (value as JSValueHandle).getPrototypeOf();
+    const h = value as JSValueHandle;
+    // Object.getPrototypeOf on a Proxy fires its getPrototypeOf trap
+    if (h.isProxy) return h.vm.getNull();
+    return h.getPrototypeOf();
   },
 
   getConstructorName(value: unknown): string | undefined {
-    return (value as JSValueHandle).constructorName;
+    const h = value as JSValueHandle;
+    // Reading .constructor.name on a Proxy would fire its get trap
+    if (h.isProxy) return 'Proxy';
+    return h.constructorName;
   },
 
   getFunctionName(value: unknown): string {
     const h = value as JSValueHandle;
+    // Reading .name on a proxied function would fire its get trap
+    if (h.isProxy) return '';
     const name = h.getProp('name');
     const result = name.isUndefined ? '' : name.toString();
     name.dispose();

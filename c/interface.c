@@ -789,6 +789,91 @@ int qjs_is_big_int(JSValue *val) {
     return JS_IsBigInt(*val);
 }
 
+/* ---- Brand checks (engine-level, trap-free) ----
+ *
+ * These inspect the internal class of a value directly, so they:
+ *   - never execute guest code (no Symbol.hasInstance, no proxy traps,
+ *     no prototype-chain walks), and
+ *   - cannot be spoofed by reassigning constructors/prototypes.
+ *
+ * Note that a Proxy wrapping a Map/Set/Date/etc. is NOT that brand:
+ * use qjs_is_proxy + qjs_get_proxy_target to unwrap first.
+ */
+
+__attribute__((export_name("qjs_is_proxy")))
+int qjs_is_proxy(JSValue *val) {
+    return JS_IsProxy(*val);
+}
+
+__attribute__((export_name("qjs_is_map")))
+int qjs_is_map(JSValue *val) {
+    return JS_IsMap(*val);
+}
+
+__attribute__((export_name("qjs_is_set")))
+int qjs_is_set(JSValue *val) {
+    return JS_IsSet(*val);
+}
+
+__attribute__((export_name("qjs_is_date")))
+int qjs_is_date(JSValue *val) {
+    return JS_IsDate(*val);
+}
+
+__attribute__((export_name("qjs_is_regexp")))
+int qjs_is_regexp(JSValue *val) {
+    return JS_IsRegExp(*val);
+}
+
+__attribute__((export_name("qjs_is_weak_ref")))
+int qjs_is_weak_ref(JSValue *val) {
+    return JS_IsWeakRef(*val);
+}
+
+__attribute__((export_name("qjs_is_weak_map")))
+int qjs_is_weak_map(JSValue *val) {
+    return JS_IsWeakMap(*val);
+}
+
+__attribute__((export_name("qjs_is_weak_set")))
+int qjs_is_weak_set(JSValue *val) {
+    return JS_IsWeakSet(*val);
+}
+
+__attribute__((export_name("qjs_is_data_view")))
+int qjs_is_data_view(JSValue *val) {
+    return JS_IsDataView(*val);
+}
+
+/*
+ * Get the internal JSClassID of a value.
+ * Returns 0 (JS_INVALID_CLASS_ID) for non-objects.
+ */
+__attribute__((export_name("qjs_get_class_id")))
+int qjs_get_class_id(JSValue *val) {
+    return (int)JS_GetClassID(*val);
+}
+
+/*
+ * Get the [[ProxyTarget]] of a Proxy, without firing any traps.
+ * Returns a heap-allocated JSValue*, or JS_EXCEPTION if the value
+ * is not a Proxy.
+ */
+__attribute__((export_name("qjs_get_proxy_target")))
+JSValue *qjs_get_proxy_target(JSValue *val) {
+    return jsvalue_to_heap(JS_GetProxyTarget(ctx, *val));
+}
+
+/*
+ * Get the [[ProxyHandler]] of a Proxy, without firing any traps.
+ * Returns a heap-allocated JSValue*, or JS_EXCEPTION if the value
+ * is not a Proxy.
+ */
+__attribute__((export_name("qjs_get_proxy_handler")))
+JSValue *qjs_get_proxy_handler(JSValue *val) {
+    return jsvalue_to_heap(JS_GetProxyHandler(ctx, *val));
+}
+
 __attribute__((export_name("qjs_get_bool")))
 int qjs_get_bool(JSValue *val) {
     return JS_ToBool(ctx, *val);
@@ -1054,6 +1139,84 @@ JSValue *qjs_get_own_property_names_all(JSValue *obj) {
 
     JS_FreePropertyEnum(ctx, tab, len);
     return jsvalue_to_heap(arr);
+}
+
+/*
+ * Get ALL own property keys — strings AND symbols, including
+ * non-enumerable — as a QuickJS Array (Reflect.ownKeys semantics).
+ * String keys are returned as strings, symbol keys as symbols.
+ * Returns a heap-allocated JSValue* pointing to the array, or
+ * JS_EXCEPTION on failure.
+ *
+ * For ordinary objects this is trap-free; for a Proxy it fires the
+ * ownKeys trap (check qjs_is_proxy first if that matters).
+ */
+__attribute__((export_name("qjs_get_own_property_keys")))
+JSValue *qjs_get_own_property_keys(JSValue *obj) {
+    JSPropertyEnum *tab;
+    uint32_t len;
+    int flags = JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK;
+
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, *obj, flags) < 0) {
+        return jsvalue_to_heap(JS_EXCEPTION);
+    }
+
+    JSValue arr = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue key = JS_AtomToValue(ctx, tab[i].atom);
+        JS_SetPropertyUint32(ctx, arr, i, key);
+    }
+
+    JS_FreePropertyEnum(ctx, tab, len);
+    return jsvalue_to_heap(arr);
+}
+
+/*
+ * Get the own property descriptor for a key (string or symbol JSValue)
+ * WITHOUT invoking getters (Object.getOwnPropertyDescriptor semantics,
+ * but performed engine-side so no guest code can intercept it on
+ * ordinary objects).
+ *
+ * Returns a heap-allocated JSValue* pointing to a fresh plain object:
+ *   data property:     { value, writable, enumerable, configurable }
+ *   accessor property: { get, set, enumerable, configurable }
+ * Returns NULL if the object has no such own property, or JS_EXCEPTION
+ * on error.
+ *
+ * For a Proxy this fires the getOwnPropertyDescriptor trap (check
+ * qjs_is_proxy first if that matters).
+ */
+__attribute__((export_name("qjs_get_own_property_descriptor")))
+JSValue *qjs_get_own_property_descriptor(JSValue *obj, JSValue *key) {
+    JSAtom atom = JS_ValueToAtom(ctx, *key);
+    if (atom == JS_ATOM_NULL) return jsvalue_to_heap(JS_EXCEPTION);
+
+    JSPropertyDescriptor desc;
+    int ret = JS_GetOwnProperty(ctx, &desc, *obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (ret < 0) return jsvalue_to_heap(JS_EXCEPTION);
+    if (ret == 0) return NULL; /* no such own property */
+
+    JSValue result = JS_NewObject(ctx);
+    if (desc.flags & JS_PROP_GETSET) {
+        /* Accessor property: transfer getter/setter ownership to result */
+        JS_DefinePropertyValueStr(ctx, result, "get", desc.getter, JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, result, "set", desc.setter, JS_PROP_C_W_E);
+        JS_FreeValue(ctx, desc.value);
+    } else {
+        /* Data property: transfer value ownership to result */
+        JS_DefinePropertyValueStr(ctx, result, "value", desc.value, JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, result, "writable",
+                                  JS_NewBool(ctx, (desc.flags & JS_PROP_WRITABLE) != 0),
+                                  JS_PROP_C_W_E);
+    }
+    JS_DefinePropertyValueStr(ctx, result, "enumerable",
+                              JS_NewBool(ctx, (desc.flags & JS_PROP_ENUMERABLE) != 0),
+                              JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, result, "configurable",
+                              JS_NewBool(ctx, (desc.flags & JS_PROP_CONFIGURABLE) != 0),
+                              JS_PROP_C_W_E);
+    return jsvalue_to_heap(result);
 }
 
 /*

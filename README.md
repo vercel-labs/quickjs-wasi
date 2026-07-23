@@ -630,6 +630,27 @@ These are singleton handles — do **not** dispose them:
 | `handle.dispose()` | Free the handle |
 | `handle[Symbol.dispose]()` | Same as `dispose()` — enables `using handle = ...` |
 
+#### Trap-free introspection
+
+These use engine-level (internal class) checks, so they never execute guest
+code — no proxy traps, no getters, no `Symbol.hasInstance` — and cannot be
+spoofed or broken by guest-side prototype/constructor mutation. This makes
+them safe to call on hostile or unknown values (e.g. when rendering an
+inspector UI, or implementing side-effect-free serialization).
+
+| Method / Property | Description |
+|-------------------|-------------|
+| `handle.isProxy` | `true` if this is a Proxy exotic object (undetectable from within JS) |
+| `handle.isMap` / `handle.isSet` | Engine brand checks (a Proxy wrapping a Map is **not** a Map) |
+| `handle.isDate` / `handle.isRegExp` | Engine brand checks |
+| `handle.isWeakRef` / `handle.isWeakMap` / `handle.isWeakSet` | Engine brand checks |
+| `handle.isDataView` | Engine brand check |
+| `handle.classId` | Internal QuickJS class ID (`0` for non-objects) |
+| `handle.getProxyTarget()` | The `[[ProxyTarget]]` of a Proxy, without firing traps |
+| `handle.getProxyHandler()` | The `[[ProxyHandler]]` of a Proxy, without firing traps |
+| `handle.getOwnPropertyKeys()` | All own keys (strings **and** symbols, incl. non-enumerable), à la `Reflect.ownKeys()` |
+| `handle.getOwnPropertyDescriptor(key)` | Own property descriptor **without invoking getters**; accessor properties yield `get`/`set` handles |
+
 ### `Deferred` (from `vm.newPromise()`)
 
 | Property / Method | Description |
