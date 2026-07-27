@@ -657,6 +657,9 @@ necessarily fire its `ownKeys`/`getOwnPropertyDescriptor` traps — check
 | `handle.getProxyHandler()` | The `[[ProxyHandler]]` of a Proxy, without firing traps |
 | `handle.getOwnPropertyKeys()` | All own keys (strings **and** symbols, incl. non-enumerable), à la `Reflect.ownKeys()` |
 | `handle.getOwnPropertyDescriptor(key)` | Own property descriptor **without invoking getters**; accessor properties yield `get`/`set` handles |
+| `handle.identity` | Numeric identity of the underlying heap value (`0` for non-heap values) — key a `Map` on this to deduplicate or detect cycles across handles |
+| `handle.toBoolean()` | Extract as a `boolean`, applying JavaScript truthiness |
+| `vm.construct(ctor, ...args)` | Invoke a constructor with `new` — the counterpart to `callFunction` for building values in the VM from the host |
 
 ### `Deferred` (from `vm.newPromise()`)
 

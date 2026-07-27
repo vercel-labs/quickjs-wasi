@@ -1,0 +1,539 @@
+/**
+ * Proof-of-concept: devalue serialization that runs entirely on the host,
+ * operating on `JSValueHandle`s instead of on guest values.
+ *
+ * This is the architecture that lets a serialization layer live *outside*
+ * the WASM VM (matching how it works for `node:vm`, where the serializer is
+ * host code reaching into the sandbox realm) rather than being bundled into
+ * the guest.
+ *
+ * Two halves, mirroring devalue's two pluggable operation sets:
+ *
+ * - `stringifyOperations` reads a handle without executing guest code:
+ *   engine-level brand checks for classification, boot-captured intrinsics
+ *   for extraction, and descriptor reads instead of `[[Get]]`.
+ * - `parseOperations` builds values inside the VM through boot-captured
+ *   factories, returning a handle the guest can use directly.
+ *
+ * "Boot-captured" means the intrinsics and factories are taken from the VM
+ * before any user code runs, and are held only on the host — so patching
+ * `Date.prototype.toISOString` (or anything else) inside the VM afterwards
+ * cannot influence serialization.
+ */
+
+import {
+  defaultStringifyOperations,
+  type ParseOperations,
+  type StringifyOperations,
+} from 'devalue';
+import { QuickJS, type JSValueHandle } from '../src/index.ts';
+
+/** Tags devalue classifies values by, keyed on QuickJS class id. */
+const BRANDED_SAMPLES = `({
+  Number: new Number(0),
+  String: new String(''),
+  Boolean: new Boolean(false),
+  BigInt: Object(0n),
+  Date: new Date(0),
+  RegExp: /x/,
+  Array: [],
+  Set: new Set(),
+  Map: new Map(),
+  ArrayBuffer: new ArrayBuffer(0),
+  DataView: new DataView(new ArrayBuffer(0)),
+  Int8Array: new Int8Array(0),
+  Uint8Array: new Uint8Array(0),
+  Uint8ClampedArray: new Uint8ClampedArray(0),
+  Int16Array: new Int16Array(0),
+  Uint16Array: new Uint16Array(0),
+  Int32Array: new Int32Array(0),
+  Uint32Array: new Uint32Array(0),
+  Float32Array: new Float32Array(0),
+  Float64Array: new Float64Array(0),
+  BigInt64Array: new BigInt64Array(0),
+  BigUint64Array: new BigUint64Array(0),
+})`;
+
+/**
+ * Everything the host needs from the guest realm, captured once at boot.
+ *
+ * Accessors are captured as functions and invoked with an explicit receiver
+ * via `vm.callFunction`, so no property lookup happens on the value being
+ * serialized.
+ */
+const CAPTURE_INTRINSICS = `(() => {
+  const descriptor = (object, key) =>
+    Object.getOwnPropertyDescriptor(object, key);
+  const getter = (object, key) => descriptor(object, key).get;
+  const TypedArray = Object.getPrototypeOf(Int8Array.prototype);
+
+  return {
+    // --- reading (stringify) ---
+    dateGetTime: Date.prototype.getTime,
+    dateToISOString: Date.prototype.toISOString,
+    regExpSource: getter(RegExp.prototype, 'source'),
+    regExpFlags: getter(RegExp.prototype, 'flags'),
+    numberValueOf: Number.prototype.valueOf,
+    stringValueOf: String.prototype.valueOf,
+    booleanValueOf: Boolean.prototype.valueOf,
+    bigIntValueOf: BigInt.prototype.valueOf,
+    setForEach: Set.prototype.forEach,
+    mapForEach: Map.prototype.forEach,
+    viewBuffer: getter(TypedArray, 'buffer'),
+    viewByteOffset: getter(TypedArray, 'byteOffset'),
+    viewByteLength: getter(TypedArray, 'byteLength'),
+    viewLength: getter(TypedArray, 'length'),
+    dataViewBuffer: getter(DataView.prototype, 'buffer'),
+    dataViewByteOffset: getter(DataView.prototype, 'byteOffset'),
+    dataViewByteLength: getter(DataView.prototype, 'byteLength'),
+    arrayBufferByteLength: getter(ArrayBuffer.prototype, 'byteLength'),
+    objectPrototype: Object.prototype,
+
+    // --- building (parse) ---
+    // Real constructors, invoked from the host with \`vm.construct()\`.
+    Date,
+    RegExp,
+    Set,
+    Map,
+    Array,
+    Object,
+    Int8Array,
+    Uint8Array,
+    Uint8ClampedArray,
+    Int16Array,
+    Uint16Array,
+    Int32Array,
+    Uint32Array,
+    Float32Array,
+    Float64Array,
+    BigInt64Array,
+    BigUint64Array,
+    DataView,
+    // Captured methods, invoked with an explicit receiver.
+    setAdd: Set.prototype.add,
+    mapSet: Map.prototype.set,
+    objectCreate: Object.create,
+    // \`defineProperty\` is used for assignment so that a poisoned setter
+    // inherited from a prototype cannot intercept it.
+    defineProperty: Object.defineProperty,
+    // The sparse-array dance has no host-callable equivalent: it needs a
+    // real \`delete\` and a \`length\` assignment.
+    makeSparseArray: (length) => {
+      const array = [];
+      // force dictionary-elements mode before declaring a large length, so an
+      // untrusted length cannot trigger a huge contiguous allocation
+      array[4294967294] = undefined;
+      delete array[4294967294];
+      array.length = length;
+      return array;
+    },
+  };
+})()`;
+
+export interface DevalueOperations {
+  stringifyOperations: Partial<StringifyOperations>;
+  parseOperations: Partial<ParseOperations>;
+  dispose(): void;
+}
+
+/**
+ * Build host-side devalue operations for a VM. Call immediately after
+ * `QuickJS.create()`, before evaluating any user code.
+ */
+export function createDevalueOperations(vm: QuickJS): DevalueOperations {
+  const disposables: JSValueHandle[] = [];
+
+  /** Capture a guest value and keep it alive for the lifetime of the ops. */
+  const keep = (handle: JSValueHandle): JSValueHandle => {
+    disposables.push(handle);
+    return handle;
+  };
+
+  // --- boot-time capture -------------------------------------------------
+
+  const tagByClassId = new Map<number, string>();
+  {
+    using samples = vm.evalCode(BRANDED_SAMPLES);
+    for (const tag of samples.getOwnPropertyNames()) {
+      using sample = samples.getProp(tag);
+      tagByClassId.set(sample.classId, tag);
+    }
+  }
+
+  const intrinsics = keep(vm.evalCode(CAPTURE_INTRINSICS));
+  const at = (name: string) => keep(intrinsics.getProp(name));
+
+  const i = {
+    dateGetTime: at('dateGetTime'),
+    dateToISOString: at('dateToISOString'),
+    regExpSource: at('regExpSource'),
+    regExpFlags: at('regExpFlags'),
+    numberValueOf: at('numberValueOf'),
+    stringValueOf: at('stringValueOf'),
+    booleanValueOf: at('booleanValueOf'),
+    bigIntValueOf: at('bigIntValueOf'),
+    setForEach: at('setForEach'),
+    mapForEach: at('mapForEach'),
+    viewBuffer: at('viewBuffer'),
+    viewByteOffset: at('viewByteOffset'),
+    viewByteLength: at('viewByteLength'),
+    viewLength: at('viewLength'),
+    dataViewBuffer: at('dataViewBuffer'),
+    dataViewByteOffset: at('dataViewByteOffset'),
+    dataViewByteLength: at('dataViewByteLength'),
+    arrayBufferByteLength: at('arrayBufferByteLength'),
+    objectPrototype: at('objectPrototype'),
+    Date: at('Date'),
+    RegExp: at('RegExp'),
+    Set: at('Set'),
+    Map: at('Map'),
+    Array: at('Array'),
+    Object: at('Object'),
+    DataView: at('DataView'),
+    setAdd: at('setAdd'),
+    mapSet: at('mapSet'),
+    objectCreate: at('objectCreate'),
+    defineProperty: at('defineProperty'),
+    makeSparseArray: at('makeSparseArray'),
+  };
+
+  /** Typed-array constructors, captured by name. */
+  const typedArrayConstructors = new Map<string, JSValueHandle>();
+  for (const name of [
+    'Int8Array',
+    'Uint8Array',
+    'Uint8ClampedArray',
+    'Int16Array',
+    'Uint16Array',
+    'Int32Array',
+    'Uint32Array',
+    'Float32Array',
+    'Float64Array',
+    'BigInt64Array',
+    'BigUint64Array',
+    'DataView',
+  ]) {
+    typedArrayConstructors.set(name, at(name));
+  }
+
+  /** Invoke a captured function with an explicit receiver. */
+  const call = (
+    fn: JSValueHandle,
+    thisValue: JSValueHandle,
+    ...args: JSValueHandle[]
+  ): JSValueHandle => vm.callFunction(fn, thisValue, ...args);
+
+  /** Invoke a captured free function (no receiver). */
+  const invoke = (fn: JSValueHandle, ...args: JSValueHandle[]): JSValueHandle =>
+    vm.callFunction(fn, vm.undefined, ...args);
+
+  /**
+   * Define an own data property. Uses `Object.defineProperty` rather than
+   * assignment so that an inherited setter cannot intercept the write — the
+   * revived value is built exactly as the payload describes it.
+   */
+  const define = (
+    target: JSValueHandle,
+    key: string,
+    value: JSValueHandle
+  ): void => {
+    using descriptor = vm.newObject();
+    descriptor.setProp('value', value);
+    descriptor.setProp('writable', vm.true);
+    descriptor.setProp('enumerable', vm.true);
+    descriptor.setProp('configurable', vm.true);
+    using keyHandle = vm.newString(key);
+    call(i.defineProperty, vm.undefined, target, keyHandle, descriptor).dispose();
+  };
+
+  // --- identity ----------------------------------------------------------
+
+  // Object identities must be unforgeable: devalue compares them against the
+  // keys of *every* value in the payload, including primitives, so returning
+  // the raw pointer (a number) would let a guest number collide with an
+  // object's identity and produce a bogus back-reference. Mapping each
+  // pointer to a unique host object avoids that entirely.
+  const identities = new Map<number, object>();
+  const identityOf = (pointer: number): object => {
+    let identity = identities.get(pointer);
+    if (!identity) {
+      identity = { pointer };
+      identities.set(pointer, identity);
+    }
+    return identity;
+  };
+
+  // --- stringify ---------------------------------------------------------
+
+  const typeOf = (handle: JSValueHandle): ReturnType<StringifyOperations['typeOf']> => {
+    if (handle.isNull) return 'null';
+    return handle.typeof as ReturnType<StringifyOperations['typeOf']>;
+  };
+
+  const primitive = (handle: JSValueHandle) => {
+    if (handle.isUndefined) return undefined;
+    if (handle.isNull) return null;
+    if (handle.isBool) return handle.toBoolean();
+    if (handle.isNumber) return handle.toNumber();
+    if (handle.isBigInt) return handle.toBigInt();
+    return handle.toString();
+  };
+
+  const tag = (handle: JSValueHandle): string => {
+    // A proxy is never one of the branded types; report it as a plain-object
+    // candidate so `objectShape` can reject it without firing traps.
+    if (handle.isProxy) return 'Object';
+    return tagByClassId.get(handle.classId) ?? 'Object';
+  };
+
+  // A single reusable collector: `vm.newFunction` registers host callbacks by
+  // name for the lifetime of the VM (disposing the handle does not
+  // unregister it), so creating one per Set/Map would both collide on the
+  // name and leak. Instead the target is swapped on the host side.
+  let collectorTarget: any[] = [];
+  let collectorArity: 1 | 2 = 1;
+  const collector = keep(
+    vm.newFunction('__devalue_collect', (value, key) => {
+      collectorTarget.push(
+        collectorArity === 1 ? value.dup() : [key.dup(), value.dup()]
+      );
+      return vm.undefined;
+    })
+  );
+
+  /** Collect the elements a Set/Map yields, via captured `forEach`. */
+  const collect = (
+    forEach: JSValueHandle,
+    collection: JSValueHandle,
+    arity: 1 | 2
+  ): any[] => {
+    const collected: any[] = [];
+    const previousTarget = collectorTarget;
+    const previousArity = collectorArity;
+    collectorTarget = collected;
+    collectorArity = arity;
+    try {
+      call(forEach, collection, collector).dispose();
+    } finally {
+      collectorTarget = previousTarget;
+      collectorArity = previousArity;
+    }
+    return collected;
+  };
+
+  const stringifyOperations: Partial<StringifyOperations> = {
+    identify: (handle: JSValueHandle) => {
+      const pointer = handle.identity;
+      // primitives are deduplicated by value, exactly like host devalue
+      if (pointer === 0 || handle.isString) return primitive(handle);
+      return identityOf(pointer);
+    },
+
+    typeOf,
+    primitive,
+    tag,
+
+    isThenable: (handle: JSValueHandle) => handle.isPromise,
+
+    toPromise: async (handle: JSValueHandle) => {
+      const settled = await vm.resolvePromise(handle);
+      if ('error' in settled) throw settled.error;
+      return settled.value;
+    },
+
+    unbox: (handle: JSValueHandle) => {
+      switch (tag(handle)) {
+        case 'Number':
+          return call(i.numberValueOf, handle);
+        case 'String':
+          return call(i.stringValueOf, handle);
+        case 'Boolean':
+          return call(i.booleanValueOf, handle);
+        default:
+          return call(i.bigIntValueOf, handle);
+      }
+    },
+
+    dateISO: (handle: JSValueHandle) => {
+      using time = call(i.dateGetTime, handle);
+      if (Number.isNaN(time.toNumber())) return '';
+      using iso = call(i.dateToISOString, handle);
+      return iso.toString();
+    },
+
+    toStringValue: (handle: JSValueHandle) => handle.toString(),
+
+    regExp: (handle: JSValueHandle) => {
+      using source = call(i.regExpSource, handle);
+      using flags = call(i.regExpFlags, handle);
+      return { source: source.toString(), flags: flags.toString() };
+    },
+
+    setValues: (handle: JSValueHandle) => collect(i.setForEach, handle, 1),
+    mapEntries: (handle: JSValueHandle) => collect(i.mapForEach, handle, 2),
+
+    viewInfo: (handle: JSValueHandle) => {
+      const isDataView = handle.isDataView;
+      const buffer = call(isDataView ? i.dataViewBuffer : i.viewBuffer, handle);
+      using byteOffset = call(
+        isDataView ? i.dataViewByteOffset : i.viewByteOffset,
+        handle
+      );
+      using byteLength = call(
+        isDataView ? i.dataViewByteLength : i.viewByteLength,
+        handle
+      );
+      using bufferByteLength = call(i.arrayBufferByteLength, buffer);
+      const info = {
+        buffer,
+        byteOffset: byteOffset.toNumber(),
+        byteLength: byteLength.toNumber(),
+        bufferByteLength: bufferByteLength.toNumber(),
+        length: 0,
+      };
+      if (!isDataView) {
+        using length = call(i.viewLength, handle);
+        info.length = length.toNumber();
+      }
+      return info;
+    },
+
+    arrayBuffer: (handle: JSValueHandle) => handle.toArrayBuffer(),
+
+    arrayLength: (handle: JSValueHandle) => {
+      const descriptor = handle.getOwnPropertyDescriptor('length');
+      // `length` is an own data property on arrays — no getter runs
+      return descriptor?.value?.consume((h) => h.toNumber()) ?? 0;
+    },
+
+    hasOwn: (handle: JSValueHandle, key: string | number) =>
+      handle.hasOwnProperty(String(key)),
+
+    arrayIndices: (handle: JSValueHandle) =>
+      // `keys()` is own enumerable string keys, in property order — the same
+      // input devalue's default implementation filters
+      defaultStringifyOperations.arrayIndices(
+        Object.fromEntries(handle.keys().map((key) => [key, 0]))
+      ),
+
+    objectShape: (handle: JSValueHandle) => {
+      // A proxy would run trap code for every question asked below.
+      if (handle.isProxy) return { kind: 'not-plain' as const };
+
+      using prototype = handle.getPrototypeOf();
+      const isPlain =
+        prototype.isNull || prototype.identity === i.objectPrototype.identity;
+      if (!isPlain) return { kind: 'not-plain' as const };
+
+      const keys: string[] = [];
+      for (const key of handle.getOwnPropertyKeys()) {
+        if (typeof key !== 'string') {
+          const enumerable = handle
+            .getOwnPropertyDescriptor(key)
+            ?.enumerable;
+          key.dispose();
+          if (enumerable) return { kind: 'symbol-keys' as const };
+          continue;
+        }
+        if (handle.propertyIsEnumerable(key)) keys.push(key);
+      }
+
+      return {
+        kind: prototype.isNull ? ('null-proto' as const) : ('plain' as const),
+        keys,
+      };
+    },
+
+    get: (handle: JSValueHandle, key: string | number) => {
+      const descriptor = handle.getOwnPropertyDescriptor(String(key));
+      if (!descriptor) return vm.undefined;
+      if (descriptor.get) {
+        // Reading through the accessor would execute guest code; a production
+        // implementation would de-opt or report taint here.
+        descriptor.get.dispose();
+        descriptor.set?.dispose();
+        throw new Error(`refusing to invoke getter for "${key}"`);
+      }
+      return descriptor.value ?? vm.undefined;
+    },
+  };
+
+  // --- parse -------------------------------------------------------------
+
+  const parseOperations: Partial<ParseOperations> = {
+    primitive: (value) =>
+      typeof value === 'bigint' ? vm.newBigInt(value) : vm.hostToHandle(value),
+
+    bigint: (text) => vm.newBigInt(BigInt(text)),
+
+    date: (iso) => {
+      // an empty ISO string represents an invalid date
+      using argument = iso === '' ? vm.newNumber(NaN) : vm.newString(iso);
+      return vm.construct(i.Date, argument);
+    },
+
+    regExp: (source, flags) => {
+      using sourceHandle = vm.newString(source);
+      if (!flags) return vm.construct(i.RegExp, sourceHandle);
+      using flagsHandle = vm.newString(flags);
+      return vm.construct(i.RegExp, sourceHandle, flagsHandle);
+    },
+
+    temporal: (type) => {
+      throw new Error(`${type} is not available in this VM`);
+    },
+
+    box: (value: JSValueHandle) => vm.construct(i.Object, value),
+
+    arrayBuffer: (buffer) => vm.newArrayBuffer(buffer),
+
+    view: (type, buffer, byteOffset, length) => {
+      const Constructor = typedArrayConstructors.get(type);
+      if (!Constructor) throw new Error(`${type} is not available in this VM`);
+      if (byteOffset === undefined) return vm.construct(Constructor, buffer);
+      using offsetHandle = vm.newNumber(byteOffset);
+      using lengthHandle = vm.newNumber(length ?? 0);
+      return vm.construct(Constructor, buffer, offsetHandle, lengthHandle);
+    },
+
+    createArray: (length) => {
+      // `new Array(n)` with a single numeric argument creates n holes
+      using lengthHandle = vm.newNumber(length);
+      return vm.construct(i.Array, lengthHandle);
+    },
+
+    createSparseArray: (length) => {
+      using lengthHandle = vm.newNumber(length);
+      return invoke(i.makeSparseArray, lengthHandle);
+    },
+
+    setIndex: (array: JSValueHandle, index, value: JSValueHandle) =>
+      define(array, String(index), value),
+
+    createObject: () => vm.newObject(),
+    createNullPrototypeObject: () =>
+      call(i.objectCreate, vm.undefined, vm.null),
+
+    setProperty: (object: JSValueHandle, key, value: JSValueHandle) =>
+      define(object, key, value),
+
+    createSet: () => vm.construct(i.Set),
+    setAdd: (set: JSValueHandle, value: JSValueHandle) => {
+      call(i.setAdd, set, value).dispose();
+    },
+
+    createMap: () => vm.construct(i.Map),
+    mapSet: (map: JSValueHandle, key: JSValueHandle, value: JSValueHandle) => {
+      call(i.mapSet, map, key, value).dispose();
+    },
+  };
+
+  return {
+    stringifyOperations,
+    parseOperations,
+    dispose() {
+      for (const handle of disposables.reverse()) handle.dispose();
+      disposables.length = 0;
+    },
+  };
+}

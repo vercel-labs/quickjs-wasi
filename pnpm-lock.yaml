@@ -38,6 +38,9 @@ importers:
       degenerator:
         specifier: ^5.0.1
         version: 5.0.1
+      devalue:
+        specifier: file:./vendor/devalue-5.8.2-operations.tgz
+        version: file:vendor/devalue-5.8.2-operations.tgz
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -1821,6 +1824,10 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  devalue@file:vendor/devalue-5.8.2-operations.tgz:
+    resolution: {integrity: sha512-gNBtCkAhhgnfVWywX0tBqtRU6hPHAgd4ek5VSKnR77NNsGUGwMz7JzEEw+4Qrc9XL1cWxlTm8mUKfTQgV9HytA==, tarball: file:vendor/devalue-5.8.2-operations.tgz}
+    version: 5.8.2
 
   diff@8.0.4:
     resolution: {integrity: sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==}
@@ -4898,6 +4905,8 @@ snapshots:
   detect-indent@6.1.0: {}
 
   detect-libc@2.1.2: {}
+
+  devalue@file:vendor/devalue-5.8.2-operations.tgz: {}
 
   diff@8.0.4: {}
 

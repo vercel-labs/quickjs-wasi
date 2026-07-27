@@ -965,6 +965,27 @@ int qjs_set_prop_uint32(JSValue *obj, unsigned int idx, JSValue *val) {
 
 /* ---- Function Calls ---- */
 
+/*
+ * Invoke a constructor with `new`, i.e. `new func(...argv)`.
+ * Returns a heap-allocated JSValue* holding the constructed object, or
+ * JS_EXCEPTION if the call threw (including when `func` is not a
+ * constructor).
+ */
+__attribute__((export_name("qjs_call_constructor")))
+JSValue *qjs_call_constructor(JSValue *func, int argc, JSValue **argv) {
+    /* Convert pointer-to-pointer argv to array of JSValues */
+    JSValue *args = NULL;
+    if (argc > 0) {
+        args = (JSValue *)malloc(sizeof(JSValue) * argc);
+        for (int i = 0; i < argc; i++) {
+            args[i] = *argv[i];
+        }
+    }
+    JSValue result = JS_CallConstructor(ctx, *func, argc, args);
+    free(args);
+    return jsvalue_to_heap(result);
+}
+
 __attribute__((export_name("qjs_call")))
 JSValue *qjs_call(JSValue *func, JSValue *this_val, int argc, JSValue **argv) {
     /* Convert pointer-to-pointer argv to array of JSValues */

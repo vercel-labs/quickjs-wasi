@@ -420,6 +420,7 @@ interface QuickJSExports {
 
   // Function calls
   qjs_call(funcPtr: number, thisPtr: number, argc: number, argvPtr: number): number;
+  qjs_call_constructor(ctorPtr: number, argc: number, argvPtr: number): number;
 
   // Host function registration
   qjs_new_host_function(namePtr: number, nameLen: number, argCount: number): number;
@@ -1614,6 +1615,35 @@ export class QuickJS {
   }
 
   /**
+   * Invoke a QuickJS constructor with `new`, i.e. `new ctor(...args)`.
+   * If the constructor throws — including when `ctor` is not a constructor
+   * — a `JSException` is thrown on the host side.
+   *
+   * This is the counterpart to `callFunction` for building values inside
+   * the VM from the host, e.g. `new Date(iso)` on a constructor captured
+   * before any user code ran.
+   */
+  construct(ctor: JSValueHandle, ...args: JSValueHandle[]): JSValueHandle {
+    this.assertNotDisposed();
+    const argc = args.length;
+
+    let argvPtr = 0;
+    if (argc > 0) {
+      argvPtr = this.exports.wasm_malloc(argc * 4);
+      const view = new DataView(this.exports.memory.buffer);
+      for (let i = 0; i < argc; i++) {
+        view.setUint32(argvPtr + i * 4, args[i].ptr, true);
+      }
+    }
+
+    const resultPtr = this.exports.qjs_call_constructor(ctor.ptr, argc, argvPtr);
+
+    if (argvPtr) this.exports.wasm_free(argvPtr);
+
+    return this.throwIfException(new JSValueHandle(this, resultPtr));
+  }
+
+  /**
    * Internal: call a QuickJS function without throwing on exception.
    * Used by promise plumbing where exceptions are handled differently.
    */
@@ -2317,6 +2347,33 @@ export class JSValueHandle {
   /** Whether this value is a DataView (engine brand check). */
   get isDataView(): boolean {
     return this.vm._getExports().qjs_is_data_view(this.ptr) !== 0;
+  }
+
+  /**
+   * A numeric identity for the underlying heap value, or 0 for values that
+   * are not heap-allocated (numbers, booleans, `null`, `undefined`).
+   *
+   * Two handles to the same underlying object always report the same
+   * identity, and two live handles to different objects always report
+   * different identities — so this is the value to key a `Map` on when
+   * deduplicating or detecting cycles across handles (`dump()` uses it for
+   * exactly that).
+   *
+   * The identity is only meaningful while the value is alive; it is an
+   * address, so it may be reused after every handle to the value has been
+   * disposed. Do not persist it, and do not treat it as unforgeable — a
+   * number read out of the guest can trivially collide with one.
+   */
+  get identity(): number {
+    return this.vm._getExports().qjs_get_value_ptr(this.ptr);
+  }
+
+  /**
+   * Extract the value as a boolean, applying JavaScript truthiness
+   * (equivalent to `!!value` inside the VM).
+   */
+  toBoolean(): boolean {
+    return this.vm._getExports().qjs_get_bool(this.ptr) !== 0;
   }
 
   /**
