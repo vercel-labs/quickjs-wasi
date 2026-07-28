@@ -1826,7 +1826,7 @@ packages:
     engines: {node: '>=8'}
 
   devalue@file:vendor/devalue-5.8.2-operations.tgz:
-    resolution: {integrity: sha512-gNBtCkAhhgnfVWywX0tBqtRU6hPHAgd4ek5VSKnR77NNsGUGwMz7JzEEw+4Qrc9XL1cWxlTm8mUKfTQgV9HytA==, tarball: file:vendor/devalue-5.8.2-operations.tgz}
+    resolution: {integrity: sha512-H+cu0LsqYyaRAsyT58tHQtIFiHu1p1FlKp/djkl9Ag1Z+YUHb6FUSumWVaxMgf/P/2Mi7D9FqMDL+De6904aOQ==, tarball: file:vendor/devalue-5.8.2-operations.tgz}
     version: 5.8.2
 
   diff@8.0.4:

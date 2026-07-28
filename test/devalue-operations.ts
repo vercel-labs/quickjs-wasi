@@ -22,7 +22,7 @@
  */
 
 import {
-  defaultStringifyOperations,
+  filterArrayIndices,
   type ParseOperations,
   type StringifyOperations,
 } from 'devalue';
@@ -286,21 +286,6 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
     return tagByClassId.get(handle.classId) ?? 'Object';
   };
 
-  // A single reusable collector: `vm.newFunction` registers host callbacks by
-  // name for the lifetime of the VM (disposing the handle does not
-  // unregister it), so creating one per Set/Map would both collide on the
-  // name and leak. Instead the target is swapped on the host side.
-  let collectorTarget: any[] = [];
-  let collectorArity: 1 | 2 = 1;
-  const collector = keep(
-    vm.newFunction('__devalue_collect', (value, key) => {
-      collectorTarget.push(
-        collectorArity === 1 ? value.dup() : [key.dup(), value.dup()]
-      );
-      return vm.undefined;
-    })
-  );
-
   /** Collect the elements a Set/Map yields, via captured `forEach`. */
   const collect = (
     forEach: JSValueHandle,
@@ -308,16 +293,13 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
     arity: 1 | 2
   ): any[] => {
     const collected: any[] = [];
-    const previousTarget = collectorTarget;
-    const previousArity = collectorArity;
-    collectorTarget = collected;
-    collectorArity = arity;
-    try {
-      call(forEach, collection, collector).dispose();
-    } finally {
-      collectorTarget = previousTarget;
-      collectorArity = previousArity;
-    }
+    // Ephemeral: the callback is unregistered when the handle is disposed, so
+    // a serialization pass over many Maps/Sets doesn't accumulate callbacks.
+    using visitor = vm.newEphemeralFunction((value, key) => {
+      collected.push(arity === 1 ? value.dup() : [key.dup(), value.dup()]);
+      return vm.undefined;
+    });
+    call(forEach, collection, visitor).dispose();
     return collected;
   };
 
@@ -354,49 +336,56 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
       }
     },
 
-    dateISO: (handle: JSValueHandle) => {
-      using time = call(i.dateGetTime, handle);
-      if (Number.isNaN(time.toNumber())) return '';
-      using iso = call(i.dateToISOString, handle);
-      return iso.toString();
+    dateISO: (handle: JSValueHandle) =>
+      vm.withScope(() => {
+        if (Number.isNaN(call(i.dateGetTime, handle).toNumber())) return '';
+        return call(i.dateToISOString, handle).toString();
+      }),
+
+    // Only reached for URL / URLSearchParams / Temporal.*, none of which
+    // exist in the base VM. `handle.toString()` would execute guest code
+    // (the value's own `toString`), so this deliberately refuses rather than
+    // silently running it — a VM with those types would capture the relevant
+    // prototype methods the same way the intrinsics above are captured.
+    toStringValue: (handle: JSValueHandle) => {
+      throw new Error(
+        `no captured string conversion for ${tag(handle)} in this VM`
+      );
     },
 
-    toStringValue: (handle: JSValueHandle) => handle.toString(),
-
-    regExp: (handle: JSValueHandle) => {
-      using source = call(i.regExpSource, handle);
-      using flags = call(i.regExpFlags, handle);
-      return { source: source.toString(), flags: flags.toString() };
-    },
+    regExp: (handle: JSValueHandle) =>
+      vm.withScope(() => ({
+        source: call(i.regExpSource, handle).toString(),
+        flags: call(i.regExpFlags, handle).toString(),
+      })),
 
     setValues: (handle: JSValueHandle) => collect(i.setForEach, handle, 1),
     mapEntries: (handle: JSValueHandle) => collect(i.mapForEach, handle, 2),
 
-    viewInfo: (handle: JSValueHandle) => {
-      const isDataView = handle.isDataView;
-      const buffer = call(isDataView ? i.dataViewBuffer : i.viewBuffer, handle);
-      using byteOffset = call(
-        isDataView ? i.dataViewByteOffset : i.viewByteOffset,
-        handle
-      );
-      using byteLength = call(
-        isDataView ? i.dataViewByteLength : i.viewByteLength,
-        handle
-      );
-      using bufferByteLength = call(i.arrayBufferByteLength, buffer);
-      const info = {
-        buffer,
-        byteOffset: byteOffset.toNumber(),
-        byteLength: byteLength.toNumber(),
-        bufferByteLength: bufferByteLength.toNumber(),
-        length: 0,
-      };
-      if (!isDataView) {
-        using length = call(i.viewLength, handle);
-        info.length = length.toNumber();
-      }
-      return info;
-    },
+    viewInfo: (handle: JSValueHandle) =>
+      // Every intermediate here is a number read through a captured getter;
+      // only the buffer handle needs to outlive the scope.
+      vm.withScope((scope) => {
+        const isDataView = handle.isDataView;
+        const buffer = call(isDataView ? i.dataViewBuffer : i.viewBuffer, handle);
+        const info = {
+          buffer: scope.escape(buffer),
+          byteOffset: call(
+            isDataView ? i.dataViewByteOffset : i.viewByteOffset,
+            handle
+          ).toNumber(),
+          byteLength: call(
+            isDataView ? i.dataViewByteLength : i.viewByteLength,
+            handle
+          ).toNumber(),
+          bufferByteLength: call(i.arrayBufferByteLength, buffer).toNumber(),
+          length: 0,
+        };
+        if (!isDataView) {
+          info.length = call(i.viewLength, handle).toNumber();
+        }
+        return info;
+      }),
 
     arrayBuffer: (handle: JSValueHandle) => handle.toArrayBuffer(),
 
@@ -409,12 +398,9 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
     hasOwn: (handle: JSValueHandle, key: string | number) =>
       handle.hasOwnProperty(String(key)),
 
-    arrayIndices: (handle: JSValueHandle) =>
-      // `keys()` is own enumerable string keys, in property order — the same
-      // input devalue's default implementation filters
-      defaultStringifyOperations.arrayIndices(
-        Object.fromEntries(handle.keys().map((key) => [key, 0]))
-      ),
+    // `keys()` is own enumerable string keys in property order, which is
+    // exactly what devalue's filtering helper expects
+    arrayIndices: (handle: JSValueHandle) => filterArrayIndices(handle.keys()),
 
     objectShape: (handle: JSValueHandle) => {
       // A proxy would run trap code for every question asked below.
