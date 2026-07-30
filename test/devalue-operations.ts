@@ -131,8 +131,8 @@ const CAPTURE_INTRINSICS = `(() => {
 })()`;
 
 export interface DevalueOperations {
-  stringifyOperations: Partial<StringifyOperations>;
-  parseOperations: Partial<ParseOperations>;
+  stringifyOperations: StringifyOperations;
+  parseOperations: ParseOperations;
   dispose(): void;
 }
 
@@ -281,7 +281,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
 
   const tag = (handle: JSValueHandle): string => {
     // A proxy is never one of the branded types; report it as a plain-object
-    // candidate so `objectShape` can reject it without firing traps.
+    // candidate so `shapeOf` can reject it without firing traps.
     if (handle.isProxy) return 'Object';
     return tagByClassId.get(handle.classId) ?? 'Object';
   };
@@ -303,7 +303,10 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
     return collected;
   };
 
-  const stringifyOperations: Partial<StringifyOperations> = {
+  // Typed as the *complete* interface (not Partial): if devalue adds a hook
+  // this implementation is missing, compilation fails — which is exactly the
+  // gap-detection this POC exists to provide.
+  const stringifyOperations: StringifyOperations = {
     identify: (handle: JSValueHandle) => {
       const pointer = handle.identity;
       // primitives are deduplicated by value, exactly like host devalue
@@ -312,8 +315,8 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
     },
 
     typeOf,
-    primitive,
-    tag,
+    toPrimitive: primitive,
+    tagOf: tag,
 
     isThenable: (handle: JSValueHandle) => handle.isPromise,
 
@@ -336,7 +339,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
       }
     },
 
-    dateISO: (handle: JSValueHandle) =>
+    toISOString: (handle: JSValueHandle) =>
       vm.withScope(() => {
         if (Number.isNaN(call(i.dateGetTime, handle).toNumber())) return '';
         return call(i.dateToISOString, handle).toString();
@@ -353,14 +356,14 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
       );
     },
 
-    regExp: (handle: JSValueHandle) =>
+    regExpInfo: (handle: JSValueHandle) =>
       vm.withScope(() => ({
         source: call(i.regExpSource, handle).toString(),
         flags: call(i.regExpFlags, handle).toString(),
       })),
 
-    setValues: (handle: JSValueHandle) => collect(i.setForEach, handle, 1),
-    mapEntries: (handle: JSValueHandle) => collect(i.mapForEach, handle, 2),
+    valuesOf: (handle: JSValueHandle) => collect(i.setForEach, handle, 1),
+    entriesOf: (handle: JSValueHandle) => collect(i.mapForEach, handle, 2),
 
     viewInfo: (handle: JSValueHandle) =>
       // Every intermediate here is a number read through a captured getter;
@@ -387,9 +390,9 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
         return info;
       }),
 
-    arrayBuffer: (handle: JSValueHandle) => handle.toArrayBuffer(),
+    toArrayBuffer: (handle: JSValueHandle) => handle.toArrayBuffer(),
 
-    arrayLength: (handle: JSValueHandle) => {
+    lengthOf: (handle: JSValueHandle) => {
       const descriptor = handle.getOwnPropertyDescriptor('length');
       // `length` is an own data property on arrays — no getter runs
       return descriptor?.value?.consume((h) => h.toNumber()) ?? 0;
@@ -400,9 +403,9 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
 
     // `keys()` is own enumerable string keys in property order, which is
     // exactly what devalue's filtering helper expects
-    arrayIndices: (handle: JSValueHandle) => filterArrayIndices(handle.keys()),
+    indicesOf: (handle: JSValueHandle) => filterArrayIndices(handle.keys()),
 
-    objectShape: (handle: JSValueHandle) => {
+    shapeOf: (handle: JSValueHandle) => {
       // A proxy would run trap code for every question asked below.
       if (handle.isProxy) return { kind: 'not-plain' as const };
 
@@ -446,41 +449,42 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
 
   // --- parse -------------------------------------------------------------
 
-  const parseOperations: Partial<ParseOperations> = {
-    primitive: (value) =>
+  const parseOperations: ParseOperations = {
+    // host bigints arrive here too — devalue converts the decimal string
+    // host-side, mirroring `toPrimitive`'s domain
+    fromPrimitive: (value) =>
       typeof value === 'bigint' ? vm.newBigInt(value) : vm.hostToHandle(value),
 
-    bigint: (text) => vm.newBigInt(BigInt(text)),
-
-    date: (iso) => {
+    fromISOString: (iso) => {
       // an empty ISO string represents an invalid date
       using argument = iso === '' ? vm.newNumber(NaN) : vm.newString(iso);
       return vm.construct(i.Date, argument);
     },
 
-    regExp: (source, flags) => {
+    // URL / URLSearchParams / Temporal.* — none exist in the base VM
+    fromStringValue: (tag) => {
+      throw new Error(`${tag} is not available in this VM`);
+    },
+
+    fromArrayBuffer: (buffer) => vm.newArrayBuffer(buffer),
+
+    fromRegExpInfo: (source, flags) => {
       using sourceHandle = vm.newString(source);
       if (!flags) return vm.construct(i.RegExp, sourceHandle);
       using flagsHandle = vm.newString(flags);
       return vm.construct(i.RegExp, sourceHandle, flagsHandle);
     },
 
-    temporal: (type) => {
-      throw new Error(`${type} is not available in this VM`);
-    },
-
-    box: (value: JSValueHandle) => vm.construct(i.Object, value),
-
-    arrayBuffer: (buffer) => vm.newArrayBuffer(buffer),
-
-    view: (type, buffer, byteOffset, length) => {
-      const Constructor = typedArrayConstructors.get(type);
-      if (!Constructor) throw new Error(`${type} is not available in this VM`);
+    fromViewInfo: (tag, buffer, byteOffset, length) => {
+      const Constructor = typedArrayConstructors.get(tag);
+      if (!Constructor) throw new Error(`${tag} is not available in this VM`);
       if (byteOffset === undefined) return vm.construct(Constructor, buffer);
       using offsetHandle = vm.newNumber(byteOffset);
       using lengthHandle = vm.newNumber(length ?? 0);
       return vm.construct(Constructor, buffer, offsetHandle, lengthHandle);
     },
+
+    box: (value: JSValueHandle) => vm.construct(i.Object, value),
 
     createArray: (length) => {
       // `new Array(n)` with a single numeric argument creates n holes
@@ -493,23 +497,22 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
       return invoke(i.makeSparseArray, lengthHandle);
     },
 
-    setIndex: (array: JSValueHandle, index, value: JSValueHandle) =>
-      define(array, String(index), value),
-
     createObject: () => vm.newObject(),
     createNullPrototypeObject: () =>
       call(i.objectCreate, vm.undefined, vm.null),
 
-    setProperty: (object: JSValueHandle, key, value: JSValueHandle) =>
-      define(object, key, value),
-
     createSet: () => vm.construct(i.Set),
-    setAdd: (set: JSValueHandle, value: JSValueHandle) => {
+    createMap: () => vm.construct(i.Map),
+
+    // serves arrays and objects alike, the inverse of `get`
+    set: (target: JSValueHandle, key, value: JSValueHandle) =>
+      define(target, String(key), value),
+
+    addValue: (set: JSValueHandle, value: JSValueHandle) => {
       call(i.setAdd, set, value).dispose();
     },
 
-    createMap: () => vm.construct(i.Map),
-    mapSet: (map: JSValueHandle, key: JSValueHandle, value: JSValueHandle) => {
+    addEntry: (map: JSValueHandle, key: JSValueHandle, value: JSValueHandle) => {
       call(i.mapSet, map, key, value).dispose();
     },
   };
