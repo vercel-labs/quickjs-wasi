@@ -39,8 +39,8 @@ importers:
         specifier: ^5.0.1
         version: 5.0.1
       devalue:
-        specifier: file:./vendor/devalue-5.8.2-operations.tgz
-        version: file:vendor/devalue-5.8.2-operations.tgz
+        specifier: ^5.9.0
+        version: 5.9.0
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -1825,9 +1825,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  devalue@file:vendor/devalue-5.8.2-operations.tgz:
-    resolution: {integrity: sha512-YYSvkjZfhp7OKcQ8fF1JCy/Y891Kb3uGNkkIOuVRVrwXL4QSFN2z2kJ7d/KDNLbDIllWjuZggMYfWt5nmlVSew==, tarball: file:vendor/devalue-5.8.2-operations.tgz}
-    version: 5.8.2
+  devalue@5.9.0:
+    resolution: {integrity: sha512-RWrqdArjvPbsATEhOPUo6Wndc/iWnkWKlhIrdlF3zMMYo/c3CVtoaVAyLtWxz5h8nSlkHzxnzV2uLydPXmtF+A==}
 
   diff@8.0.4:
     resolution: {integrity: sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==}
@@ -4906,7 +4905,7 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  devalue@file:vendor/devalue-5.8.2-operations.tgz: {}
+  devalue@5.9.0: {}
 
   diff@8.0.4: {}
 
