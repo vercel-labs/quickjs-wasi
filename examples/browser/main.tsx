@@ -406,11 +406,16 @@ const jsValueAccessor: DataAccessor = {
     if (h.isArrayBuffer) return 'ArrayBuffer';
     if (h.isPromise) return 'Promise';
 
-    // Unbranded: fall back to the constructor's own `name`, read through
-    // descriptors so neither hop invokes an accessor.
-    const ctor = readOwnData(h, 'constructor') ?? h.getPrototypeOf().consume(
-      (proto) => (proto.isObject ? readOwnData(proto, 'constructor') : undefined)
-    );
+    // Unbranded: take the constructor from the *prototype*, never from the
+    // value's own properties — `{ constructor: Map }` would otherwise be
+    // labelled "Map". This matches how DevTools derives the label, keeps
+    // real class instances reporting their class, and both hops are
+    // descriptor reads so neither invokes an accessor.
+    const ctor = h
+      .getPrototypeOf()
+      .consume((proto) =>
+        proto.isObject ? readOwnData(proto, 'constructor') : undefined
+      );
     if (!ctor) return undefined;
     return ctor.consume((c) => {
       const name = readOwnData(c, 'name');
