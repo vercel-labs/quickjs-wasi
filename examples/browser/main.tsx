@@ -39,28 +39,102 @@ import '@/index.css';
 
 // ─── JSValue DataAccessor for react-inspector ───────────────────────────────
 
-const objectProtoPtrCache = new WeakMap<QuickJS, number>();
-
-function getObjectPrototypePtr(vm: QuickJS): number {
-  let ptr = objectProtoPtrCache.get(vm);
-  if (ptr === undefined) {
-    const proto = vm.evalCode('Object.prototype');
-    ptr = proto.ptr;
-    objectProtoPtrCache.set(vm, ptr);
-    proto.dispose();
-  }
-  return ptr;
+/**
+ * Guest values the inspector needs in order to render without executing
+ * guest code, captured once per VM.
+ *
+ * Rendering is the same problem shape as side-effect-free serialization: the
+ * host inspects values the guest built, so any dynamic lookup —
+ * `value.toString()`, `Symbol.iterator`, `.constructor.name` — dispatches
+ * through guest-patchable prototypes and runs guest code *while drawing the
+ * UI*. Capturing the methods up front and invoking them with an explicit
+ * receiver keeps the display identical while making the lookup unpatchable.
+ *
+ * `captureInspectorIntrinsics` is called immediately after the VM is created
+ * (before any user code runs); the lazy path is a fallback.
+ */
+interface InspectorIntrinsics {
+  objectPrototypeIdentity: number;
+  symbolIterator: JSValueHandle;
+  dateToString: JSValueHandle;
+  regExpToString: JSValueHandle;
+  symbolToString: JSValueHandle;
+  mapForEach: JSValueHandle;
+  setForEach: JSValueHandle;
 }
 
-const symbolIteratorCache = new WeakMap<QuickJS, JSValueHandle>();
+const intrinsicsCache = new WeakMap<QuickJS, InspectorIntrinsics>();
 
-function getSymbolIterator(vm: QuickJS): JSValueHandle {
-  let sym = symbolIteratorCache.get(vm);
-  if (!sym) {
-    sym = vm.evalCode('Symbol.iterator');
-    symbolIteratorCache.set(vm, sym);
+function captureInspectorIntrinsics(vm: QuickJS): InspectorIntrinsics {
+  const captured = vm.evalCode(`({
+    objectPrototype: Object.prototype,
+    symbolIterator: Symbol.iterator,
+    dateToString: Date.prototype.toString,
+    regExpToString: RegExp.prototype.toString,
+    symbolToString: Symbol.prototype.toString,
+    mapForEach: Map.prototype.forEach,
+    setForEach: Set.prototype.forEach,
+  })`);
+  const at = (name: string) => captured.getProp(name);
+  const objectPrototype = at('objectPrototype');
+  const intrinsics: InspectorIntrinsics = {
+    // Identity, not `.ptr`: every handle is its own heap box, so two
+    // handles to one object never share a `.ptr`.
+    objectPrototypeIdentity: objectPrototype.identity,
+    symbolIterator: at('symbolIterator'),
+    dateToString: at('dateToString'),
+    regExpToString: at('regExpToString'),
+    symbolToString: at('symbolToString'),
+    mapForEach: at('mapForEach'),
+    setForEach: at('setForEach'),
+  };
+  objectPrototype.dispose();
+  captured.dispose();
+  intrinsicsCache.set(vm, intrinsics);
+  return intrinsics;
+}
+
+function intrinsics(vm: QuickJS): InspectorIntrinsics {
+  return intrinsicsCache.get(vm) ?? captureInspectorIntrinsics(vm);
+}
+
+/** Invoke a captured method with an explicit receiver, returning a string. */
+function callToString(
+  method: JSValueHandle,
+  receiver: JSValueHandle
+): string | undefined {
+  try {
+    return receiver.vm
+      .callFunction(method, receiver)
+      .consume((result) => result.toString());
+  } catch {
+    return undefined;
   }
-  return sym;
+}
+
+/**
+ * Reads an own data property without invoking accessors or proxy traps.
+ * Returns undefined for accessor properties, missing properties, and
+ * proxies — callers decide what to display instead.
+ */
+function readOwnData(
+  handle: JSValueHandle,
+  key: string
+): JSValueHandle | undefined {
+  if (handle.isProxy) return undefined;
+  let descriptor: ReturnType<JSValueHandle['getOwnPropertyDescriptor']>;
+  try {
+    descriptor = handle.getOwnPropertyDescriptor(key);
+  } catch {
+    return undefined;
+  }
+  if (!descriptor) return undefined;
+  if (descriptor.get || descriptor.set) {
+    descriptor.get?.dispose();
+    descriptor.set?.dispose();
+    return undefined;
+  }
+  return descriptor.value;
 }
 
 // Synthetic property names used to render a Proxy's internals
@@ -76,6 +150,18 @@ const jsValueAccessor: DataAccessor = {
     const h = value as JSValueHandle;
     // toString() on a Proxy would fire get/apply traps
     if (h.isProxy) return 'Proxy';
+    // For objects, `handle.toString()` performs a JavaScript string
+    // conversion, which dispatches through the guest's (patchable)
+    // `toString`/`valueOf`. Use the captured intrinsic for the branded
+    // types the inspector renders this way — same output, unpatchable
+    // lookup. Primitives convert without running any guest code.
+    if (h.isObject) {
+      const i = intrinsics(h.vm);
+      if (h.isDate) return callToString(i.dateToString, h) ?? 'Invalid Date';
+      if (h.isRegExp) return callToString(i.regExpToString, h) ?? 'RegExp';
+    } else if (h.isSymbol) {
+      return callToString(intrinsics(h.vm).symbolToString, h) ?? 'Symbol()';
+    }
     return h.toString();
   },
 
@@ -107,7 +193,7 @@ const jsValueAccessor: DataAccessor = {
     if (h.isProxy) return false;
     // Genuine Map/Set: trust the brand, skip the probing call below
     if (h.isMap || h.isSet) return true;
-    const sym = getSymbolIterator(h.vm);
+    const sym = intrinsics(h.vm).symbolIterator;
     const method = h.vm.getProp(h, sym);
     if (!method.isFunction) {
       method.dispose();
@@ -128,7 +214,41 @@ const jsValueAccessor: DataAccessor = {
 
   iterate(value: unknown): Iterable<unknown> {
     const h = value as JSValueHandle;
-    const sym = getSymbolIterator(h.vm);
+
+    // Genuine Map/Set: iterate with the captured `forEach`, which reads the
+    // internal entry list directly. The iterator protocol is never touched,
+    // so a patched `Map.prototype[Symbol.iterator]` (or a patched
+    // `%MapIteratorPrototype%.next`) cannot run — or lie — while rendering.
+    if (h.isMap || h.isSet) {
+      const i = intrinsics(h.vm);
+      const entries: JSValueHandle[] = [];
+      // Ephemeral: the callback unregisters when the handle is disposed, so
+      // re-rendering a tree of Maps doesn't accumulate host callbacks.
+      const visitor = h.vm.newEphemeralFunction((entryValue, entryKey) => {
+        if (h.isMap) {
+          // react-inspector renders Map entries as [key, value] pairs
+          const pair = h.vm.newArray();
+          pair.setProp('0', entryKey);
+          pair.setProp('1', entryValue);
+          entries.push(pair);
+        } else {
+          entries.push(entryValue.dup());
+        }
+        return h.vm.undefined;
+      });
+      try {
+        h.vm
+          .callFunction(h.isMap ? i.mapForEach : i.setForEach, h, visitor)
+          .dispose();
+      } catch {
+        // fall through to an empty rendering
+      } finally {
+        visitor.dispose();
+      }
+      return entries;
+    }
+
+    const sym = intrinsics(h.vm).symbolIterator;
     const method = h.vm.getProp(h, sym);
     if (!method.isFunction) {
       method.dispose();
@@ -166,9 +286,11 @@ const jsValueAccessor: DataAccessor = {
 
   length(value: unknown): number {
     const h = value as JSValueHandle;
-    // Reading .length on a Proxy would fire its get trap
-    if (h.isProxy) return 0;
-    return h.length;
+    // `handle.length` is a [[Get]]; read the own data property instead so a
+    // `length` accessor is not invoked just to size the preview.
+    const length = readOwnData(h, 'length');
+    if (!length) return 0;
+    return length.consume((n) => (n.isNumber ? n.toNumber() : 0));
   },
 
   getOwnPropertyNames(value: unknown): string[] {
@@ -269,17 +391,39 @@ const jsValueAccessor: DataAccessor = {
     const h = value as JSValueHandle;
     // Reading .constructor.name on a Proxy would fire its get trap
     if (h.isProxy) return 'Proxy';
-    return h.constructorName;
+
+    // Prefer the engine brand: `.constructor.name` is two [[Get]]s that can
+    // run guest getters, and it is trivially spoofed (`{ constructor: Map }`
+    // reports "Map"). The brand cannot be forged or patched.
+    if (h.isMap) return 'Map';
+    if (h.isSet) return 'Set';
+    if (h.isDate) return 'Date';
+    if (h.isRegExp) return 'RegExp';
+    if (h.isWeakMap) return 'WeakMap';
+    if (h.isWeakSet) return 'WeakSet';
+    if (h.isWeakRef) return 'WeakRef';
+    if (h.isDataView) return 'DataView';
+    if (h.isArrayBuffer) return 'ArrayBuffer';
+    if (h.isPromise) return 'Promise';
+
+    // Unbranded: fall back to the constructor's own `name`, read through
+    // descriptors so neither hop invokes an accessor.
+    const ctor = readOwnData(h, 'constructor') ?? h.getPrototypeOf().consume(
+      (proto) => (proto.isObject ? readOwnData(proto, 'constructor') : undefined)
+    );
+    if (!ctor) return undefined;
+    return ctor.consume((c) => {
+      const name = readOwnData(c, 'name');
+      return name?.consume((n) => (n.isString ? n.toString() : undefined));
+    });
   },
 
   getFunctionName(value: unknown): string {
     const h = value as JSValueHandle;
     // Reading .name on a proxied function would fire its get trap
     if (h.isProxy) return '';
-    const name = h.getProp('name');
-    const result = name.isUndefined ? '' : name.toString();
-    name.dispose();
-    return result;
+    const name = readOwnData(h, 'name');
+    return name?.consume((n) => (n.isString ? n.toString() : '')) ?? '';
   },
 
   isBuffer(value: unknown): boolean {
@@ -293,7 +437,10 @@ const jsValueAccessor: DataAccessor = {
 
   isObjectPrototype(value: unknown): boolean {
     const h = value as JSValueHandle;
-    return h.ptr === getObjectPrototypePtr(h.vm);
+    // Compare heap-value identity, not `.ptr`: `.ptr` is this handle's own
+    // JSValue box, so it differs for every handle — including two handles
+    // to `Object.prototype` — which silently disabled this guard.
+    return h.identity === intrinsics(h.vm).objectPrototypeIdentity;
   },
 };
 
@@ -1173,6 +1320,12 @@ function App() {
         interruptHandler: () => Date.now() - execStart > 5000,
         extensions,
       });
+
+      // Capture the values the inspector renders with *before* running any
+      // user code, so patching `Date.prototype.toString`,
+      // `Map.prototype[Symbol.iterator]`, etc. cannot affect (or be
+      // triggered by) rendering.
+      captureInspectorIntrinsics(vm);
 
       // Provide console.log / console.error
       {
