@@ -657,6 +657,35 @@ necessarily fire its `ownKeys`/`getOwnPropertyDescriptor` traps — check
 | `handle.getProxyHandler()` | The `[[ProxyHandler]]` of a Proxy, without firing traps |
 | `handle.getOwnPropertyKeys()` | All own keys (strings **and** symbols, incl. non-enumerable), à la `Reflect.ownKeys()` |
 | `handle.getOwnPropertyDescriptor(key)` | Own property descriptor **without invoking getters**; accessor properties yield `get`/`set` handles |
+| `handle.identity` | Numeric identity of the underlying heap value (`0` for non-heap values) — key a `Map` on this to deduplicate or detect cycles across handles |
+| `handle.toBoolean()` | Extract as a `boolean`, applying JavaScript truthiness |
+| `vm.construct(ctor, ...args)` | Invoke a constructor with `new` — the counterpart to `callFunction` for building values in the VM from the host |
+
+Note that `handle.toString()` is **not** in this list: for values that are not
+already strings it performs a JavaScript string conversion, which executes
+guest code. Guard with `handle.isString`, or call a captured intrinsic such as
+`URL.prototype.toString` through `vm.callFunction`.
+
+### Handle lifetime
+
+| Method / Property | Description |
+|-------------------|-------------|
+| `vm.withScope(fn)` | Run `fn`, disposing every handle created during it; use `scope.escape(handle)` to keep one. Scopes nest, and `escape()` transfers to the enclosing scope |
+| `vm.newEphemeralFunction(fn)` | Like `newFunction()`, but the host callback is unregistered when the handle is disposed — use for short-lived callbacks instead of inventing unique names |
+| `vm.unregisterHostCallback(name)` | Remove a callback registered by `newFunction()` / `registerHostCallback()` |
+| `handle.disposed` | Whether `dispose()` has been called |
+
+```typescript
+const name = vm.withScope((scope) => {
+  const user = root.getProp('user');       // freed automatically
+  const profile = user.getProp('profile'); // freed automatically
+  return scope.escape(profile.getProp('name'));
+});
+```
+
+Handle methods do not guard against use after disposal — reading from a
+disposed handle reads freed memory. Check `handle.disposed` when a handle's
+lifetime is managed elsewhere.
 
 ### `Deferred` (from `vm.newPromise()`)
 

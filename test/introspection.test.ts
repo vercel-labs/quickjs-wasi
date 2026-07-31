@@ -102,6 +102,114 @@ describe('brand check getters', () => {
   });
 });
 
+describe('construct', () => {
+  it('invokes a constructor with new', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using DateCtor = vm.evalCode('Date');
+    using iso = vm.newString('2023-11-14T22:13:20.000Z');
+    using date = vm.construct(DateCtor, iso);
+
+    expect(date.isDate).toBe(true);
+    using time = vm.evalCode('(d) => d.getTime()');
+    expect(
+      vm.callFunction(time, vm.undefined, date).consume((h) => h.toNumber())
+    ).toBe(1700000000000);
+  });
+
+  it('supports zero-argument and multi-argument construction', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using MapCtor = vm.evalCode('Map');
+    using map = vm.construct(MapCtor);
+    expect(map.isMap).toBe(true);
+
+    using RegExpCtor = vm.evalCode('RegExp');
+    using source = vm.newString('ab+c');
+    using flags = vm.newString('gi');
+    using regexp = vm.construct(RegExpCtor, source, flags);
+    expect(regexp.isRegExp).toBe(true);
+    expect(regexp.getProp('flags').consume((h) => h.toString())).toBe('gi');
+  });
+
+  it('constructs user classes', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using Point = vm.evalCode('globalThis.Point = class Point { constructor(x, y) { this.x = x; this.y = y; } }');
+    using x = vm.newNumber(3);
+    using y = vm.newNumber(4);
+    using point = vm.construct(Point, x, y);
+
+    vm.setProp(vm.global, 'point', point);
+    using check = vm.evalCode('point instanceof Point && point.x === 3 && point.y === 4');
+    expect(check.toBoolean()).toBe(true);
+  });
+
+  it('throws JSException when the constructor throws', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using Throwing = vm.evalCode('(class T { constructor() { throw new Error("boom"); } })');
+    expect(() => vm.construct(Throwing)).toThrow(/boom/);
+  });
+
+  it('throws when the value is not a constructor', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using notCtor = vm.evalCode('({})');
+    expect(() => vm.construct(notCtor)).toThrow();
+  });
+});
+
+describe('identity', () => {
+  it('is stable per underlying value and distinct across values', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    vm.evalCode('globalThis.shared = { a: 1 }; globalThis.other = { a: 1 };').dispose();
+
+    using first = vm.evalCode('globalThis.shared');
+    using second = vm.evalCode('globalThis.shared');
+    using other = vm.evalCode('globalThis.other');
+
+    // two independent handles to one object agree...
+    expect(first.identity).toBe(second.identity);
+    // ...and differ from a structurally identical but distinct object
+    expect(first.identity).not.toBe(other.identity);
+    expect(first.identity).toBeGreaterThan(0);
+  });
+
+  it('is 0 for values that are not heap-allocated', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    for (const expression of ['42', 'true', 'null', 'undefined']) {
+      using handle = vm.evalCode(expression);
+      expect(handle.identity).toBe(0);
+    }
+  });
+
+  it('survives being read through a proxy without unwrapping', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using proxy = vm.evalCode('new Proxy({}, {})');
+    using target = proxy.getProxyTarget();
+
+    // the proxy and its target are distinct values
+    expect(proxy.identity).not.toBe(target.identity);
+  });
+});
+
+describe('toBoolean', () => {
+  it('applies JavaScript truthiness', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    for (const [expression, expected] of [
+      ['true', true],
+      ['false', false],
+      ['1', true],
+      ['0', false],
+      ['""', false],
+      ['"x"', true],
+      ['null', false],
+      ['undefined', false],
+      ['({})', true],
+      ['[]', true],
+    ] as const) {
+      using handle = vm.evalCode(expression);
+      expect(handle.toBoolean(), expression).toBe(expected);
+    }
+  });
+});
+
 describe('classId', () => {
   it('returns 0 for non-objects and stable distinct IDs for object brands', async () => {
     using vm = await QuickJS.create(wasmBytes);

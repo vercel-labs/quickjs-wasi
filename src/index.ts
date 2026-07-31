@@ -22,6 +22,21 @@ import { VERSION } from './version.js';
 
 export type HostFunction = (this: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
 
+/**
+ * A batch of handles created inside `vm.withScope()`, disposed together when
+ * the scope ends.
+ */
+export interface HandleScope {
+  /**
+   * Remove a handle from the scope so that it outlives it. The handle is
+   * transferred to the enclosing scope when there is one, otherwise it
+   * becomes the caller's responsibility to dispose.
+   *
+   * Use this for the value you intend to return.
+   */
+  escape<T extends JSValueHandle>(handle: T): T;
+}
+
 /** Property descriptor flags for `defineProp()`. */
 export interface JSPropertyDescriptor {
   writable?: boolean;
@@ -420,6 +435,7 @@ interface QuickJSExports {
 
   // Function calls
   qjs_call(funcPtr: number, thisPtr: number, argc: number, argvPtr: number): number;
+  qjs_call_constructor(ctorPtr: number, argc: number, argvPtr: number): number;
 
   // Host function registration
   qjs_new_host_function(namePtr: number, nameLen: number, argCount: number): number;
@@ -551,6 +567,16 @@ export class QuickJS {
 
   // Handles that must be freed on dispose (e.g. unresolved promise resolve/reject functions)
   private _ownedHandles = new Set<JSValueHandle>();
+
+  /**
+   * The innermost active `withScope()` batch, if any. New non-singleton
+   * handles register themselves here so they can be freed together.
+   * @internal
+   */
+  _activeScope: Set<JSValueHandle> | null = null;
+
+  /** `Promise.prototype.then`, captured on first use. @internal */
+  private _promiseThen: JSValueHandle | null = null;
 
   /** Loaded extensions in deterministic order */
   private loadedExtensions: LoadedExtension[] = [];
@@ -1461,6 +1487,93 @@ export class QuickJS {
   }
 
   /**
+   * Run `fn` with a handle scope: every handle created during the call is
+   * disposed when it returns, except those passed to `scope.escape()`.
+   *
+   * This is the bulk alternative to disposing handles individually, for code
+   * that creates many intermediates — walking a large value, for example:
+   *
+   * ```ts
+   * const name = vm.withScope((scope) => {
+   *   const user = root.getProp('user');       // freed automatically
+   *   const profile = user.getProp('profile'); // freed automatically
+   *   return scope.escape(profile.getProp('name'));
+   * });
+   * ```
+   *
+   * Scopes nest: `escape()` transfers the handle to the enclosing scope when
+   * there is one, so it is still cleaned up at the outer boundary.
+   *
+   * `fn` must be synchronous. Handles created after an `await` are outside
+   * the scope, because it closes as soon as `fn` returns.
+   */
+  withScope<T>(fn: (scope: HandleScope) => T): T {
+    this.assertNotDisposed();
+
+    const enclosing = this._activeScope;
+    const tracked = new Set<JSValueHandle>();
+    this._activeScope = tracked;
+
+    const scope: HandleScope = {
+      escape: (handle) => {
+        tracked.delete(handle);
+        enclosing?.add(handle);
+        return handle;
+      },
+    };
+
+    try {
+      return fn(scope);
+    } finally {
+      this._activeScope = enclosing;
+      for (const handle of tracked) handle.dispose();
+    }
+  }
+
+  /**
+   * Create a QuickJS function backed by a host callback whose registration is
+   * tied to the returned handle: disposing the handle unregisters the
+   * callback.
+   *
+   * Use this for short-lived callbacks — e.g. a visitor passed to
+   * `Map.prototype.forEach` — where the name is an implementation detail.
+   * `newFunction()` keeps its callback registered for the lifetime of the VM
+   * (by design, so that names can be re-registered after a snapshot is
+   * restored), which makes it unsuitable for callbacks created in a loop.
+   *
+   * The guest must not retain the function past disposal: calling it after
+   * the handle is disposed throws, because the callback is gone. Ephemeral
+   * functions do not survive snapshot/restore.
+   */
+  newEphemeralFunction(fn: HostFunction): JSValueHandle {
+    this.assertNotDisposed();
+
+    const name = `__ephemeral:${this.nextInternalId++}`;
+    this.hostCallbacks.set(name, fn);
+
+    const { ptr: namePtr, len: nameLen } = this.writeString(name);
+    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, 0);
+    this.exports.wasm_free(namePtr);
+
+    const handle = new JSValueHandle(this, resultPtr);
+    handle._onDispose = () => {
+      this.hostCallbacks.delete(name);
+    };
+    return handle;
+  }
+
+  /**
+   * Remove a host callback registered with `newFunction()` or
+   * `registerHostCallback()`. Returns true if a callback was removed.
+   *
+   * Any QuickJS function still referencing the name will throw when called,
+   * so only unregister once the guest can no longer reach it.
+   */
+  unregisterHostCallback(name: string): boolean {
+    return this.hostCallbacks.delete(name);
+  }
+
+  /**
    * Create an internal host function that bypasses the duplicate-name check.
    * Used for ephemeral callbacks (promise settle handlers, resolvePromise, etc.)
    * that are not intended to survive snapshot/restore.
@@ -1527,10 +1640,13 @@ export class QuickJS {
             return vm.undefined;
           });
 
-          const thenFn = promiseHandle.getProp('then');
           const onSettleDup = onSettleFn.dup();
-          vm.callFunctionRaw(thenFn, promiseHandle, onSettleFn, onSettleDup).dispose();
-          thenFn.dispose();
+          vm.callFunctionRaw(
+            vm.getPromiseThen(),
+            promiseHandle,
+            onSettleFn,
+            onSettleDup
+          ).dispose();
           onSettleFn.dispose();
           onSettleDup.dispose();
         }
@@ -1597,12 +1713,38 @@ export class QuickJS {
         return this.undefined;
       });
 
-      const thenFn = promiseHandle.getProp('then');
-      this.callFunctionRaw(thenFn, promiseHandle, onFulfilled, onRejected).dispose();
-      thenFn.dispose();
+      // Use the captured intrinsic rather than reading `.then` off the value:
+      // a proxy or a patched own property would otherwise run guest code here.
+      this.callFunctionRaw(
+        this.getPromiseThen(),
+        promiseHandle,
+        onFulfilled,
+        onRejected
+      ).dispose();
       onFulfilled.dispose();
       onRejected.dispose();
     });
+  }
+
+  /**
+   * `Promise.prototype.then`, captured once and reused.
+   *
+   * `resolvePromise()` needs to subscribe to a promise without executing
+   * guest code, so it must not read `.then` off the value being resolved.
+   */
+  /** @internal */
+  getPromiseThen(): JSValueHandle {
+    if (!this._promiseThen) {
+      // capture outside any active scope, since this outlives it
+      const enclosing = this._activeScope;
+      this._activeScope = null;
+      try {
+        this._promiseThen = this.evalCode('Promise.prototype.then');
+      } finally {
+        this._activeScope = enclosing;
+      }
+    }
+    return this._promiseThen;
   }
 
   /**
@@ -1611,6 +1753,35 @@ export class QuickJS {
    */
   callFunction(func: JSValueHandle, thisVal: JSValueHandle, ...args: JSValueHandle[]): JSValueHandle {
     return this.throwIfException(this.callFunctionRaw(func, thisVal, ...args));
+  }
+
+  /**
+   * Invoke a QuickJS constructor with `new`, i.e. `new ctor(...args)`.
+   * If the constructor throws — including when `ctor` is not a constructor
+   * — a `JSException` is thrown on the host side.
+   *
+   * This is the counterpart to `callFunction` for building values inside
+   * the VM from the host, e.g. `new Date(iso)` on a constructor captured
+   * before any user code ran.
+   */
+  construct(ctor: JSValueHandle, ...args: JSValueHandle[]): JSValueHandle {
+    this.assertNotDisposed();
+    const argc = args.length;
+
+    let argvPtr = 0;
+    if (argc > 0) {
+      argvPtr = this.exports.wasm_malloc(argc * 4);
+      const view = new DataView(this.exports.memory.buffer);
+      for (let i = 0; i < argc; i++) {
+        view.setUint32(argvPtr + i * 4, args[i].ptr, true);
+      }
+    }
+
+    const resultPtr = this.exports.qjs_call_constructor(ctor.ptr, argc, argvPtr);
+
+    if (argvPtr) this.exports.wasm_free(argvPtr);
+
+    return this.throwIfException(new JSValueHandle(this, resultPtr));
   }
 
   /**
@@ -2045,6 +2216,8 @@ export class QuickJS {
       this._false = null;
       this._ownedHandles.clear();
       this.hostCallbacks.clear();
+      this._activeScope = null;
+      this._promiseThen = null;
       this.exports = null!;
       this.instance = null!;
       this.module = null!;
@@ -2178,7 +2351,7 @@ export class JSValueHandle {
   readonly vm: QuickJS;
   /** @internal */
   readonly ptr: number;
-  private disposed = false;
+  private disposed_ = false;
   /**
    * When true, this handle is a cached singleton (e.g. `undefined`, `null`,
    * `true`, `false`, the global object) and `dispose()` is a no-op. This
@@ -2189,10 +2362,31 @@ export class JSValueHandle {
    */
   private readonly singleton: boolean;
 
+  /**
+   * Extra cleanup to run when this handle is disposed — used by
+   * `newEphemeralFunction()` to unregister its host callback.
+   * @internal
+   */
+  _onDispose: (() => void) | undefined;
+
   constructor(vm: QuickJS, ptr: number, singleton = false) {
     this.vm = vm;
     this.ptr = ptr;
     this.singleton = singleton;
+    // Singletons are shared and outlive any scope.
+    if (!singleton) vm._activeScope?.add(this);
+  }
+
+  /**
+   * Whether `dispose()` has been called on this handle.
+   *
+   * Note that handle methods do not currently guard against use after
+   * disposal — reading from a disposed handle reads freed memory. Check this
+   * when a handle's lifetime is managed elsewhere (e.g. by `withScope()`).
+   */
+  get disposed(): boolean {
+    // singletons are never freed, so they are never "disposed"
+    return this.disposed_;
   }
 
   get isUndefined(): boolean {
@@ -2317,6 +2511,33 @@ export class JSValueHandle {
   /** Whether this value is a DataView (engine brand check). */
   get isDataView(): boolean {
     return this.vm._getExports().qjs_is_data_view(this.ptr) !== 0;
+  }
+
+  /**
+   * A numeric identity for the underlying heap value, or 0 for values that
+   * are not heap-allocated (numbers, booleans, `null`, `undefined`).
+   *
+   * Two handles to the same underlying object always report the same
+   * identity, and two live handles to different objects always report
+   * different identities — so this is the value to key a `Map` on when
+   * deduplicating or detecting cycles across handles (`dump()` uses it for
+   * exactly that).
+   *
+   * The identity is only meaningful while the value is alive; it is an
+   * address, so it may be reused after every handle to the value has been
+   * disposed. Do not persist it, and do not treat it as unforgeable — a
+   * number read out of the guest can trivially collide with one.
+   */
+  get identity(): number {
+    return this.vm._getExports().qjs_get_value_ptr(this.ptr);
+  }
+
+  /**
+   * Extract the value as a boolean, applying JavaScript truthiness
+   * (equivalent to `!!value` inside the VM).
+   */
+  toBoolean(): boolean {
+    return this.vm._getExports().qjs_get_bool(this.ptr) !== 0;
   }
 
   /**
@@ -2703,7 +2924,14 @@ export class JSValueHandle {
   }
 
   /**
-   * Extract the value as a string (calls JS_ToCString - works on any value).
+   * Extract the value as a string. Works on any value.
+   *
+   * For values that are not already strings this performs a JavaScript
+   * string conversion, which **executes guest code**: `toString()` /
+   * `valueOf()` / `Symbol.toPrimitive` on the value or its prototype chain,
+   * and proxy traps. Guard with `isString` when the caller must not run guest
+   * code, and call a captured intrinsic (e.g. `URL.prototype.toString` via
+   * `vm.callFunction`) when a specific conversion is wanted.
    */
   toString(): string {
     const cstrPtr = this.vm._getExports().qjs_get_string(this.ptr);
@@ -2741,8 +2969,10 @@ export class JSValueHandle {
     // here would leave the cached handle pointing at freed memory, so disposing
     // a singleton is intentionally a no-op.
     if (this.singleton) return;
-    if (!this.disposed) {
-      this.disposed = true;
+    if (!this.disposed_) {
+      this.disposed_ = true;
+      this._onDispose?.();
+      this._onDispose = undefined;
       // If the VM is already disposed, the WASM instance is gone —
       // no need to (and we can't) call qjs_free_value.
       const exports = this.vm._getExports();
