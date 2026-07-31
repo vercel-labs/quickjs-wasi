@@ -1,5 +1,27 @@
 # quickjs-wasi
 
+## 3.3.0
+
+### Minor Changes
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `handle.disposed`: whether `dispose()` has been called on a handle.
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `handle.identity`: a numeric identity for the underlying heap value, for deduplication and cycle detection across handles.
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `handle.toBoolean()`: extract a value as a boolean, applying JavaScript truthiness.
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.construct(ctor, ...args)`: invoke a QuickJS constructor with `new` from the host.
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.newEphemeralFunction(fn)`: a host-backed function whose callback registration is unregistered when the handle is disposed, for short-lived callbacks.
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.unregisterHostCallback(name)`: remove a host callback registered with `newFunction()` or `registerHostCallback()`, freeing the name for reuse.
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.withScope(fn)`: batch handle disposal for every handle created during the call, with `scope.escape(handle)` to keep specific handles alive.
+
+### Patch Changes
+
+- [#26](https://github.com/vercel-labs/quickjs-wasi/pull/26) [`ce955ba`](https://github.com/vercel-labs/quickjs-wasi/commit/ce955ba390f77eb87f6300dac4feca95e1aa5eeb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - `resolvePromise()` now subscribes via a captured `Promise.prototype.then` instead of reading `.then` off the value, so a proxy trap or shadowed accessor can no longer intercept it.
+
 ## 3.2.0
 
 ### Minor Changes
