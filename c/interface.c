@@ -8,6 +8,7 @@
  */
 
 #include "quickjs.h"
+#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -271,11 +272,64 @@ const char *qjs_get_quickjs_version(void) {
 /* All intrinsics enabled (same as JS_NewContext) */
 #define QJS_INTRINSIC_ALL 0xFFFFFFFF
 
+/*
+ * Malloc functions with a WORKING usable-size on wasm32-wasi.
+ *
+ * quickjs-ng's default `js__malloc_usable_size` (cutils.h) has no branch
+ * for WASI and falls through to `return 0;`. The memory accounting adds
+ * `usable_size(ptr) + MALLOC_OVERHEAD` per allocation, so with a zero
+ * usable-size every allocation is recorded as overhead only — the actual
+ * bytes never count against `JS_SetMemoryLimit`, and `mallocSize` stays
+ * near zero while real memory grows without bound (retained ArrayBuffers
+ * reach GiB under an 8 MiB limit; see issue #30). The per-allocation
+ * limit check still sees each incoming request's size, which is why one
+ * oversized allocation is refused while many sub-limit ones accumulate
+ * freely.
+ *
+ * wasi-libc's dlmalloc exports `malloc_usable_size`, so wiring it in
+ * makes the accounting — and therefore `memoryLimit` — actually work.
+ */
+static void *qjs_wasi_calloc(void *opaque, size_t count, size_t size) {
+    (void)opaque;
+    return calloc(count, size);
+}
+
+static void *qjs_wasi_malloc(void *opaque, size_t size) {
+    (void)opaque;
+    return malloc(size);
+}
+
+static void qjs_wasi_free(void *opaque, void *ptr) {
+    (void)opaque;
+    free(ptr);
+}
+
+static void *qjs_wasi_realloc(void *opaque, void *ptr, size_t size) {
+    (void)opaque;
+    return realloc(ptr, size);
+}
+
+static size_t qjs_wasi_malloc_usable_size(const void *ptr) {
+    return malloc_usable_size((void *)ptr);
+}
+
+static const JSMallocFunctions qjs_wasi_malloc_funcs = {
+    qjs_wasi_calloc,
+    qjs_wasi_malloc,
+    qjs_wasi_free,
+    qjs_wasi_realloc,
+    qjs_wasi_malloc_usable_size,
+};
+
+static JSRuntime *qjs_new_runtime(void) {
+    return JS_NewRuntime2(&qjs_wasi_malloc_funcs, NULL);
+}
+
 __attribute__((export_name("qjs_init")))
 int qjs_init(void) {
     if (rt) return -1; /* already initialized */
 
-    rt = JS_NewRuntime();
+    rt = qjs_new_runtime();
     if (!rt) return -1;
 
     ctx = JS_NewContext(rt);
@@ -300,7 +354,7 @@ __attribute__((export_name("qjs_init2")))
 int qjs_init2(unsigned int intrinsics) {
     if (rt) return -1; /* already initialized */
 
-    rt = JS_NewRuntime();
+    rt = qjs_new_runtime();
     if (!rt) return -1;
 
     if (intrinsics == QJS_INTRINSIC_ALL) {

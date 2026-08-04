@@ -25,6 +25,48 @@ describe('memoryLimit', () => {
     expect(msg).not.toBe('ok');
   });
 
+  it('bounds RETAINED ArrayBuffer/TypedArray memory (issue #30)', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      memoryLimit: 8 * 1024 * 1024, // 8 MiB
+    });
+
+    // Regression: quickjs-ng's default usable-size returns 0 on
+    // wasm32-wasi, so allocations were recorded as overhead only — the
+    // per-allocation limit check saw each incoming size, but nothing
+    // accumulated in malloc_size. Many sub-limit buffers (each well
+    // under 8 MiB) therefore grew real linear memory without bound:
+    // this exact loop reached ~150 MiB resident under the 8 MiB limit
+    // with no exception. With wasi-libc's malloc_usable_size wired into
+    // the runtime's malloc functions, retention is accounted and the
+    // loop must throw close to the limit.
+    const result = vm.evalCode(`
+      globalThis.keep = [];
+      try {
+        for (var i = 0; i < 300; i++) {
+          var b = new Uint8Array(512 * 1024);
+          b[0] = 1;
+          keep.push(b);
+        }
+        "no-throw";
+      } catch (e) {
+        "threw at " + keep.length;
+      }
+    `);
+    const msg = result.consume((h) => h.toString());
+    expect(msg).not.toBe('no-throw');
+    // 8 MiB limit / 512 KiB buffers ⇒ must stop well before 32 pushes
+    // (heap baseline eats some budget; the pre-fix behavior was 300).
+    const count = Number(msg.replace('threw at ', ''));
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThan(32);
+
+    // The accounting is real: mallocSize reflects the retained bytes.
+    const usage = vm.getMemoryUsage();
+    expect(usage.mallocSize).toBeGreaterThan(4 * 1024 * 1024);
+    expect(usage.mallocSize).toBeLessThanOrEqual(9 * 1024 * 1024);
+  });
+
   it('should allow normal operations within the limit', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
