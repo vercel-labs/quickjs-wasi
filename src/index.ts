@@ -1112,7 +1112,24 @@ export class QuickJS {
     const name = this.decoder.decode(new Uint8Array(this.exports.memory.buffer, namePtr, nameLen));
     const callback = this.hostCallbacks.get(name);
     if (!callback) {
-      return this.exports.qjs_get_undefined();
+      // Throw inside the guest, as the docs promise: `newEphemeralFunction`
+      // ("calling it after the handle is disposed throws, because the
+      // callback is gone") and `unregisterHostCallback` ("any QuickJS
+      // function still referencing the name will throw when called").
+      // Silently returning `undefined` here masked real bugs — e.g. a
+      // snapshot-restored VM calling a host function that was never
+      // re-registered would corrupt results instead of failing loud.
+      // Guest code can catch this like any other error.
+      const errHandle = this.newError(
+        new Error(
+          `Host callback "${name}" is not registered — it was unregistered, ` +
+            'its ephemeral function handle was disposed, or it was never ' +
+            're-registered after a snapshot restore.'
+        )
+      );
+      this.exports.qjs_throw(errHandle.ptr);
+      errHandle.dispose();
+      return 0;
     }
 
     // `thisPtr` and the argv entries are OWNED BY THE C TRAMPOLINE, which

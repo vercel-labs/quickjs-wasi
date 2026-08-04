@@ -24,10 +24,28 @@ describe('newEphemeralFunction', () => {
 
     fn.dispose();
 
-    // the guest still holds the function, but the callback is gone: an
-    // unregistered host callback yields `undefined` rather than throwing
-    using after = vm.evalCode('ephemeral()');
-    expect(after.isUndefined).toBe(true);
+    // The guest still holds the function, but the callback is gone: the
+    // call throws inside the guest (as the newEphemeralFunction docs
+    // promise), and the error is catchable like any other guest error.
+    using after = vm.evalCode(
+      'try { ephemeral(); "no-throw" } catch (e) { e.message }'
+    );
+    expect(after.toString()).toContain('is not registered');
+  });
+
+  it('a call after unregisterHostCallback throws inside the guest', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+
+    using fn = vm.newFunction('goner', () => vm.newString('alive'));
+    vm.setProp(vm.global, 'goner', fn);
+    expect(vm.evalCode('goner()').consume((h) => h.toString())).toBe('alive');
+
+    expect(vm.unregisterHostCallback('goner')).toBe(true);
+
+    // Uncaught in the guest: surfaces as a host-side exception.
+    expect(() => vm.evalCode('goner()')).toThrow(
+      '"goner" is not registered'
+    );
   });
 
   it('does not leak callbacks across many calls', async () => {
@@ -67,8 +85,12 @@ describe('unregisterHostCallback', () => {
 
     expect(vm.unregisterHostCallback('greet')).toBe(true);
     expect(vm.unregisterHostCallback('greet')).toBe(false);
-    using after = vm.evalCode('greet()');
-    expect(after.isUndefined).toBe(true);
+    // A call through the still-reachable guest function now throws, as
+    // the unregisterHostCallback docs promise.
+    using after = vm.evalCode(
+      'try { greet(); "no-throw" } catch (e) { e.message }'
+    );
+    expect(after.toString()).toContain('"greet" is not registered');
   });
 
   it('frees the name for reuse', async () => {
