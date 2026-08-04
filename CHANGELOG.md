@@ -1,5 +1,15 @@
 # quickjs-wasi
 
+## 3.3.1
+
+### Patch Changes
+
+- [#31](https://github.com/vercel-labs/quickjs-wasi/pull/31) [`ff79f5c`](https://github.com/vercel-labs/quickjs-wasi/commit/ff79f5cc7f48c68bf0b36292f6a5545f516dd084) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Host-callback `this`/argument handles are now "borrowed": exempt from `withScope()` tracking and `dispose()` is a no-op. Their pointers are owned by the C trampoline (which frees them after the call returns), so a scope active around guest execution — or an explicit dispose inside a callback — previously double-freed the guest values and corrupted the heap. Callbacks retain arguments past their invocation via `dup()`, which takes an owned reference and behaves normally.
+
+- [#34](https://github.com/vercel-labs/quickjs-wasi/pull/34) [`fca5918`](https://github.com/vercel-labs/quickjs-wasi/commit/fca5918bd52ff56f144e7f1ac6ed7c3f327f24aa) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Calling a guest function whose host callback is not registered now throws inside the guest (catchable, or surfaced as a host exception when uncaught), as the `newEphemeralFunction` and `unregisterHostCallback` docs already promised — previously it silently returned `undefined`, masking bugs like un-re-registered callbacks after a snapshot restore.
+
+- [#33](https://github.com/vercel-labs/quickjs-wasi/pull/33) [`4829774`](https://github.com/vercel-labs/quickjs-wasi/commit/4829774bd667965c9f713db2f081484ac41bd66e) Thanks [@TooTallNate](https://github.com/TooTallNate)! - `memoryLimit` now actually bounds retained memory: the runtime is created with malloc functions that use wasi-libc's `malloc_usable_size`, replacing quickjs-ng's default usable-size which returns 0 on wasm32-wasi. Previously every allocation was accounted as overhead only, so retained ArrayBuffers/TypedArrays (and all other allocations) grew real memory without bound under any limit — reaching GiB under an 8 MiB `memoryLimit` — and `getMemoryUsage().mallocSize` stayed near zero. Workloads near their configured limit may now throw where they silently over-allocated before; raise `memoryLimit` to match actual usage.
+
 ## 3.3.0
 
 ### Minor Changes
