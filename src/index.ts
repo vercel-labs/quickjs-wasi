@@ -1115,14 +1115,21 @@ export class QuickJS {
       return this.exports.qjs_get_undefined();
     }
 
-    const thisHandle = new JSValueHandle(this, thisPtr);
+    // `thisPtr` and the argv entries are OWNED BY THE C TRAMPOLINE, which
+    // frees them after this call returns. Wrap them as borrowed handles:
+    // dispose() is a no-op and they are exempt from `withScope()`
+    // tracking — a scope active around guest execution (e.g. a host
+    // serializer driving a `forEach` visitor) must not free them at its
+    // boundary, which would double-free the guest values and corrupt the
+    // heap. Callbacks retain arguments past their invocation via `dup()`.
+    const thisHandle = new JSValueHandle(this, thisPtr, false, true);
 
     const args: JSValueHandle[] = [];
     if (argc > 0 && argvPtr !== 0) {
       const view = new DataView(this.exports.memory.buffer);
       for (let i = 0; i < argc; i++) {
         const argPtr = view.getUint32(argvPtr + i * 4, true);
-        args.push(new JSValueHandle(this, argPtr));
+        args.push(new JSValueHandle(this, argPtr, false, true));
       }
     }
 
@@ -1506,6 +1513,12 @@ export class QuickJS {
    *
    * `fn` must be synchronous. Handles created after an `await` are outside
    * the scope, because it closes as soon as `fn` returns.
+   *
+   * Host callbacks are safe to trigger inside a scope: the `this`/argument
+   * handles the trampoline passes to a callback wrap C-owned pointers and
+   * are exempt from scope tracking (see `handleHostCall`), so the scope
+   * frees only handles the host actually owns. Handles a callback CREATES
+   * (including `dup()`s of its arguments) are tracked normally.
    */
   withScope<T>(fn: (scope: HandleScope) => T): T {
     this.assertNotDisposed();
@@ -2363,18 +2376,33 @@ export class JSValueHandle {
   private readonly singleton: boolean;
 
   /**
+   * When true, this handle wraps a `JSValue*` OWNED BY THE C CALLER — the
+   * `this`/argument handles the host-call trampoline passes to a host
+   * callback (`handleHostCall`). The C side frees those values after the
+   * call returns, so `dispose()` is a no-op and the handle is never
+   * registered with an active `withScope()` (either would double-free
+   * the guest value and corrupt the heap). A callback that needs to
+   * retain an argument past its own invocation must `dup()` it — the
+   * duplicate takes a fresh reference and behaves like any owned handle.
+   * @internal
+   */
+  private readonly borrowed: boolean;
+
+  /**
    * Extra cleanup to run when this handle is disposed — used by
    * `newEphemeralFunction()` to unregister its host callback.
    * @internal
    */
   _onDispose: (() => void) | undefined;
 
-  constructor(vm: QuickJS, ptr: number, singleton = false) {
+  constructor(vm: QuickJS, ptr: number, singleton = false, borrowed = false) {
     this.vm = vm;
     this.ptr = ptr;
     this.singleton = singleton;
-    // Singletons are shared and outlive any scope.
-    if (!singleton) vm._activeScope?.add(this);
+    this.borrowed = borrowed;
+    // Singletons are shared and outlive any scope; borrowed handles wrap
+    // C-owned pointers that a scope must never free.
+    if (!singleton && !borrowed) vm._activeScope?.add(this);
   }
 
   /**
@@ -2967,8 +2995,10 @@ export class JSValueHandle {
     // Cached singleton handles (undefined/null/true/false/global) share a
     // single heap-allocated JSValue that the VM keeps referencing. Freeing it
     // here would leave the cached handle pointing at freed memory, so disposing
-    // a singleton is intentionally a no-op.
-    if (this.singleton) return;
+    // a singleton is intentionally a no-op. Borrowed handles (host-callback
+    // `this`/arguments) wrap pointers owned by the C caller, which frees them
+    // itself after the call returns — freeing here would double-free.
+    if (this.singleton || this.borrowed) return;
     if (!this.disposed_) {
       this.disposed_ = true;
       this._onDispose?.();
