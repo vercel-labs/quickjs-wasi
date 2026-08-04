@@ -1120,12 +1120,14 @@ export class QuickJS {
       // snapshot-restored VM calling a host function that was never
       // re-registered would corrupt results instead of failing loud.
       // Guest code can catch this like any other error.
+      // A string (not a host Error object): newError copies an Error's
+      // host .stack into the guest, which would leak host file paths into
+      // guest-observable space and shadow any guest backtrace. This error
+      // is library-generated — there is no host stack worth preserving.
       const errHandle = this.newError(
-        new Error(
-          `Host callback "${name}" is not registered — it was unregistered, ` +
-            'its ephemeral function handle was disposed, or it was never ' +
-            're-registered after a snapshot restore.'
-        )
+        `Host callback "${name}" is not registered — it was unregistered, ` +
+          'its ephemeral function handle was disposed, or it was never ' +
+          're-registered after a snapshot restore.'
       );
       this.exports.qjs_throw(errHandle.ptr);
       errHandle.dispose();
