@@ -3138,6 +3138,10 @@ export class JSValueHandle {
     // length changes, defeating length-based detection downstream.
     const e = this.vm._getExports();
     const lenPtr = e.wasm_malloc(4);
+    // Same failure check as writeString(): a 0 return would make
+    // qjs_get_string_len write the length to address 0 and the DataView
+    // read below read from it — silent corruption instead of an error.
+    if (lenPtr === 0) throw new Error('wasm_malloc failed');
     try {
       const cstrPtr = e.qjs_get_string_len(this.ptr, lenPtr);
       if (cstrPtr === 0) return '<null>';
