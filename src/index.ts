@@ -1600,6 +1600,18 @@ export class QuickJS {
     if (handle.disposed) {
       throw new Error('exportHandle: handle is disposed');
     }
+    if (handle._isBorrowed) {
+      // Host-callback this/argument handles wrap boxes OWNED BY THE C
+      // TRAMPOLINE, freed when the callback returns — a token minted
+      // from one would point at freed memory in every restored VM.
+      // Callbacks that need to persist an argument must dup() it first
+      // (the duplicate is an owned box) and export the duplicate.
+      throw new Error(
+        'exportHandle: cannot export a borrowed handle (host-callback ' +
+          'this/argument) — its box is freed when the callback returns. ' +
+          'dup() it and export the duplicate.'
+      );
+    }
     return handle.ptr;
   }
 
@@ -1612,6 +1624,19 @@ export class QuickJS {
    */
   importHandle(token: number): JSValueHandle {
     this.assertNotDisposed();
+    // Best-effort validation before handing the value to qjs_dup_value,
+    // which dereferences it as a raw JSValue* inside the WASM instance.
+    // A malformed token (0, negative, fractional, out of address range)
+    // would otherwise read arbitrary memory. A well-formed but FORGED
+    // token remains undefined behavior — like any raw pointer, tokens
+    // are only meaningful under the exportHandle contract.
+    if (
+      !Number.isInteger(token) ||
+      token <= 0 ||
+      token >= this.exports.memory.buffer.byteLength
+    ) {
+      throw new Error(`importHandle: invalid token ${token}`);
+    }
     return new JSValueHandle(this, this.exports.qjs_dup_value(token));
   }
 
@@ -2475,6 +2500,16 @@ export class JSValueHandle {
     // Singletons are shared and outlive any scope; borrowed handles wrap
     // C-owned pointers that a scope must never free.
     if (!singleton && !borrowed) vm._activeScope?.add(this);
+  }
+
+  /**
+   * Whether this handle wraps a C-owned pointer (host-callback
+   * `this`/arguments). Borrowed handles must never be exported as
+   * snapshot tokens — the trampoline frees their boxes after the
+   * callback returns. @internal
+   */
+  get _isBorrowed(): boolean {
+    return this.borrowed;
   }
 
   /**

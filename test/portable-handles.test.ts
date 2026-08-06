@@ -69,6 +69,39 @@ describe('exportHandle / importHandle', () => {
     expect(imported.identity).toBe(original.identity);
   });
 
+  it('rejects borrowed handles (host-callback arguments)', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    let thrown: unknown;
+    let dupToken: number | undefined;
+    using fn = vm.newEphemeralFunction((arg) => {
+      // The trampoline's argument handles wrap C-owned boxes freed when
+      // this callback returns — a token minted from one would dangle in
+      // every restored VM.
+      try {
+        vm.exportHandle(arg);
+      } catch (err) {
+        thrown = err;
+      }
+      // The documented escape hatch: dup() (an owned box) exports fine.
+      const owned = arg.dup();
+      dupToken = vm.exportHandle(owned);
+      return vm.undefined;
+    });
+    vm.setProp(vm.global, 'cb', fn);
+    vm.evalCode('cb({ n: 3 })').dispose();
+    expect(String(thrown)).toContain('borrowed');
+    expect(dupToken).toBeDefined();
+    using imported = vm.importHandle(dupToken as number);
+    expect(imported.getProp('n').consume((h) => h.toNumber())).toBe(3);
+  });
+
+  it('rejects malformed tokens before dereferencing', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    for (const bad of [0, -1, 1.5, Number.NaN, 2 ** 40]) {
+      expect(() => vm.importHandle(bad)).toThrow('invalid token');
+    }
+  });
+
   it('rejects handles from a different VM and disposed handles', async () => {
     using vm = await QuickJS.create(wasmBytes);
     using other = await QuickJS.create(wasmBytes);
