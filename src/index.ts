@@ -415,6 +415,9 @@ interface QuickJSExports {
   // Value management
   qjs_dup_value(valPtr: number): number;
   qjs_free_value(valPtr: number): void;
+  qjs_get_string_len(valPtr: number, plenPtr: number): number;
+  qjs_has_own_property_value(objPtr: number, keyPtr: number): number;
+  qjs_property_is_enumerable_value(objPtr: number, keyPtr: number): number;
 
   // Property operations
   qjs_get_global(): number;
@@ -1169,7 +1172,10 @@ export class QuickJS {
 
   /** Write a JS string into WASM memory, returning the pointer. Caller must free. */
   private writeString(str: string): { ptr: number; len: number } {
-    const encoded = this.encoder.encode(str);
+    // WTF-8 (not plain TextEncoder): lone surrogates in the input must
+    // reach the guest intact — quickjs's decoder accepts the 3-byte
+    // surrogate sequences, so a JS string round-trips exactly.
+    const encoded = encodeWtf8(str);
     const ptr = this.exports.wasm_malloc(encoded.length + 1);
     if (ptr === 0) throw new Error('wasm_malloc failed');
     const mem = new Uint8Array(this.exports.memory.buffer);
@@ -2299,6 +2305,116 @@ export class QuickJS {
   }
 }
 
+// ---- lossless string helpers ----
+
+/**
+ * Whether a string-typed property key survives the NUL-terminated
+ * C-string key APIs: embedded U+0000 truncates the key, and an UNPAIRED
+ * surrogate cannot be UTF-8 encoded (paired surrogates — e.g. emoji —
+ * encode fine). Keys that don't survive are routed through length-aware
+ * guest string values instead.
+ */
+function stringKeyNeedsValuePath(key: string): boolean {
+  return key.includes('\u0000') || LONE_SURROGATE_RE.test(key);
+}
+
+const wtf8Decoder = new TextDecoder();
+const wtf8Encoder = new TextEncoder();
+
+const LONE_SURROGATE_RE =
+  /(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF]))|(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])/;
+
+/**
+ * Encode a JS string to WTF-8 bytes. Well-formed strings (including
+ * paired surrogates — emoji) take the native TextEncoder; strings with
+ * LONE surrogates take a manual encode that writes each unpaired
+ * surrogate as the 3-byte sequence quickjs's tolerant UTF-8 decoder
+ * accepts — TextEncoder would replace them with U+FFFD, silently
+ * corrupting every host→guest string (sources, property keys,
+ * newString values).
+ */
+function encodeWtf8(str: string): Uint8Array {
+  if (!LONE_SURROGATE_RE.test(str)) return wtf8Encoder.encode(str);
+  const bytes: number[] = [];
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
+      const next = str.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        // Well-formed pair — 4-byte UTF-8.
+        const cp = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+        bytes.push(
+          0xf0 | (cp >> 18),
+          0x80 | ((cp >> 12) & 0x3f),
+          0x80 | ((cp >> 6) & 0x3f),
+          0x80 | (cp & 0x3f)
+        );
+        i++;
+        continue;
+      }
+      // Lone high surrogate — 3-byte WTF-8.
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      // BMP char or lone (low / trailing high) surrogate — 3-byte form.
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Decode WTF-8 bytes to a JS string. WTF-8 is UTF-8 extended with 3-byte
+ * sequences for surrogate code points (0xED 0xA0-0xBF 0x80-0xBF), which
+ * is how quickjs's JS_ToCStringLen2 encodes lone surrogates ("keep
+ * unmatched surrogate code points"). TextDecoder replaces those
+ * sequences with U+FFFD, so they are detected first and the rare strings
+ * containing them take a manual decode; everything else — the
+ * overwhelming majority — uses the native decoder.
+ */
+function decodeWtf8(bytes: Uint8Array): string {
+  let hasSurrogateSequence = false;
+  for (let i = 0; i < bytes.length - 1; i++) {
+    if (bytes[i] === 0xed && bytes[i + 1] >= 0xa0 && bytes[i + 1] <= 0xbf) {
+      hasSurrogateSequence = true;
+      break;
+    }
+  }
+  if (!hasSurrogateSequence) return wtf8Decoder.decode(bytes);
+
+  let out = '';
+  let i = 0;
+  while (i < bytes.length) {
+    const b0 = bytes[i];
+    if (b0 < 0x80) {
+      out += String.fromCharCode(b0);
+      i += 1;
+    } else if (b0 < 0xe0) {
+      out += String.fromCharCode(((b0 & 0x1f) << 6) | (bytes[i + 1] & 0x3f));
+      i += 2;
+    } else if (b0 < 0xf0) {
+      // 3-byte sequence — may decode into the surrogate range, which is
+      // exactly the WTF-8 extension: emit the code unit as-is.
+      out += String.fromCharCode(
+        ((b0 & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f)
+      );
+      i += 3;
+    } else {
+      const cp =
+        ((b0 & 0x07) << 18) |
+        ((bytes[i + 1] & 0x3f) << 12) |
+        ((bytes[i + 2] & 0x3f) << 6) |
+        (bytes[i + 3] & 0x3f);
+      out += String.fromCodePoint(cp);
+      i += 4;
+    }
+  }
+  return out;
+}
+
 // ---- JSException ----
 
 /**
@@ -2781,6 +2897,12 @@ export class JSValueHandle {
    * Check if a property is an own property (equivalent to Object.prototype.hasOwnProperty).
    */
   hasOwnProperty(name: string): boolean {
+    if (stringKeyNeedsValuePath(name)) {
+      using keyHandle = this.vm.newString(name);
+      return (
+        this.vm._getExports().qjs_has_own_property_value(this.ptr, keyHandle.ptr) === 1
+      );
+    }
     const { ptr: namePtr } = this.vm._writeString(name);
     const result = this.vm._getExports().qjs_has_own_property(this.ptr, namePtr);
     this.vm._getExports().wasm_free(namePtr);
@@ -2791,6 +2913,15 @@ export class JSValueHandle {
    * Check if a property is enumerable (equivalent to Object.prototype.propertyIsEnumerable).
    */
   propertyIsEnumerable(name: string): boolean {
+    if (stringKeyNeedsValuePath(name)) {
+      using keyHandle = this.vm.newString(name);
+      return (
+        this.vm._getExports().qjs_property_is_enumerable_value(
+          this.ptr,
+          keyHandle.ptr
+        ) === 1
+      );
+    }
     const { ptr: namePtr } = this.vm._writeString(name);
     const result = this.vm._getExports().qjs_property_is_enumerable(this.ptr, namePtr);
     this.vm._getExports().wasm_free(namePtr);
@@ -2839,6 +2970,12 @@ export class JSValueHandle {
    * Get a property by name.
    */
   getProp(name: string): JSValueHandle {
+    if (stringKeyNeedsValuePath(name)) {
+      // A NUL or lone surrogate in the key cannot cross the C-string
+      // API; go through a length-aware guest string key instead.
+      using keyHandle = this.vm.newString(name);
+      return this.vm.getProp(this, keyHandle);
+    }
     const { ptr: namePtr } = this.vm._writeString(name);
     const resultPtr = this.vm._getExports().qjs_get_prop_string(this.ptr, namePtr);
     this.vm._getExports().wasm_free(namePtr);
@@ -2849,6 +2986,11 @@ export class JSValueHandle {
    * Set a property by name.
    */
   setProp(name: string, value: JSValueHandle): void {
+    if (stringKeyNeedsValuePath(name)) {
+      using keyHandle = this.vm.newString(name);
+      this.vm.setProp(this, keyHandle, value);
+      return;
+    }
     const { ptr: namePtr } = this.vm._writeString(name);
     this.vm._getExports().qjs_set_prop_string(this.ptr, namePtr, value.ptr);
     this.vm._getExports().wasm_free(namePtr);
@@ -2868,6 +3010,11 @@ export class JSValueHandle {
     if (descriptor?.writable) flags |= 2;     // JS_PROP_WRITABLE
     if (descriptor?.enumerable) flags |= 4;   // JS_PROP_ENUMERABLE
     if (typeof key === 'string') {
+      if (stringKeyNeedsValuePath(key)) {
+        using keyHandle = this.vm.newString(key);
+        this.vm._getExports().qjs_define_prop_value(this.ptr, keyHandle.ptr, value.ptr, flags);
+        return;
+      }
       const { ptr: namePtr } = this.vm._writeString(key);
       this.vm._getExports().qjs_define_prop_string(this.ptr, namePtr, value.ptr, flags);
       this.vm._getExports().wasm_free(namePtr);
@@ -2981,11 +3128,31 @@ export class JSValueHandle {
    * `vm.callFunction`) when a specific conversion is wanted.
    */
   toString(): string {
-    const cstrPtr = this.vm._getExports().qjs_get_string(this.ptr);
-    if (cstrPtr === 0) return '<null>';
-    const str = this.vm._readCString(cstrPtr);
-    this.vm._getExports().qjs_free_cstring(cstrPtr);
-    return str;
+    // Length-aware + WTF-8 (qjs_get_string_len): embedded U+0000 code
+    // units survive (the byte length is explicit, not NUL-scanned) and
+    // lone surrogates survive (quickjs encodes unmatched surrogate code
+    // points as 3-byte WTF-8 sequences, decoded back to their original
+    // code units). The previous JS_ToCString/NUL-terminated read
+    // silently truncated at the first NUL and replaced lone surrogates
+    // with U+FFFD — and the two corruptions could cancel each other's
+    // length changes, defeating length-based detection downstream.
+    const e = this.vm._getExports();
+    const lenPtr = e.wasm_malloc(4);
+    // Same failure check as writeString(): a 0 return would make
+    // qjs_get_string_len write the length to address 0 and the DataView
+    // read below read from it — silent corruption instead of an error.
+    if (lenPtr === 0) throw new Error('wasm_malloc failed');
+    try {
+      const cstrPtr = e.qjs_get_string_len(this.ptr, lenPtr);
+      if (cstrPtr === 0) return '<null>';
+      const len = new DataView(e.memory.buffer).getUint32(lenPtr, true);
+      const bytes = new Uint8Array(e.memory.buffer, cstrPtr, len);
+      const str = decodeWtf8(bytes);
+      e.qjs_free_cstring(cstrPtr);
+      return str;
+    } finally {
+      e.wasm_free(lenPtr);
+    }
   }
 
   /**
