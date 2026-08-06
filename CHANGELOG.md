@@ -1,5 +1,13 @@
 # quickjs-wasi
 
+## 3.4.0
+
+### Minor Changes
+
+- [#35](https://github.com/vercel-labs/quickjs-wasi/pull/35) [`0b05c98`](https://github.com/vercel-labs/quickjs-wasi/commit/0b05c983938c70d4b7398116bf781bf9085963a2) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Strings now cross the WASM boundary losslessly in both directions — embedded NULs and lone surrogates survive `toString()`, `newString()`, `evalCode()` sources, property keys, and enumeration.
+
+- [#36](https://github.com/vercel-labs/quickjs-wasi/pull/36) [`61eb90f`](https://github.com/vercel-labs/quickjs-wasi/commit/61eb90fb346f1d6172049b2bf42190bb8859dc9c) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.exportHandle()` / `vm.importHandle()` for snapshot-portable handle tokens, enabling pre-snapshot captures to be re-materialized in restored VMs without executing guest code.
+
 ## 3.3.1
 
 ### Patch Changes
