@@ -767,6 +767,21 @@ const char *qjs_get_string(JSValue *val) {
     return JS_ToCString(ctx, *val);
 }
 
+/*
+ * Length-aware string conversion. Unlike qjs_get_string (JS_ToCString),
+ * the result is NOT consumed via NUL-terminated reads: the byte length is
+ * written to *plen, so embedded U+0000 code units survive. Lone
+ * surrogates survive too — JS_ToCStringLen2 keeps unmatched surrogate
+ * code points, encoding them as 3-byte sequences (WTF-8). The host
+ * decodes WTF-8 (standard UTF-8 plus surrogate-range sequences) to
+ * recover the exact JS string. Free with qjs_free_cstring.
+ */
+__attribute__((export_name("qjs_get_string_len")))
+const char *qjs_get_string_len(JSValue *val, size_t *plen) {
+    if (!ctx) return NULL;
+    return JS_ToCStringLen2(ctx, plen, *val, false);
+}
+
 __attribute__((export_name("qjs_free_cstring")))
 void qjs_free_cstring(const char *str) {
     JS_FreeCString(ctx, str);
@@ -1318,6 +1333,30 @@ int qjs_has_own_property(JSValue *obj, const char *name) {
 }
 
 /*
+ * qjs_has_own_property with a JSValue key instead of a C string. C-string
+ * keys cannot express embedded NULs or lone surrogates; a JSValue key
+ * (from qjs_new_string, which is length-aware) can — and also supports
+ * symbols.
+ */
+__attribute__((export_name("qjs_has_own_property_value")))
+int qjs_has_own_property_value(JSValue *obj, JSValue *key) {
+    JSAtom atom = JS_ValueToAtom(ctx, *key);
+    if (atom == JS_ATOM_NULL) return -1;
+    JSPropertyDescriptor desc;
+    int ret = JS_GetOwnProperty(ctx, &desc, *obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (ret > 0) {
+        JS_FreeValue(ctx, desc.value);
+        if (desc.flags & JS_PROP_GETSET) {
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+        return 1;
+    }
+    return ret;
+}
+
+/*
  * Check if a property is enumerable.
  * Returns 1 if the property is own and enumerable, 0 otherwise, -1 on error.
  */
@@ -1338,6 +1377,27 @@ int qjs_property_is_enumerable(JSValue *obj, const char *name) {
         return enumerable;
     }
     return ret; /* 0 = not found, -1 = error */
+}
+
+/* qjs_property_is_enumerable with a JSValue key — see
+ * qjs_has_own_property_value for why. */
+__attribute__((export_name("qjs_property_is_enumerable_value")))
+int qjs_property_is_enumerable_value(JSValue *obj, JSValue *key) {
+    JSAtom atom = JS_ValueToAtom(ctx, *key);
+    if (atom == JS_ATOM_NULL) return -1;
+    JSPropertyDescriptor desc;
+    int ret = JS_GetOwnProperty(ctx, &desc, *obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (ret > 0) {
+        int enumerable = (desc.flags & JS_PROP_ENUMERABLE) ? 1 : 0;
+        JS_FreeValue(ctx, desc.value);
+        if (desc.flags & JS_PROP_GETSET) {
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+        return enumerable;
+    }
+    return ret;
 }
 
 /*
