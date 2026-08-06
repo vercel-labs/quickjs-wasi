@@ -1569,6 +1569,84 @@ export class QuickJS {
   }
 
   /**
+   * Export a handle as a snapshot-portable token.
+   *
+   * A handle's heap box lives in the VM's linear memory, so a
+   * `snapshot()` taken while the handle is alive carries it — and a VM
+   * restored from that snapshot has the identical box at the identical
+   * offset. `importHandle(token)` on the restored VM (or on this VM)
+   * re-materializes an owned handle for the same guest value without
+   * evaluating any guest code.
+   *
+   * Contract:
+   * - the handle must stay undisposed until after `snapshot()` — its
+   *   box (and the reference it holds) must be part of the memory image;
+   * - the token is only meaningful to THIS VM and VMs restored from a
+   *   snapshot of it taken while the handle was alive;
+   * - `importHandle` duplicates the underlying value (fresh reference,
+   *   fresh box), so it can be called any number of times and each
+   *   returned handle is independently owned and disposable. The
+   *   exported box's own reference is intentionally never released on
+   *   restored VMs (one retained reference per VM image — reclaimed
+   *   with the VM).
+   *
+   * The intended use is boot-time capture: snapshot a VM after capturing
+   * references to pristine intrinsics but BEFORE evaluating untrusted or
+   * user code, then restore per task and import the captured handles —
+   * guaranteeing the references predate anything user code patched,
+   * without re-running capture code in the restored VM (where user-
+   * patched globals could observe it). See vercel/workflow's host-side
+   * serde for a worked example.
+   */
+  exportHandle(handle: JSValueHandle): number {
+    this.assertNotDisposed();
+    if (handle.vm !== this) {
+      throw new Error('exportHandle: handle belongs to a different VM');
+    }
+    if (handle.disposed) {
+      throw new Error('exportHandle: handle is disposed');
+    }
+    if (handle._isBorrowed) {
+      // Host-callback this/argument handles wrap boxes OWNED BY THE C
+      // TRAMPOLINE, freed when the callback returns — a token minted
+      // from one would point at freed memory in every restored VM.
+      // Callbacks that need to persist an argument must dup() it first
+      // (the duplicate is an owned box) and export the duplicate.
+      throw new Error(
+        'exportHandle: cannot export a borrowed handle (host-callback ' +
+          'this/argument) — its box is freed when the callback returns. ' +
+          'dup() it and export the duplicate.'
+      );
+    }
+    return handle.ptr;
+  }
+
+  /**
+   * Re-materialize a handle from a token produced by `exportHandle` —
+   * on this VM, or on a VM restored from a snapshot taken while the
+   * exported handle was alive. Returns a NEW owned handle (the
+   * underlying value's refcount is incremented); dispose it like any
+   * other handle. See `exportHandle` for the full contract.
+   */
+  importHandle(token: number): JSValueHandle {
+    this.assertNotDisposed();
+    // Best-effort validation before handing the value to qjs_dup_value,
+    // which dereferences it as a raw JSValue* inside the WASM instance.
+    // A malformed token (0, negative, fractional, out of address range)
+    // would otherwise read arbitrary memory. A well-formed but FORGED
+    // token remains undefined behavior — like any raw pointer, tokens
+    // are only meaningful under the exportHandle contract.
+    if (
+      !Number.isInteger(token) ||
+      token <= 0 ||
+      token >= this.exports.memory.buffer.byteLength
+    ) {
+      throw new Error(`importHandle: invalid token ${token}`);
+    }
+    return new JSValueHandle(this, this.exports.qjs_dup_value(token));
+  }
+
+  /**
    * Create a QuickJS function backed by a host callback whose registration is
    * tied to the returned handle: disposing the handle unregisters the
    * callback.
@@ -2538,6 +2616,16 @@ export class JSValueHandle {
     // Singletons are shared and outlive any scope; borrowed handles wrap
     // C-owned pointers that a scope must never free.
     if (!singleton && !borrowed) vm._activeScope?.add(this);
+  }
+
+  /**
+   * Whether this handle wraps a C-owned pointer (host-callback
+   * `this`/arguments). Borrowed handles must never be exported as
+   * snapshot tokens — the trampoline frees their boxes after the
+   * callback returns. @internal
+   */
+  get _isBorrowed(): boolean {
+    return this.borrowed;
   }
 
   /**
