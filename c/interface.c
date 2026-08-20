@@ -751,10 +751,15 @@ uint8_t *qjs_compile(const char *code, size_t code_len, const char *filename,
        allocator is an arena whose pointers are NOT plain-malloc pointers,
        so hand out a plain-malloc copy and js_free the original. */
     uint8_t *copy = malloc(*out_len);
-    if (copy)
+    if (copy) {
         memcpy(copy, buf, *out_len);
-    else
+    } else {
+        /* The host reports a NULL return via the pending QuickJS
+           exception — make sure there is one, or it would surface a
+           stale/unset exception as the compile error. */
+        JS_ThrowOutOfMemory(ctx);
         *out_len = 0;
+    }
     js_free(ctx, buf);
     return copy; /* caller frees with wasm_free() */
 }

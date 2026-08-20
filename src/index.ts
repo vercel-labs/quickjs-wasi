@@ -2809,6 +2809,14 @@ export class JSValueHandle {
    */
   get className(): string | undefined {
     const h = new JSValueHandle(this.vm, this.vm._getExports().qjs_get_class_name(this.ptr));
+    // qjs_get_class_name can return JS_EXCEPTION (e.g. OOM while
+    // materializing the name atom as a string); surface it instead of
+    // stringifying the exception sentinel and leaving the real error
+    // pending on the context.
+    if (this.vm._getExports().qjs_is_exception(h.ptr) !== 0) {
+      h.dispose();
+      throw new JSException(this.vm.getException());
+    }
     try {
       return h.isUndefined ? undefined : h.toString();
     } finally {
