@@ -1,5 +1,21 @@
 # quickjs-wasi
 
+## 3.5.0
+
+### Minor Changes
+
+- [#41](https://github.com/vercel-labs/quickjs-wasi/pull/41) [`a60119c`](https://github.com/vercel-labs/quickjs-wasi/commit/a60119c738ef837ba7398128babb568c68873152) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `handle.className`: the engine-level class name of a value (e.g. `"Map"`, `"Date"`, `"URL"`) read trap-free from the class table — unlike `constructorName`, it executes no guest code and cannot be spoofed by prototype/constructor reassignment.
+
+- [#41](https://github.com/vercel-labs/quickjs-wasi/pull/41) [`a60119c`](https://github.com/vercel-labs/quickjs-wasi/commit/a60119c738ef837ba7398128babb568c68873152) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add `vm.markPromiseHandled(promise)`: suppress the `onUnhandledRejection` callback for a promise whose rejection the host observes through other means.
+
+- [#41](https://github.com/vercel-labs/quickjs-wasi/pull/41) [`a60119c`](https://github.com/vercel-labs/quickjs-wasi/commit/a60119c738ef837ba7398128babb568c68873152) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Update quickjs-ng from v0.15.1 to v0.16.2: brings the iterator chunking/includes/join proposals, the `Error.prototype.stack` accessor proposal, a faster register-based regexp engine, a new arena allocator, and many correctness/security fixes.
+
+### Patch Changes
+
+- [#41](https://github.com/vercel-labs/quickjs-wasi/pull/41) [`a60119c`](https://github.com/vercel-labs/quickjs-wasi/commit/a60119c738ef837ba7398128babb568c68873152) Thanks [@TooTallNate](https://github.com/TooTallNate)! - `resolvePromise()`, `Deferred.settled`, and module namespace resolution now subscribe via quickjs-ng's engine-level `JS_PromiseThen` instead of a captured `Promise.prototype.then`, so guest code that patches `then` or `Symbol.species` can no longer intercept or observe host promise subscriptions.
+
+- [#39](https://github.com/vercel-labs/quickjs-wasi/pull/39) [`8becfe0`](https://github.com/vercel-labs/quickjs-wasi/commit/8becfe05556d103138b8bd2344ab64f66fa83600) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Exceeding `memoryLimit` throws `InternalError: out of memory` again instead of a bare `null` (regression in 3.3.1): the limit is now enforced in the WASI malloc layer, which reserves headroom below the limit so the OOM error object can always be constructed.
+
 ## 3.4.0
 
 ### Minor Changes
