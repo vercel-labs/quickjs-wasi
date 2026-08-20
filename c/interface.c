@@ -288,25 +288,101 @@ const char *qjs_get_quickjs_version(void) {
  *
  * wasi-libc's dlmalloc exports `malloc_usable_size`, so wiring it in
  * makes the accounting — and therefore `memoryLimit` — actually work.
+ *
+ * ---- Why the limit is enforced HERE and not via JS_SetMemoryLimit ----
+ *
+ * The engine's limit check (js_malloc_rt et al.) runs BEFORE the malloc
+ * functions are called and refuses at exactly malloc_limit. When a guest
+ * exhausts the limit with many small allocations, JS_ThrowOutOfMemory's
+ * own allocation of the "out of memory" InternalError object is refused
+ * too, and quickjs falls back to throwing a bare JS_NULL (issue #38) —
+ * in-guest `catch (e)` sees `null`, indistinguishable from `throw null`,
+ * and the host gets a nameless, messageless exception.
+ *
+ * So the engine-level malloc_limit is left unlimited, and the limit is
+ * enforced in these malloc functions instead: normal allocations are
+ * refused at a SOFT limit that sits QJS_OOM_HEADROOM below the
+ * configured memoryLimit. Once a refusal happens, allocations may dip
+ * into the reserved headroom (up to the full memoryLimit) so that the
+ * InternalError object — and the guest/host code that inspects it — can
+ * allocate. The reserve re-arms as soon as usage drops back below the
+ * soft limit, and the configured memoryLimit remains a hard ceiling at
+ * all times.
  */
+
+#define QJS_OOM_HEADROOM (64 * 1024)
+
+static size_t qjs_mem_limit = 0; /* 0 = unlimited */
+static size_t qjs_mem_used = 0;  /* sum of malloc_usable_size of live allocs */
+static int qjs_mem_in_oom = 0;   /* a refusal happened; headroom is open */
+
+/* The limit normal allocations are held to: memoryLimit minus the OOM
+   headroom (or half the limit when the limit is tiny). */
+static size_t qjs_mem_soft_limit(void) {
+    if (qjs_mem_limit > 2 * QJS_OOM_HEADROOM)
+        return qjs_mem_limit - QJS_OOM_HEADROOM;
+    return qjs_mem_limit / 2;
+}
+
+/* Overflow-safe: would qjs_mem_used + size exceed cap? */
+static int qjs_mem_exceeds(size_t size, size_t cap) {
+    return size > cap || qjs_mem_used > cap - size;
+}
+
+/*
+ * Returns non-zero if an allocation of `size` additional bytes must be
+ * refused. Opens the OOM headroom on refusal; re-arms it once usage fits
+ * under the soft limit again.
+ */
+static int qjs_mem_refuse(size_t size) {
+    if (qjs_mem_limit == 0)
+        return 0; /* unlimited */
+    if (!qjs_mem_exceeds(size, qjs_mem_soft_limit())) {
+        qjs_mem_in_oom = 0; /* healthy again: re-arm the reserve */
+        return 0;
+    }
+    if (qjs_mem_in_oom && !qjs_mem_exceeds(size, qjs_mem_limit))
+        return 0; /* constructing/handling the OOM error: use the reserve */
+    qjs_mem_in_oom = 1;
+    return 1;
+}
+
 static void *qjs_wasi_calloc(void *opaque, size_t count, size_t size) {
     (void)opaque;
-    return calloc(count, size);
+    /* quickjs checks count*size for overflow before calling us */
+    if (qjs_mem_refuse(count * size)) return NULL;
+    void *ptr = calloc(count, size);
+    if (ptr) qjs_mem_used += malloc_usable_size(ptr);
+    return ptr;
 }
 
 static void *qjs_wasi_malloc(void *opaque, size_t size) {
     (void)opaque;
-    return malloc(size);
+    if (qjs_mem_refuse(size)) return NULL;
+    void *ptr = malloc(size);
+    if (ptr) qjs_mem_used += malloc_usable_size(ptr);
+    return ptr;
 }
 
 static void qjs_wasi_free(void *opaque, void *ptr) {
     (void)opaque;
+    if (!ptr) return;
+    size_t usable = malloc_usable_size(ptr);
+    qjs_mem_used -= usable <= qjs_mem_used ? usable : qjs_mem_used;
     free(ptr);
 }
 
 static void *qjs_wasi_realloc(void *opaque, void *ptr, size_t size) {
     (void)opaque;
-    return realloc(ptr, size);
+    size_t old_usable = ptr ? malloc_usable_size(ptr) : 0;
+    size_t growth = size > old_usable ? size - old_usable : 0;
+    if (qjs_mem_refuse(growth)) return NULL;
+    void *new_ptr = realloc(ptr, size);
+    if (new_ptr) {
+        qjs_mem_used -= old_usable <= qjs_mem_used ? old_usable : qjs_mem_used;
+        qjs_mem_used += malloc_usable_size(new_ptr);
+    }
+    return new_ptr;
 }
 
 static size_t qjs_wasi_malloc_usable_size(const void *ptr) {
@@ -434,7 +510,15 @@ void qjs_set_module_loader(int enable) {
 
 __attribute__((export_name("qjs_set_memory_limit")))
 void qjs_set_memory_limit(size_t limit) {
-    if (rt) JS_SetMemoryLimit(rt, limit);
+    qjs_mem_limit = limit;
+    qjs_mem_in_oom = 0;
+    /* The limit is enforced by our malloc functions (see the comment above
+       qjs_wasi_malloc): the engine-level check refuses at exactly the limit
+       and leaves no headroom to construct the "out of memory" InternalError,
+       so a bare `null` gets thrown instead (issue #38). Keep the engine
+       limit unlimited — and explicitly reset it, since a runtime restored
+       from a snapshot may carry a persisted engine-level limit. */
+    if (rt) JS_SetMemoryLimit(rt, 0);
 }
 
 __attribute__((export_name("qjs_set_max_stack_size")))
@@ -481,7 +565,9 @@ void qjs_compute_memory_usage(int64_t *out) {
     JSMemoryUsage s;
     JS_ComputeMemoryUsage(rt, &s);
     out[0]  = s.malloc_size;
-    out[1]  = s.malloc_limit;
+    /* The engine-level malloc_limit is intentionally left unlimited (see
+       qjs_set_memory_limit); report the limit we actually enforce. */
+    out[1]  = (int64_t)qjs_mem_limit;
     out[2]  = s.memory_used_size;
     out[3]  = s.malloc_count;
     out[4]  = s.memory_used_count;

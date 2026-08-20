@@ -67,6 +67,49 @@ describe('memoryLimit', () => {
     expect(usage.mallocSize).toBeLessThanOrEqual(9 * 1024 * 1024);
   });
 
+  it('throws InternalError: out of memory, not null, on exhaustion (issue #38)', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      memoryLimit: 4 * 1024 * 1024, // 4 MiB
+    });
+
+    // Regression: once #33 made the accounting real, a guest that filled
+    // memory with small objects left no room for JS_ThrowOutOfMemory to
+    // allocate the "out of memory" InternalError — the engine's limit
+    // check refused that allocation too, and quickjs fell back to
+    // throwing a bare JS_NULL. In-guest catch saw `null` and the host
+    // JSException had name/message "<null>", indistinguishable from a
+    // guest `throw null`. The malloc layer now reserves headroom below
+    // memoryLimit so the error object can always be constructed.
+    const result = vm.evalCode(`
+      (() => {
+        try {
+          const c = [];
+          for (;;) c.push({ i: c.length, s: 'x' + c.length });
+        } catch (e) {
+          return e === null ? 'NULL' : e.name + ': ' + e.message;
+        }
+      })()
+    `);
+    const msg = result.consume((h) => h.toString());
+    expect(msg).toBe('InternalError: out of memory');
+
+    // Uncaught OOM surfaces host-side with a real name/message too.
+    using vm2 = await QuickJS.create({
+      wasm: wasmBytes,
+      memoryLimit: 4 * 1024 * 1024,
+    });
+    try {
+      vm2.evalCode('const c = []; for (;;) c.push({ i: c.length })');
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(JSException);
+      expect((err as JSException).name).toBe('InternalError');
+      expect((err as JSException).message).toBe('out of memory');
+      (err as JSException).dispose();
+    }
+  });
+
   it('should allow normal operations within the limit', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
