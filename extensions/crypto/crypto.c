@@ -34,7 +34,7 @@
 #include "psa/crypto.h"
 
 /* ================================================================
- * WASI random_get — used as the external RNG for mbedTLS PSA
+ * WASI random_get, used as the external RNG for mbedTLS PSA
  * ================================================================ */
 
 /* WASI random_get syscall */
@@ -42,7 +42,7 @@ extern int __wasi_random_get(void *buf, size_t buf_len)
     __attribute__((__import_module__("wasi_snapshot_preview1"),
                    __import_name__("random_get")));
 
-/* mbedTLS external RNG callback — called by PSA internals */
+/* mbedTLS external RNG callback, called by PSA internals */
 psa_status_t mbedtls_psa_external_get_random(
     mbedtls_psa_external_random_context_t *context,
     uint8_t *output, size_t output_size, size_t *output_length)
@@ -426,7 +426,7 @@ static JSValue js_cryptokey_get_extractable(JSContext *ctx, JSValueConst this_va
     return JS_NewBool(ctx, kd->extractable);
 }
 
-/* CryptoKey.algorithm getter — returns a frozen algorithm object */
+/* CryptoKey.algorithm getter: returns a frozen algorithm object */
 static JSValue js_cryptokey_get_algorithm(JSContext *ctx, JSValueConst this_val) {
     CryptoKeyData *kd = (CryptoKeyData *)JS_GetOpaque(this_val, js_cryptokey_class_id);
     if (!kd) return JS_EXCEPTION;
@@ -2302,7 +2302,7 @@ static const JSCFunctionListEntry js_crypto_proto_funcs[] = {
     JS_CFUNC_DEF("randomUUID", 0, js_crypto_randomUUID),
 };
 
-/* Illegal constructor — throws TypeError matching browser behavior */
+/* Illegal constructor: throws TypeError matching browser behavior */
 static JSValue js_illegal_constructor(JSContext *ctx, JSValueConst new_target,
                                        int argc, JSValueConst *argv)
 {

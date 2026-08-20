@@ -530,7 +530,7 @@ describe('SubtleCrypto.digest()', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.generateKey() — HMAC
+// SubtleCrypto.generateKey(): HMAC
 // WPT: WebCryptoAPI/generateKey/successes_HMAC.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -577,7 +577,7 @@ describe('SubtleCrypto.generateKey() - HMAC', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.generateKey() — AES
+// SubtleCrypto.generateKey(): AES
 // WPT: WebCryptoAPI/generateKey/successes_AES-GCM.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -606,7 +606,7 @@ describe('SubtleCrypto.generateKey() - AES', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.generateKey() — ECDSA key pair
+// SubtleCrypto.generateKey(): ECDSA key pair
 // WPT: WebCryptoAPI/generateKey/successes_ECDSA.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -637,7 +637,7 @@ describe('SubtleCrypto.generateKey() - ECDSA', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.sign() / verify() — HMAC
+// SubtleCrypto.sign() / verify(): HMAC
 // WPT: WebCryptoAPI/sign_verify/hmac.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -679,7 +679,7 @@ describe('SubtleCrypto.sign() / verify() - HMAC', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.sign() / verify() — ECDSA
+// SubtleCrypto.sign() / verify(): ECDSA
 // WPT: WebCryptoAPI/sign_verify/ecdsa.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -702,7 +702,7 @@ describe('SubtleCrypto.sign() / verify() - ECDSA', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.encrypt() / decrypt() — AES-GCM
+// SubtleCrypto.encrypt() / decrypt(): AES-GCM
 // WPT: WebCryptoAPI/encrypt_decrypt/aes_gcm.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -750,7 +750,7 @@ describe('SubtleCrypto.encrypt() / decrypt() - AES-GCM', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.encrypt() / decrypt() — AES-CBC
+// SubtleCrypto.encrypt() / decrypt(): AES-CBC
 // WPT: WebCryptoAPI/encrypt_decrypt/aes_cbc.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -782,7 +782,7 @@ describe('SubtleCrypto.encrypt() / decrypt() - AES-CBC', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.encrypt() / decrypt() — AES-CTR
+// SubtleCrypto.encrypt() / decrypt(): AES-CTR
 // WPT: WebCryptoAPI/encrypt_decrypt/aes_ctr.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -820,7 +820,7 @@ describe('SubtleCrypto.encrypt() / decrypt() - AES-CTR', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.importKey() / exportKey() — raw AES round-trip
+// SubtleCrypto.importKey() / exportKey(): raw AES round-trip
 // WPT: WebCryptoAPI/import_export/symmetric_importKey.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -852,7 +852,7 @@ describe('SubtleCrypto.importKey() / exportKey() - AES raw', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.importKey() / exportKey() — HMAC raw round-trip
+// SubtleCrypto.importKey() / exportKey(): HMAC raw round-trip
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('SubtleCrypto.importKey() / exportKey() - HMAC raw', () => {
@@ -869,7 +869,7 @@ describe('SubtleCrypto.importKey() / exportKey() - HMAC raw', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.deriveBits() / deriveKey() — HKDF
+// SubtleCrypto.deriveBits() / deriveKey(): HKDF
 // WPT: WebCryptoAPI/derive_bits_keys/hkdf.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -906,7 +906,7 @@ describe('SubtleCrypto.deriveBits() - HKDF', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SubtleCrypto.deriveKey() — PBKDF2
+// SubtleCrypto.deriveKey(): PBKDF2
 // WPT: WebCryptoAPI/derive_bits_keys/pbkdf2.https.any.js
 // ═══════════════════════════════════════════════════════════════════════════════
 

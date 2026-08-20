@@ -91,10 +91,10 @@
 
 /* Platform */
 #define MBEDTLS_PLATFORM_C
-/* Disable MBEDTLS_HAVE_TIME — WASI does not provide mbedtls_ms_time */
+/* Disable MBEDTLS_HAVE_TIME; WASI does not provide mbedtls_ms_time */
 /* #undef MBEDTLS_HAVE_TIME */
 
-/* Do NOT enable these — no filesystem, no network, no threads in WASM */
+/* Do NOT enable these: no filesystem, no network, no threads in WASM */
 /* #undef MBEDTLS_FS_IO */
 /* #undef MBEDTLS_NET_C */
 /* #undef MBEDTLS_TIMING_C */
@@ -104,7 +104,7 @@
 /* PSA Crypto core */
 #define MBEDTLS_PSA_CRYPTO_C
 
-/* Use external RNG — we provide mbedtls_psa_external_get_random() backed by
+/* Use external RNG: we provide mbedtls_psa_external_get_random() backed by
    WASI random_get / arc4random_buf. This avoids needing the entropy module,
    DRBG, and filesystem for seed storage. */
 #define MBEDTLS_PSA_CRYPTO_EXTERNAL_RNG
@@ -116,10 +116,10 @@
 /* Dynamic key store */
 #define MBEDTLS_PSA_KEY_STORE_DYNAMIC
 
-/* Assume exclusive buffers — safe in single-threaded WASM */
+/* Assume exclusive buffers; safe in single-threaded WASM */
 #define MBEDTLS_PSA_ASSUME_EXCLUSIVE_BUFFERS
 
-/* Bignum, ASN.1, PK — needed for RSA/ECC key import/export (PKCS#8, SPKI, JWK) */
+/* Bignum, ASN.1, PK: needed for RSA/ECC key import/export (PKCS#8, SPKI, JWK) */
 #define MBEDTLS_ASN1_PARSE_C
 #define MBEDTLS_ASN1_WRITE_C
 #define MBEDTLS_PK_C
@@ -128,15 +128,15 @@
 #define MBEDTLS_PK_PARSE_EC_EXTENDED
 #define MBEDTLS_PK_PARSE_EC_COMPRESSED
 
-/* MD layer — needed by many modules */
+/* MD layer, needed by many modules */
 #define MBEDTLS_MD_C
 
-/* PEM parsing — for importing PEM-encoded keys */
+/* PEM parsing, for importing PEM-encoded keys */
 #define MBEDTLS_BASE64_C
 #define MBEDTLS_PEM_PARSE_C
 #define MBEDTLS_PEM_WRITE_C
 
-/* NIST key wrapping — AES-KW */
+/* NIST key wrapping (AES-KW) */
 #define MBEDTLS_NIST_KW_C
 
 /* Error strings (useful for debugging) */

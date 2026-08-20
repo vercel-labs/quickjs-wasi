@@ -483,7 +483,7 @@ describe('TextDecoder streaming', () => {
     const result = await evalStr(`
       const decoder = new TextDecoder();
       let out = '';
-      // é = U+00E9 = 0xC3 0xA9 — split across two chunks
+      // é = U+00E9 = 0xC3 0xA9, split across two chunks
       out += decoder.decode(new Uint8Array([0xC3]), { stream: true });
       out += decoder.decode(new Uint8Array([0xA9]));
       out
@@ -495,7 +495,7 @@ describe('TextDecoder streaming', () => {
     const result = await evalStr(`
       const decoder = new TextDecoder();
       let out = '';
-      // € = U+20AC = 0xE2 0x82 0xAC — split across three chunks
+      // € = U+20AC = 0xE2 0x82 0xAC, split across three chunks
       out += decoder.decode(new Uint8Array([0xE2]), { stream: true });
       out += decoder.decode(new Uint8Array([0x82]), { stream: true });
       out += decoder.decode(new Uint8Array([0xAC]));

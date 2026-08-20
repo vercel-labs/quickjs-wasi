@@ -273,7 +273,7 @@ describe('className', () => {
     `);
 
     // The engine registers the Proxy class under the name "Object"
-    // (mirroring Object.prototype.toString) — use isProxy to detect
+    // (mirroring Object.prototype.toString), so use isProxy to detect
     // proxies, then unwrap to get the real brand.
     expect(proxy.className).toBe('Object');
     expect(proxy.isProxy).toBe(true);

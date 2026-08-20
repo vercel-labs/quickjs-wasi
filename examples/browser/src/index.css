@@ -28,7 +28,7 @@
   font-display: swap;
 }
 
-/* Dark theme (always active — no light mode) */
+/* Dark theme (always active, no light mode) */
 @theme inline {
   --color-background: oklch(0.145 0 0);
   --color-foreground: oklch(0.985 0 0);

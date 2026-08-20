@@ -42,7 +42,7 @@ OPT ?= -Oz
 # hard-failing.
 WASM_OPT ?= $(shell if [ -x node_modules/.bin/wasm-opt ]; then echo node_modules/.bin/wasm-opt; else echo wasm-opt; fi)
 
-# $(call wasm_opt,<file>) — optimize <file> in place.
+# $(call wasm_opt,<file>): optimize <file> in place.
 define wasm_opt
 	@if command -v $(WASM_OPT) >/dev/null 2>&1; then \
 		before=$$(wc -c < $(1)); \
@@ -57,7 +57,7 @@ endef
 # Compiler flags
 #
 # BUILDING_QJS_SHARED: since quickjs-ng 0.16 (commit 66adc82), JS_EXTERN only
-# carries default visibility when this is defined — without it, -fvisibility=hidden
+# carries default visibility when this is defined. Without it, -fvisibility=hidden
 # hides the JS_* API from the dynamic symbol table and extension .so files can no
 # longer resolve them at runtime through -Wl,--export-dynamic.
 CFLAGS = \
@@ -216,7 +216,7 @@ EXT_URL_OBJS = \
 EXT_URL_SO = $(EXT_URL_DIR)/url.so
 
 # Extensions: Encoding (TextEncoder / TextDecoder)
-# Pure C extension — no C++ dependencies needed.
+# Pure C extension; no C++ dependencies needed.
 EXT_ENC_DIR = extensions/encoding
 EXT_ENC_SO = $(EXT_ENC_DIR)/encoding.so
 

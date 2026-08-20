@@ -12,7 +12,7 @@ npm install quickjs-wasi
 
 ### Loading the WASM Binary
 
-The caller is responsible for providing the WASM bytes (or a pre-compiled `WebAssembly.Module`) — quickjs-wasi does no implicit filesystem or network I/O. The package ships the binary at the `quickjs-wasi/quickjs.wasm` subpath, which can be resolved by your environment's preferred mechanism.
+The caller is responsible for providing the WASM bytes (or a pre-compiled `WebAssembly.Module`): quickjs-wasi does no implicit filesystem or network I/O. The package ships the binary at the `quickjs-wasi/quickjs.wasm` subpath, which can be resolved by your environment's preferred mechanism.
 
 Node.js (read from disk):
 
@@ -38,7 +38,7 @@ import wasmUrl from 'quickjs-wasi/quickjs.wasm?url';
 const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
 ```
 
-Compiling a `WebAssembly.Module` once and reusing it across many VMs is highly recommended — instantiation from a compiled module is much faster than re-compiling bytes for each call to `QuickJS.create()`.
+Compiling a `WebAssembly.Module` once and reusing it across many VMs is highly recommended, since instantiation from a compiled module is much faster than re-compiling bytes for each call to `QuickJS.create()`.
 
 ### Basic Evaluation
 
@@ -50,7 +50,7 @@ import { QuickJS } from 'quickjs-wasi';
 {
   using vm = await QuickJS.create({ wasm: wasmBytes });
 
-  // Evaluate code — handles are auto-disposed with `using`
+  // Evaluate code. Handles are auto-disposed with `using`
   using result = vm.evalCode('1 + 2');
   console.log(result.toNumber()); // 3
 } // vm and result are automatically disposed here
@@ -61,7 +61,7 @@ import { QuickJS } from 'quickjs-wasi';
 ```typescript
 using vm = await QuickJS.create(wasmBytes);
 
-// Create values — `using` ensures they're disposed at end of scope
+// Create values. `using` ensures they're disposed at end of scope
 {
   using str = vm.newString('hello');
   using num = vm.newNumber(42);
@@ -189,7 +189,7 @@ if ('value' in result) {
 
 #### Async Module Loading
 
-The `load` and `normalize` callbacks are **synchronous** — the engine calls
+The `load` and `normalize` callbacks are **synchronous**: the engine calls
 them from inside the WASM call stack, which cannot be suspended to await a
 Promise (returning one throws a `TypeError`). To load module sources
 asynchronously (e.g. over `https://`), use the **fetch-and-retry** pattern:
@@ -263,7 +263,7 @@ try {
 
 The `wasi` option lets you override any `wasi_snapshot_preview1` host function. It's a factory that receives the WASM linear memory and returns an object of override functions. Overrides apply to both the main module and all loaded extensions.
 
-This is useful for deterministic execution — QuickJS uses a [xorshift64*](https://en.wikipedia.org/wiki/Xorshift) PRNG that is seeded once from the clock value during context creation. Override `clock_time_get` to control both `Date.now()` and the `Math.random()` seed:
+This is useful for deterministic execution: QuickJS uses a [xorshift64*](https://en.wikipedia.org/wiki/Xorshift) PRNG that is seeded once from the clock value during context creation. Override `clock_time_get` to control both `Date.now()` and the `Math.random()` seed:
 
 ```typescript
 const fixedClock = (memory: WebAssembly.Memory) => ({
@@ -347,7 +347,7 @@ const start = Date.now();
 using vm = await QuickJS.create({
   wasm: wasmBytes,
   interruptHandler: () => {
-    // Return true to interrupt — called periodically during JS execution
+    // Return true to interrupt. Called periodically during JS execution
     return Date.now() - start > 5000; // 5 second timeout
   },
 });
@@ -355,7 +355,7 @@ using vm = await QuickJS.create({
 try {
   vm.evalCode('while (true) {}');
 } catch (err) {
-  // JSException — interrupted
+  // JSException: interrupted
   err.dispose();
 }
 
@@ -399,13 +399,13 @@ using vm = await QuickJS.create({
 
 The `timezoneOffset` option accepts:
 
-- **`'host'`** (default) — mirrors the host's timezone, including DST transitions.
-- **A number** — fixed UTC offset in minutes using the `getTimezoneOffset()` sign convention (positive values are west of UTC, e.g. `480` for UTC-8).
-- **A callback `(timeSecs: number) => number`** — called with seconds since epoch, must return the offset in minutes. Useful for custom timezone logic. The callback is invoked whenever QuickJS needs to convert between UTC and local time (e.g. `getHours()`, `toString()`, `new Date(year, month, ...)`, `getTimezoneOffset()`), so it may be called multiple times per Date operation.
+- **`'host'`** (default): mirrors the host's timezone, including DST transitions.
+- **A number**: fixed UTC offset in minutes using the `getTimezoneOffset()` sign convention (positive values are west of UTC, e.g. `480` for UTC-8).
+- **A callback `(timeSecs: number) => number`**: called with seconds since epoch, must return the offset in minutes. Useful for custom timezone logic. The callback is invoked whenever QuickJS needs to convert between UTC and local time (e.g. `getHours()`, `toString()`, `new Date(year, month, ...)`, `getTimezoneOffset()`), so it may be called multiple times per Date operation.
 
 ### Snapshot and Restore
 
-The key differentiator — snapshot the entire VM state and restore it later:
+The key differentiator: snapshot the entire VM state and restore it later.
 
 ```typescript
 let snapshot: Snapshot;
@@ -444,7 +444,7 @@ const restored = QuickJS.deserializeSnapshot(loaded);
 {
   using vm = await QuickJS.restore(restored, wasmBytes);
 
-  // The pending promise still exists — resolve it
+  // The pending promise still exists; resolve it
   using resolve = vm.global.getProp('__resolve');
   using arg = vm.newNumber(42);
   vm.callFunction(resolve, vm.undefined, arg).dispose();
@@ -473,7 +473,7 @@ let snapshot: Snapshot;
 }
 
 {
-  // After restore — re-register by name
+  // After restore, re-register by name
   using vm = await QuickJS.restore(snapshot, wasmBytes);
   vm.registerHostCallback('hostAdd', (...args) => {
     return vm.newNumber(args[0].toNumber() + args[1].toNumber());
@@ -489,7 +489,7 @@ Note: each call to `newFunction()` must use a unique name. Attempting to registe
 
 ### Native WASM Extensions
 
-Load C-based extensions compiled as WASM shared libraries. Extensions link directly against the QuickJS C API with zero marshalling overhead — they share the same linear memory and can register custom classes, prototypes, and globals.
+Load C-based extensions compiled as WASM shared libraries. Extensions link directly against the QuickJS C API with zero marshalling overhead: they share the same linear memory and can register custom classes, prototypes, and globals.
 
 The package ships five pre-built extensions, each available as a subpath export. As with the main `quickjs.wasm` binary, the caller is responsible for loading the bytes:
 
@@ -530,7 +530,7 @@ import urlSoUrl from 'quickjs-wasi/url.so?url';
 const urlExtBytes = await fetch(urlSoUrl).then((r) => r.arrayBuffer());
 ```
 
-Extensions survive snapshot/restore — provide the same extensions when restoring:
+Extensions survive snapshot/restore. Provide the same extensions when restoring:
 
 ```typescript
 const snapshot = vm.snapshot();
@@ -577,7 +577,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build your own extensions, how d
 | `vm.snapshot()` | Capture the entire VM state (including extension metadata) |
 | `vm.registerHostCallback(name, fn)` | Re-register a host callback by name after restore |
 | `vm.dispose()` | Free the VM |
-| `vm[Symbol.dispose]()` | Same as `dispose()` — enables `using vm = ...` |
+| `vm[Symbol.dispose]()` | Same as `dispose()`, enables `using vm = ...` |
 
 ### `QuickJSOptions`
 
@@ -587,7 +587,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build your own extensions, how d
 | `wasi` | WASI override factory: `(memory) => ({ random_get, clock_time_get, ... })`. Applies to main module and all extensions |
 | `memoryLimit` | Maximum memory the QuickJS runtime can allocate (bytes) |
 | `interruptHandler` | Callback to interrupt execution (return `true` to stop) |
-| `extensions` | Array of `ExtensionDescriptor` objects — native WASM extensions to load |
+| `extensions` | Array of `ExtensionDescriptor` objects (native WASM extensions to load) |
 | `timezoneOffset` | Timezone for `Date` inside the VM: `'host'` (default), fixed offset in minutes, or `(timeSecs) => minutes` callback |
 
 ### `ExtensionDescriptor`
@@ -601,7 +601,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build your own extensions, how d
 
 ### Cached Properties
 
-These are singleton handles — do **not** dispose them:
+These are singleton handles. Do **not** dispose them:
 
 | Property | Value |
 |----------|-------|
@@ -628,7 +628,7 @@ These are singleton handles — do **not** dispose them:
 | `handle.consume(fn)` | Call `fn(handle)`, then dispose, return result |
 | `handle.dup()` | Duplicate the handle (increment refcount) |
 | `handle.dispose()` | Free the handle |
-| `handle[Symbol.dispose]()` | Same as `dispose()` — enables `using handle = ...` |
+| `handle[Symbol.dispose]()` | Same as `dispose()`, enables `using handle = ...` |
 
 #### Trap-free introspection
 
@@ -638,11 +638,11 @@ to call on hostile or unknown values (e.g. when rendering an inspector UI,
 or implementing side-effect-free serialization).
 
 The brand checks, `classId`, and `getProxyTarget()`/`getProxyHandler()`
-never execute guest code on **any** value — no proxy traps, no getters, no
+never execute guest code on **any** value: no proxy traps, no getters, no
 `Symbol.hasInstance`. The two property-inspection helpers
 (`getOwnPropertyKeys()` and `getOwnPropertyDescriptor()`) never invoke
 getters and are guest-code free for ordinary objects, but on a Proxy they
-necessarily fire its `ownKeys`/`getOwnPropertyDescriptor` traps — check
+necessarily fire its `ownKeys`/`getOwnPropertyDescriptor` traps. Check
 `isProxy` first if that matters.
 
 | Method / Property | Description |
@@ -657,9 +657,9 @@ necessarily fire its `ownKeys`/`getOwnPropertyDescriptor` traps — check
 | `handle.getProxyHandler()` | The `[[ProxyHandler]]` of a Proxy, without firing traps |
 | `handle.getOwnPropertyKeys()` | All own keys (strings **and** symbols, incl. non-enumerable), à la `Reflect.ownKeys()` |
 | `handle.getOwnPropertyDescriptor(key)` | Own property descriptor **without invoking getters**; accessor properties yield `get`/`set` handles |
-| `handle.identity` | Numeric identity of the underlying heap value (`0` for non-heap values) — key a `Map` on this to deduplicate or detect cycles across handles |
+| `handle.identity` | Numeric identity of the underlying heap value (`0` for non-heap values). Key a `Map` on this to deduplicate or detect cycles across handles |
 | `handle.toBoolean()` | Extract as a `boolean`, applying JavaScript truthiness |
-| `vm.construct(ctor, ...args)` | Invoke a constructor with `new` — the counterpart to `callFunction` for building values in the VM from the host |
+| `vm.construct(ctor, ...args)` | Invoke a constructor with `new`, the counterpart to `callFunction` for building values in the VM from the host |
 
 Note that `handle.toString()` is **not** in this list: for values that are not
 already strings it performs a JavaScript string conversion, which executes
@@ -671,7 +671,7 @@ guest code. Guard with `handle.isString`, or call a captured intrinsic such as
 | Method / Property | Description |
 |-------------------|-------------|
 | `vm.withScope(fn)` | Run `fn`, disposing every handle created during it; use `scope.escape(handle)` to keep one. Scopes nest, and `escape()` transfers to the enclosing scope |
-| `vm.newEphemeralFunction(fn)` | Like `newFunction()`, but the host callback is unregistered when the handle is disposed — use for short-lived callbacks instead of inventing unique names |
+| `vm.newEphemeralFunction(fn)` | Like `newFunction()`, but the host callback is unregistered when the handle is disposed. Use for short-lived callbacks instead of inventing unique names |
 | `vm.unregisterHostCallback(name)` | Remove a callback registered by `newFunction()` / `registerHostCallback()` |
 | `handle.disposed` | Whether `dispose()` has been called |
 
@@ -683,7 +683,7 @@ const name = vm.withScope((scope) => {
 });
 ```
 
-Handle methods do not guard against use after disposal — reading from a
+Handle methods do not guard against use after disposal: reading from a
 disposed handle reads freed memory. Check `handle.disposed` when a handle's
 lifetime is managed elsewhere.
 
@@ -722,20 +722,20 @@ lifetime is managed elsewhere.
 - Global symbols (`Symbol.for()`) round-trip as real host `Symbol` values via `Symbol.for(description)`
 - Local (anonymous) symbols dump as `undefined` and throw if passed to `hostToHandle()`
 - Functions dump as `undefined` (cannot be meaningfully serialized)
-- Circular and shared references are preserved — `dump()` returns the same host object for the same QuickJS object pointer
+- Circular and shared references are preserved: `dump()` returns the same host object for the same QuickJS object pointer
 - Only own enumerable string properties are included when dumping objects
-- Binary data is always **copied** between host and WASM memory — there is no zero-copy view API
+- Binary data is always **copied** between host and WASM memory; there is no zero-copy view API
 - `dump()` for typed arrays determines the host constructor from bytes-per-element (1 → `Uint8Array`, 2 → `Uint16Array`, 4 → `Uint32Array`, 8 → `Float64Array`)
 
 ## How It Works
 
 ### The Core Insight
 
-WebAssembly linear memory is a flat byte array. Everything QuickJS allocates — the runtime struct, all contexts, all JS objects, the GC heap, the atom table, the promise job queue, pending promises — lives in this linear memory. There are no external pointers, file handles, or OS resources. When you copy the memory wholesale to a new WASM instance, all internal pointer relationships are preserved because they reference the same linear address space.
+WebAssembly linear memory is a flat byte array. Everything QuickJS allocates (the runtime struct, all contexts, all JS objects, the GC heap, the atom table, the promise job queue, pending promises) lives in this linear memory. There are no external pointers, file handles, or OS resources. When you copy the memory wholesale to a new WASM instance, all internal pointer relationships are preserved because they reference the same linear address space.
 
 ### One VM = One WASM Instance
 
-Unlike quickjs-emscripten which has a two-level model (`QuickJSWASMModule` → `QuickJSContext`), quickjs-wasm uses a simpler one-level model: each `QuickJS.create()` call instantiates its own WASM module with its own linear memory, runtime, and context. This gives stronger isolation (no shared memory between VMs) and makes snapshotting clean — one instance, one context, one snapshot.
+Unlike quickjs-emscripten which has a two-level model (`QuickJSWASMModule` → `QuickJSContext`), quickjs-wasm uses a simpler one-level model: each `QuickJS.create()` call instantiates its own WASM module with its own linear memory, runtime, and context. This gives stronger isolation (no shared memory between VMs) and makes snapshotting clean: one instance, one context, one snapshot.
 
 ### Architecture
 
@@ -769,7 +769,7 @@ This design survives snapshot/restore: the name string is stored in QuickJS's he
 
 ### Prerequisites
 
-- [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) (tested with v30) — set `WASI_SDK` env var or defaults to `/tmp/wasi-sdk`
+- [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) (tested with v30). Set the `WASI_SDK` env var or it defaults to `/tmp/wasi-sdk`
 - Node.js >= 22
 - pnpm
 
@@ -780,7 +780,7 @@ This design survives snapshot/restore: the name string is stored in QuickJS's he
 git clone --recursive https://github.com/vercel-labs/quickjs-wasm.git
 cd quickjs-wasm
 
-# Install wasi-sdk (macOS arm64 — adjust URL for your platform)
+# Install wasi-sdk (macOS arm64; adjust URL for your platform)
 curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-arm64-macos.tar.gz" \
   | tar xz -C /tmp --strip-components=1 --one-top-level=wasi-sdk
 
@@ -821,14 +821,14 @@ Plus the `__stack_pointer` WASM global (a single i32).
 
 ### Limitations and Future Work
 
-- **Snapshot size**: Snapshots capture the entire WASM linear memory (~256 KB baseline, grows with heap). Use `serializeSnapshot()` to get a binary buffer, then apply your own compression (gzip/zstd) — the memory compresses very well due to large zero regions.
+- **Snapshot size**: Snapshots capture the entire WASM linear memory (~256 KB baseline, grows with heap). Use `serializeSnapshot()` to get a binary buffer, then apply your own compression (gzip/zstd). The memory compresses well due to its large zero regions.
 - **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
 - **ES Modules**: Supported via `EvalFlags.TYPE_MODULE` and the `moduleLoader` option (see [ES Modules](#es-modules)). Dynamic `import()` resolves through the same loader.
 - **Extension ABI**: Native WASM extensions use an experimental dynamic linking ABI that is [not yet stabilized](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md). All extensions must be compiled with the same wasi-sdk version as the main module. See [EXTENSIONS.md](./EXTENSIONS.md) for details.
 
 ### Browser Usage
 
-quickjs-wasi works in browsers — the TypeScript API uses only the standard `WebAssembly` API and the WASI shim is environment-agnostic. The package does no implicit I/O, so loading the WASM binary is up to you. See [Loading the WASM Binary](#loading-the-wasm-binary) above for `fetch()` and bundler-based examples.
+quickjs-wasi works in browsers: the TypeScript API uses only the standard `WebAssembly` API and the WASI shim is environment-agnostic. The package does no implicit I/O, so loading the WASM binary is up to you. See [Loading the WASM Binary](#loading-the-wasm-binary) above for `fetch()` and bundler-based examples.
 
 ```typescript
 import { QuickJS } from 'quickjs-wasi';
@@ -837,7 +837,7 @@ import wasmUrl from 'quickjs-wasi/quickjs.wasm?url'; // Vite
 // Fetch the .wasm file and compile it once
 const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
 
-// Create VMs from the pre-compiled module (fast — no re-compilation)
+// Create VMs from the pre-compiled module (fast, no re-compilation)
 using vm = await QuickJS.create({ wasm: wasmModule });
 ```
 

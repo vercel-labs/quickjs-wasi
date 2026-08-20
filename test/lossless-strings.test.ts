@@ -7,7 +7,7 @@ import { wasmBytes } from './helpers.ts';
  *
  * Guest→host previously read strings through NUL-terminated
  * `JS_ToCString`: embedded U+0000 truncated the string, and lone
- * surrogates were replaced with U+FFFD — and the two corruptions can
+ * surrogates were replaced with U+FFFD, and the two corruptions can
  * cancel each other's length changes, so no length check downstream can
  * detect the loss. Host→guest previously encoded with TextEncoder, which
  * replaces lone surrogates with U+FFFD before the guest ever sees them
@@ -15,15 +15,15 @@ import { wasmBytes } from './helpers.ts';
  * identically).
  *
  * Now: guest→host reads length-aware WTF-8 (`qjs_get_string_len`), and
- * host→guest writes WTF-8 (`writeString`), so every JS string — a
- * sequence of arbitrary UTF-16 code units — round-trips exactly. Keys are
+ * host→guest writes WTF-8 (`writeString`), so every JS string (a
+ * sequence of arbitrary UTF-16 code units) round-trips exactly. Keys are
  * covered by routing string keys that C strings cannot express (NULs,
  * unpaired surrogates) through length-aware guest string values.
  */
 
 // Escape source so the guest receives exact code units regardless of the
 // transport under test (avoids the both-sides-corrupted trap).
-// NOTE: iterate by CODE UNIT (index), not by code point — Array.from /
+// NOTE: iterate by CODE UNIT (index), not by code point: Array.from /
 // for..of iterate code points and would collapse surrogate pairs.
 const guestLiteral = (s: string) => {
   let out = '"';

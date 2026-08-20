@@ -347,7 +347,7 @@ static int32_t utf16_handler(UTF16DecoderState *st, int byte_or_eof) {
         if (is_lo_surr(code_unit)) {
             return (int32_t)surr_to_cp(lead, code_unit);
         }
-        /* Not a trail surrogate — error for the lead surrogate.
+        /* Not a trail surrogate: error for the lead surrogate.
            But we need to re-process this code_unit. We handle this
            by checking if it's a lead surrogate itself or a regular code unit. */
         if (is_hi_surr(code_unit)) {
@@ -859,7 +859,7 @@ static JSValue decode_utf16(JSContext *ctx, TextDecoderData *d,
                 }
                 have_cu = 1;
             } else if (pos < input_len) {
-                /* One byte left — save as lead_byte */
+                /* One byte left; save as lead_byte */
                 st->lead_byte = input[pos++];
                 break;
             } else {

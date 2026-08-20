@@ -10,14 +10,14 @@
  * Two halves, mirroring devalue's two pluggable operation sets:
  *
  * - `stringifyOperations` reads a handle without executing guest code:
- *   the engine's class table for classification (`handle.className` — no
+ *   the engine's class table for classification (`handle.className`, with no
  *   sample instances needed, not even at boot), boot-captured intrinsics
  *   for extraction, and descriptor reads instead of `[[Get]]`.
  * - `parseOperations` builds values inside the VM through boot-captured
  *   factories, returning a handle the guest can use directly.
  *
  * "Boot-captured" means the intrinsics and factories are taken from the VM
- * before any user code runs, and are held only on the host — so patching
+ * before any user code runs, and are held only on the host, so patching
  * `Date.prototype.toISOString` (or anything else) inside the VM afterwards
  * cannot influence serialization.
  */
@@ -31,9 +31,9 @@ import { QuickJS, type JSValueHandle } from '../src/index.ts';
 
 /**
  * The tags devalue classifies values by. QuickJS registers each of these
- * classes under exactly this name, so `handle.className` — a trap-free
+ * classes under exactly this name, so `handle.className`, a trap-free
  * read of the engine's class table (`JS_GetClassName`, fixed in
- * quickjs-ng 0.16.2) — classifies values directly. No sample instances,
+ * quickjs-ng 0.16.2), classifies values directly. No sample instances,
  * no guest code, not even at boot: a VM built without some of these
  * intrinsics classifies the rest just fine.
  */
@@ -228,7 +228,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
 
   /**
    * Define an own data property. Uses `Object.defineProperty` rather than
-   * assignment so that an inherited setter cannot intercept the write — the
+   * assignment so that an inherited setter cannot intercept the write: the
    * revived value is built exactly as the payload describes it.
    */
   const define = (
@@ -280,8 +280,8 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
 
   const tag = (handle: JSValueHandle): string => {
     // Trap-free and unspoofable: the engine's registered class name.
-    // Everything unbranded — including proxies, whose class is registered
-    // as "Object" — reports as a plain-object candidate, which `shapeOf`
+    // Everything unbranded (including proxies, whose class is registered
+    // as "Object") reports as a plain-object candidate, which `shapeOf`
     // then accepts or rejects without firing traps.
     const name = handle.className;
     return name !== undefined && BRANDED_TAGS.has(name) ? name : 'Object';
@@ -305,7 +305,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
   };
 
   // Typed as the *complete* interface (not Partial): if devalue adds a hook
-  // this implementation is missing, compilation fails — which is exactly the
+  // this implementation is missing, compilation fails, which is exactly the
   // gap-detection this POC exists to provide.
   const stringifyOperations: StringifyOperations = {
     identify: (handle: JSValueHandle) => {
@@ -349,7 +349,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
     // Only reached for URL / URLSearchParams / Temporal.*, none of which
     // exist in the base VM. `handle.toString()` would execute guest code
     // (the value's own `toString`), so this deliberately refuses rather than
-    // silently running it — a VM with those types would capture the relevant
+    // silently running it; a VM with those types would capture the relevant
     // prototype methods the same way the intrinsics above are captured.
     toStringValue: (handle: JSValueHandle) => {
       throw new Error(
@@ -395,7 +395,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
 
     lengthOf: (handle: JSValueHandle) => {
       const descriptor = handle.getOwnPropertyDescriptor('length');
-      // `length` is an own data property on arrays — no getter runs
+      // `length` is an own data property on arrays, so no getter runs
       return descriptor?.value?.consume((h) => h.toNumber()) ?? 0;
     },
 
@@ -451,7 +451,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
   // --- parse -------------------------------------------------------------
 
   const parseOperations: ParseOperations = {
-    // host bigints arrive here too — devalue converts the decimal string
+    // host bigints arrive here too; devalue converts the decimal string
     // host-side, mirroring `toPrimitive`'s domain
     fromPrimitive: (value) =>
       typeof value === 'bigint' ? vm.newBigInt(value) : vm.hostToHandle(value),
@@ -462,7 +462,7 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
       return vm.construct(i.Date, argument);
     },
 
-    // URL / URLSearchParams / Temporal.* — none exist in the base VM
+    // URL / URLSearchParams / Temporal.*: none exist in the base VM
     fromStringValue: (tag) => {
       throw new Error(`${tag} is not available in this VM`);
     },

@@ -115,7 +115,7 @@ describe('withScope + host callbacks (borrowed handles)', () => {
     // Regression: the trampoline's `this`/argument handles wrap pointers
     // OWNED BY THE C CALLER. Before the `borrowed` flag they registered
     // with the active scope, and the scope's disposal at exit double-freed
-    // the guest values — observed as WASM memory corruption when a host
+    // the guest values, observed as WASM memory corruption when a host
     // serializer drove Map/Set `forEach` visitors inside `withScope`.
     const seen: number[] = [];
     using visitor = vm.newEphemeralFunction((value) => {
@@ -179,7 +179,7 @@ describe('withScope + host callbacks (borrowed handles)', () => {
       expect(retained!.disposed).toBe(false);
     });
 
-    // The dup is an owned reference — the scope disposed it at exit,
+    // The dup is an owned reference: the scope disposed it at exit,
     // exactly like any handle the callback created.
     expect(retained!.disposed).toBe(true);
   });

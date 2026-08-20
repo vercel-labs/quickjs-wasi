@@ -27,7 +27,7 @@ vm.evalCode(`
 
 ### `URL`
 
-- Constructor: `new URL(url)`, `new URL(url, base)` — full base URL resolution support
+- Constructor: `new URL(url)`, `new URL(url, base)` (full base URL resolution support)
 - Getters/Setters: `href`, `protocol`, `username`, `password`, `host`, `hostname`, `port`, `pathname`, `search`, `hash`
 - Read-only: `origin`
 - Methods: `toString()`, `toJSON()`
@@ -36,10 +36,10 @@ vm.evalCode(`
 
 ### `URLSearchParams`
 
-- Constructor: `new URLSearchParams(init)` — parses query strings
+- Constructor: `new URLSearchParams(init)` (parses query strings)
 - Methods: `get()`, `getAll()`, `set()`, `has(key [, value])`, `delete(key [, value])`, `append()`, `sort()`, `toString()`, `forEach()`, `entries()`, `keys()`, `values()`
 - Property: `size`
-- `[Symbol.iterator]` — aliased to `entries()`, enabling `for...of` iteration
+- `[Symbol.iterator]`: aliased to `entries()`, enabling `for...of` iteration
 - Full WHATWG compliance: proper percent-encoding (spaces as `+`), key sorting
 
 ## Building

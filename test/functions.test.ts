@@ -74,7 +74,7 @@ describe('host callback this binding', () => {
       vm.setProp(vm.global, 'checkThis', checkThis);
     }
 
-    // Free function call — `this` is globalThis (which has `eval`)
+    // Free function call: `this` is globalThis (which has `eval`)
     expect(vm.dump(vm.evalCode('checkThis()'))).toBe(true);
   });
 });
@@ -104,10 +104,10 @@ describe('host callback error propagation', () => {
       vm.setProp(vm.global, 'mayFail', fn);
     }
 
-    // Successful call — returns a normal value
+    // Successful call returns a normal value
     expect(vm.evalCode('mayFail(5)').consume(h => h.toNumber())).toBe(10);
 
-    // Failed call — the guest catches it in JS, so evalCode returns a normal value
+    // Failed call: the guest catches it in JS, so evalCode returns a normal value
     using result = vm.evalCode(`
       try { mayFail(-1) } catch(e) { e.message }
     `);
@@ -123,7 +123,7 @@ describe('host callback error propagation', () => {
       vm.setProp(vm.global, 'boom', fn);
     }
 
-    // Uncaught on host side — throws JSException
+    // Uncaught on host side throws JSException
     try {
       vm.evalCode('boom()');
     } catch (err) {

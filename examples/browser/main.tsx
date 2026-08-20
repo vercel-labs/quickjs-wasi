@@ -40,12 +40,12 @@ import '@/index.css';
 // ─── JSValue DataAccessor for react-inspector ───────────────────────────────
 
 /**
- * Guest values the inspector needs in order to render without executing
+ * Guest values the inspector needs to render without executing
  * guest code, captured once per VM.
  *
  * Rendering is the same problem shape as side-effect-free serialization: the
- * host inspects values the guest built, so any dynamic lookup —
- * `value.toString()`, `Symbol.iterator`, `.constructor.name` — dispatches
+ * host inspects values the guest built, so any dynamic lookup
+ * (`value.toString()`, `Symbol.iterator`, `.constructor.name`) dispatches
  * through guest-patchable prototypes and runs guest code *while drawing the
  * UI*. Capturing the methods up front and invoking them with an explicit
  * receiver keeps the display identical while making the lookup unpatchable.
@@ -115,7 +115,7 @@ function callToString(
 /**
  * Reads an own data property without invoking accessors or proxy traps.
  * Returns undefined for accessor properties, missing properties, and
- * proxies — callers decide what to display instead.
+ * proxies; callers decide what to display instead.
  */
 function readOwnData(
   handle: JSValueHandle,
@@ -153,7 +153,7 @@ const jsValueAccessor: DataAccessor = {
     // For objects, `handle.toString()` performs a JavaScript string
     // conversion, which dispatches through the guest's (patchable)
     // `toString`/`valueOf`. Use the captured intrinsic for the branded
-    // types the inspector renders this way — same output, unpatchable
+    // types the inspector renders this way: same output, unpatchable
     // lookup. Primitives convert without running any guest code.
     if (h.isObject) {
       const i = intrinsics(h.vm);
@@ -189,7 +189,7 @@ const jsValueAccessor: DataAccessor = {
     if (!h.isObject) return false;
     // Arrays are iterable but react-inspector handles them separately
     if (h.isArray) return false;
-    // Never probe a Proxy — it renders via [[Target]]/[[Handler]] instead
+    // Never probe a Proxy; it renders via [[Target]]/[[Handler]] instead
     if (h.isProxy) return false;
     // Genuine Map/Set: trust the brand, skip the probing call below
     if (h.isMap || h.isSet) return true;
@@ -199,7 +199,7 @@ const jsValueAccessor: DataAccessor = {
       method.dispose();
       return false;
     }
-    // Verify the iterator actually works — prototype objects have
+    // Verify the iterator actually works: prototype objects have
     // Symbol.iterator but throw when called without instance data.
     try {
       const iterator = h.vm.callFunction(method, h);
@@ -218,7 +218,7 @@ const jsValueAccessor: DataAccessor = {
     // Genuine Map/Set: iterate with the captured `forEach`, which reads the
     // internal entry list directly. The iterator protocol is never touched,
     // so a patched `Map.prototype[Symbol.iterator]` (or a patched
-    // `%MapIteratorPrototype%.next`) cannot run — or lie — while rendering.
+    // `%MapIteratorPrototype%.next`) cannot run, or lie, while rendering.
     if (h.isMap || h.isSet) {
       const i = intrinsics(h.vm);
       const entries: JSValueHandle[] = [];
@@ -333,7 +333,7 @@ const jsValueAccessor: DataAccessor = {
   getOwnPropertyDescriptor(value: unknown, prop: string): InspectedPropertyDescriptor | undefined {
     const h = value as JSValueHandle;
     if (h.isProxy) {
-      // The synthetic [[Target]]/[[Handler]] rows are plain data —
+      // The synthetic [[Target]]/[[Handler]] rows are plain data,
       // resolved through engine internals, no traps fired.
       if (prop === '[[Target]]') {
         return { value: h.getProxyTarget(), enumerable: true, configurable: false };
@@ -354,7 +354,7 @@ const jsValueAccessor: DataAccessor = {
     if (desc.get || desc.set) {
       // Accessor property. react-inspector keys off the truthiness of
       // `get`, so translate a guest `undefined` handle (truthy on the
-      // host!) to host undefined — and dispose the discarded handle.
+      // host!) to host undefined, and dispose the discarded handle.
       let get = desc.get;
       if (get?.isUndefined) {
         get.dispose();
@@ -395,7 +395,7 @@ const jsValueAccessor: DataAccessor = {
     if (h.isProxy) return 'Proxy';
 
     // Prefer the engine's class table: `className` is a trap-free,
-    // unspoofable read that labels every registered class — including the
+    // unspoofable read that labels every registered class, including the
     // typed arrays and extension-defined classes (URL, Headers,
     // TextEncoder, …) the previous hand-rolled brand ladder missed.
     // Generic names fall through: "Object"/"Function" so user classes get
@@ -412,7 +412,7 @@ const jsValueAccessor: DataAccessor = {
     }
 
     // Unbranded: take the constructor from the *prototype*, never from the
-    // value's own properties — `{ constructor: Map }` would otherwise be
+    // value's own properties: `{ constructor: Map }` would otherwise be
     // labelled "Map". This matches how DevTools derives the label, keeps
     // real class instances reporting their class, and both hops are
     // descriptor reads so neither invokes an accessor.
@@ -448,8 +448,8 @@ const jsValueAccessor: DataAccessor = {
   isObjectPrototype(value: unknown): boolean {
     const h = value as JSValueHandle;
     // Compare heap-value identity, not `.ptr`: `.ptr` is this handle's own
-    // JSValue box, so it differs for every handle — including two handles
-    // to `Object.prototype` — which silently disabled this guard.
+    // JSValue box, so it differs for every handle, including two handles
+    // to `Object.prototype`, which silently disabled this guard.
     return h.identity === intrinsics(h.vm).objectPrototypeIdentity;
   },
 };
@@ -622,7 +622,7 @@ declare class TextDecoder {
 
 // ─── atob / btoa + Uint8Array base64/hex type definitions ───────────────────
 //
-// These APIs are built-in to quickjs-ng v0.15.0+ — `atob`, `btoa` are global
+// These APIs are built-in to quickjs-ng v0.15.0+: `atob`, `btoa` are global
 // functions and the Uint8Array methods are part of the TypedArrays intrinsic.
 // We always surface their types in Monaco so users get autocomplete.
 
@@ -1372,7 +1372,7 @@ function App() {
         consoleObj.dispose();
       }
 
-      // Evaluate with ASYNC flag — result is always a Promise (supports top-level await)
+      // Evaluate with ASYNC flag: result is always a Promise (supports top-level await)
       try {
         const result = vm.evalCode(code, '<eval>', EvalFlags.ASYNC);
         vm.executePendingJobs();

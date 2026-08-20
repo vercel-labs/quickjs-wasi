@@ -1,5 +1,5 @@
 /**
- * Tests for the degenerator compile() integration — compiles JS code into
+ * Tests for the degenerator compile() integration, which compiles JS code into
  * async functions with sandbox support and executes them in the QuickJS VM.
  */
 

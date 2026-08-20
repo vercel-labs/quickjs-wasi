@@ -258,7 +258,7 @@ describe('moduleLoader', () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
       moduleLoader: {
-        // @ts-expect-error — deliberately wrong: load must be synchronous
+        // @ts-expect-error deliberately wrong: load must be synchronous
         load: async () => 'export const x = 42;',
       },
     });
@@ -272,7 +272,7 @@ describe('moduleLoader', () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
       moduleLoader: {
-        // @ts-expect-error — deliberately wrong: normalize must be synchronous
+        // @ts-expect-error deliberately wrong: normalize must be synchronous
         normalize: async (_base: string, specifier: string) => specifier,
         load: () => 'export const x = 42;',
       },
@@ -371,7 +371,7 @@ describe('moduleLoader', () => {
     const snapshot = vm1.snapshot();
     vm1.dispose();
 
-    // Restore — must provide moduleLoader again for future imports
+    // Restore: must provide moduleLoader again for future imports
     using vm2 = await QuickJS.restore(snapshot, {
       wasm: wasmBytes,
       moduleLoader: makeLoader(),

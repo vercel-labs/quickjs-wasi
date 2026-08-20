@@ -91,7 +91,7 @@ static char *module_normalizer_trampoline(JSContext *ctx,
     char *result = host_module_normalize(module_base_name, module_name);
     if (!result) {
         /* The host may have already thrown a more specific error via
-           qjs_throw — only throw the generic error if it did not. */
+           qjs_throw; only throw the generic error if it did not. */
         if (!JS_HasException(ctx))
             JS_ThrowReferenceError(ctx, "could not normalize module '%s'", module_name);
         return NULL;
@@ -99,7 +99,7 @@ static char *module_normalizer_trampoline(JSContext *ctx,
     /* The host allocated with plain malloc, but QuickJS frees the returned
        name with js_free. Since quickjs-ng 0.16 the js_* allocator is an
        arena that stores a block header BEFORE each pointer, so handing it
-       a foreign pointer reads a garbage header and corrupts the heap —
+       a foreign pointer reads a garbage header and corrupts the heap;
        the two allocators can no longer be mixed. Copy into js_malloc'd
        memory and free the host buffer. */
     size_t len = strlen(result);
@@ -122,7 +122,7 @@ static JSModuleDef *module_loader_trampoline(JSContext *ctx,
     char *source = host_module_load(module_name, &source_len);
     if (!source) {
         /* The host may have already thrown a more specific error via
-           qjs_throw — only throw the generic error if it did not. */
+           qjs_throw; only throw the generic error if it did not. */
         if (!JS_HasException(ctx))
             JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
         return NULL;
@@ -139,7 +139,7 @@ static JSModuleDef *module_loader_trampoline(JSContext *ctx,
 
     /* Extract the JSModuleDef from the compiled module function */
     JSModuleDef *m = (JSModuleDef *)JS_VALUE_GET_PTR(func_val);
-    /* Don't free func_val — the module is owned by the runtime */
+    /* Don't free func_val; the module is owned by the runtime */
     return m;
 }
 
@@ -262,7 +262,7 @@ const char *qjs_get_quickjs_version(void) {
 
 /* ---- Lifecycle ---- */
 
-/* Intrinsic bitmask flags — must match the TypeScript Intrinsics constants */
+/* Intrinsic bitmask flags; must match the TypeScript Intrinsics constants */
 #define QJS_INTRINSIC_DATE           (1 << 0)
 #define QJS_INTRINSIC_EVAL           (1 << 1)
 #define QJS_INTRINSIC_REGEXP         (1 << 2)
@@ -286,7 +286,7 @@ const char *qjs_get_quickjs_version(void) {
  * quickjs-ng's default `js__malloc_usable_size` (cutils.h) has no branch
  * for WASI and falls through to `return 0;`. The memory accounting adds
  * `usable_size(ptr) + MALLOC_OVERHEAD` per allocation, so with a zero
- * usable-size every allocation is recorded as overhead only — the actual
+ * usable-size every allocation is recorded as overhead only: the actual
  * bytes never count against `JS_SetMemoryLimit`, and `mallocSize` stays
  * near zero while real memory grows without bound (retained ArrayBuffers
  * reach GiB under an 8 MiB limit; see issue #30). The per-allocation
@@ -295,7 +295,7 @@ const char *qjs_get_quickjs_version(void) {
  * freely.
  *
  * wasi-libc's dlmalloc exports `malloc_usable_size`, so wiring it in
- * makes the accounting — and therefore `memoryLimit` — actually work.
+ * makes the accounting, and therefore `memoryLimit`, actually work.
  *
  * ---- Why the limit is enforced HERE and not via JS_SetMemoryLimit ----
  *
@@ -303,7 +303,7 @@ const char *qjs_get_quickjs_version(void) {
  * functions are called and refuses at exactly malloc_limit. When a guest
  * exhausts the limit with many small allocations, JS_ThrowOutOfMemory's
  * own allocation of the "out of memory" InternalError object is refused
- * too, and quickjs falls back to throwing a bare JS_NULL (issue #38) —
+ * too, and quickjs falls back to throwing a bare JS_NULL (issue #38):
  * in-guest `catch (e)` sees `null`, indistinguishable from `throw null`,
  * and the host gets a nameless, messageless exception.
  *
@@ -312,7 +312,7 @@ const char *qjs_get_quickjs_version(void) {
  * refused at a SOFT limit that sits QJS_OOM_HEADROOM below the
  * configured memoryLimit. Once a refusal happens, allocations may dip
  * into the reserved headroom (up to the full memoryLimit) so that the
- * InternalError object — and the guest/host code that inspects it — can
+ * InternalError object, and the guest/host code that inspects it, can
  * allocate. The reserve re-arms as soon as usage drops back below the
  * soft limit, and the configured memoryLimit remains a hard ceiling at
  * all times.
@@ -385,7 +385,7 @@ static void *qjs_wasi_realloc(void *opaque, void *ptr, size_t size) {
     size_t old_usable = ptr ? malloc_usable_size(ptr) : 0;
     /* Only consult the limiter when the block grows: a shrinking or
        same-size realloc releases (or keeps) memory and must never be
-       refused — usage can legitimately sit above the soft limit, e.g.
+       refused: usage can legitimately sit above the soft limit, e.g.
        right after qjs_set_memory_limit applies a tighter limit to a
        restored snapshot, and refusing would turn a memory-RELEASING
        operation into a spurious OOM. */
@@ -442,7 +442,7 @@ int qjs_init(void) {
  * intrinsics (same as qjs_init), or a bitmask of QJS_INTRINSIC_* flags
  * to create a minimal context.
  *
- * Note: BaseObjects is always included — it provides fundamental types
+ * Note: BaseObjects is always included; it provides fundamental types
  * (Object, Array, Number, String, etc.) without which nothing works.
  */
 __attribute__((export_name("qjs_init2")))
@@ -535,7 +535,7 @@ void qjs_set_memory_limit(size_t limit) {
        qjs_wasi_malloc): the engine-level check refuses at exactly the limit
        and leaves no headroom to construct the "out of memory" InternalError,
        so a bare `null` gets thrown instead (issue #38). Keep the engine
-       limit unlimited — and explicitly reset it, since a runtime restored
+       limit unlimited, and explicitly reset it, since a runtime restored
        from a snapshot may carry a persisted engine-level limit. */
     if (rt) JS_SetMemoryLimit(rt, 0);
 }
@@ -656,7 +656,7 @@ static JSValue resolve_to_func_data(JSContext *ctx, JSValueConst this_val,
  * the chained promise unchanged.
  *
  * The chaining uses JS_PromiseThen, the engine-level primitive that does
- * not consult Promise.prototype.then or Symbol.species — guest code that
+ * not consult Promise.prototype.then or Symbol.species, so guest code that
  * patches either cannot intercept or observe module namespace resolution.
  *
  * Consumes func_obj.
@@ -668,7 +668,7 @@ static JSValue eval_module_to_namespace(JSValue func_obj)
     /* Resolve module dependencies before evaluation. JS_Eval with
        COMPILE_ONLY already resolves the graph, and quickjs-ng's
        js_resolve_module early-returns for already-resolved modules, so
-       this is a no-op for that caller — but it is required for modules
+       this is a no-op for that caller, but it is required for modules
        deserialized from bytecode and keeps this helper self-contained. */
     if (JS_ResolveModule(ctx, func_obj) < 0) {
         JS_FreeValue(ctx, func_obj);
@@ -755,7 +755,7 @@ uint8_t *qjs_compile(const char *code, size_t code_len, const char *filename,
         memcpy(copy, buf, *out_len);
     } else {
         /* The host reports a NULL return via the pending QuickJS
-           exception — make sure there is one, or it would surface a
+           exception, so make sure there is one, or it would surface a
            stale/unset exception as the compile error. */
         JS_ThrowOutOfMemory(ctx);
         *out_len = 0;
@@ -861,13 +861,13 @@ int qjs_get_symbol_description(JSValue *val, JSValue **desc_out) {
     JS_FreeValue(ctx, global);
 
     if (!JS_IsUndefined(key_for_result)) {
-        /* Global symbol — keyFor returned the description string */
+        /* Global symbol: keyFor returned the description string */
         *desc_out = jsvalue_to_heap(key_for_result);
         return 1;
     }
     JS_FreeValue(ctx, key_for_result);
 
-    /* Local symbol — get the .description property */
+    /* Local symbol: get the .description property */
     JSValue desc = JS_GetPropertyStr(ctx, *val, "description");
     *desc_out = jsvalue_to_heap(desc);
     return 2;
@@ -892,7 +892,7 @@ const char *qjs_get_string(JSValue *val) {
  * Length-aware string conversion. Unlike qjs_get_string (JS_ToCString),
  * the result is NOT consumed via NUL-terminated reads: the byte length is
  * written to *plen, so embedded U+0000 code units survive. Lone
- * surrogates survive too — JS_ToCStringLen2 keeps unmatched surrogate
+ * surrogates survive too: JS_ToCStringLen2 keeps unmatched surrogate
  * code points, encoding them as 3-byte sequences (WTF-8). The host
  * decodes WTF-8 (standard UTF-8 plus surrogate-range sequences) to
  * recover the exact JS string. Free with qjs_free_cstring.
@@ -1045,11 +1045,11 @@ int qjs_get_class_id(JSValue *val) {
 }
 
 /*
- * Get the engine-level class name of a value as a JS string — e.g.
+ * Get the engine-level class name of a value as a JS string, e.g.
  * "Object", "Map", "Date", or the registered name of a class defined by
  * an extension. Like the brand checks above this is trap-free: it reads
  * the class table, so no Symbol.toStringTag lookups, constructor/name
- * property reads, proxy traps, or prototype-chain walks — and it cannot
+ * property reads, proxy traps, or prototype-chain walks, and it cannot
  * be spoofed by guest code. Note the engine registers the Proxy class
  * under the name "Object" (mirroring Object.prototype.toString); use
  * qjs_is_proxy to detect proxies.
@@ -1407,8 +1407,8 @@ JSValue *qjs_get_own_property_names_all(JSValue *obj) {
 }
 
 /*
- * Get ALL own property keys — strings AND symbols, including
- * non-enumerable — as a QuickJS Array (Reflect.ownKeys semantics).
+ * Get ALL own property keys (strings AND symbols, including
+ * non-enumerable) as a QuickJS Array (Reflect.ownKeys semantics).
  * String keys are returned as strings, symbol keys as symbols.
  * Returns a heap-allocated JSValue* pointing to the array, or
  * JS_EXCEPTION on failure.
@@ -1510,7 +1510,7 @@ int qjs_has_own_property(JSValue *obj, const char *name) {
 /*
  * qjs_has_own_property with a JSValue key instead of a C string. C-string
  * keys cannot express embedded NULs or lone surrogates; a JSValue key
- * (from qjs_new_string, which is length-aware) can — and also supports
+ * (from qjs_new_string, which is length-aware) can, and it also supports
  * symbols.
  */
 __attribute__((export_name("qjs_has_own_property_value")))
@@ -1554,7 +1554,7 @@ int qjs_property_is_enumerable(JSValue *obj, const char *name) {
     return ret; /* 0 = not found, -1 = error */
 }
 
-/* qjs_property_is_enumerable with a JSValue key — see
+/* qjs_property_is_enumerable with a JSValue key; see
  * qjs_has_own_property_value for why. */
 __attribute__((export_name("qjs_property_is_enumerable_value")))
 int qjs_property_is_enumerable_value(JSValue *obj, JSValue *key) {

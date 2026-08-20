@@ -67,7 +67,7 @@ describe('onUnhandledRejection', () => {
   });
 
   it('should not fire when no handler is registered', async () => {
-    // Should not crash — just silently ignores unhandled rejections
+    // Should not crash; unhandled rejections are silently ignored
     using vm = await QuickJS.create(wasmBytes);
     vm.evalCode('Promise.reject("ignored")').dispose();
     vm.executePendingJobs();
