@@ -87,7 +87,6 @@ static char *module_normalizer_trampoline(JSContext *ctx,
                                            const char *module_base_name,
                                            const char *module_name, void *opaque)
 {
-    (void)ctx;
     (void)opaque;
     char *result = host_module_normalize(module_base_name, module_name);
     if (!result) {
@@ -97,9 +96,18 @@ static char *module_normalizer_trampoline(JSContext *ctx,
             JS_ThrowReferenceError(ctx, "could not normalize module '%s'", module_name);
         return NULL;
     }
-    /* The host allocated with malloc; QuickJS expects js_malloc'd memory.
-       Since we're using the same allocator (wasi libc malloc), this is fine. */
-    return result;
+    /* The host allocated with plain malloc, but QuickJS frees the returned
+       name with js_free. Since quickjs-ng 0.16 the js_* allocator is an
+       arena that stores a block header BEFORE each pointer, so handing it
+       a foreign pointer reads a garbage header and corrupts the heap —
+       the two allocators can no longer be mixed. Copy into js_malloc'd
+       memory and free the host buffer. */
+    size_t len = strlen(result);
+    char *copy = js_malloc(ctx, len + 1);
+    if (copy)
+        memcpy(copy, result, len + 1);
+    free(result);
+    return copy; /* NULL on OOM: js_malloc already threw */
 }
 
 /*
@@ -647,6 +655,10 @@ static JSValue resolve_to_func_data(JSContext *ctx, JSValueConst this_val,
  * Rejections (e.g. a throw during module evaluation) propagate through
  * the chained promise unchanged.
  *
+ * The chaining uses JS_PromiseThen, the engine-level primitive that does
+ * not consult Promise.prototype.then or Symbol.species — guest code that
+ * patches either cannot intercept or observe module namespace resolution.
+ *
  * Consumes func_obj.
  */
 static JSValue eval_module_to_namespace(JSValue func_obj)
@@ -680,14 +692,7 @@ static JSValue eval_module_to_namespace(JSValue func_obj)
         return then_fn;
     }
 
-    JSAtom then_atom = JS_NewAtom(ctx, "then");
-    if (then_atom == JS_ATOM_NULL) {
-        JS_FreeValue(ctx, then_fn);
-        JS_FreeValue(ctx, eval_result);
-        return JS_EXCEPTION;
-    }
-    JSValue result = JS_Invoke(ctx, eval_result, then_atom, 1, &then_fn);
-    JS_FreeAtom(ctx, then_atom);
+    JSValue result = JS_PromiseThen(ctx, eval_result, then_fn, JS_UNDEFINED);
     JS_FreeValue(ctx, then_fn);
     JS_FreeValue(ctx, eval_result);
     return result;
@@ -737,7 +742,21 @@ uint8_t *qjs_compile(const char *code, size_t code_len, const char *filename,
     }
     uint8_t *buf = JS_WriteObject(ctx, out_len, obj, write_flags | JS_WRITE_OBJ_BYTECODE);
     JS_FreeValue(ctx, obj);
-    return buf; /* caller frees with js_free(ctx, buf) or wasm_free() */
+    if (!buf) {
+        *out_len = 0;
+        return NULL;
+    }
+    /* JS_WriteObject's buffer is js_malloc'd; the host frees the returned
+       pointer with wasm_free (plain free). Since quickjs-ng 0.16 the js_*
+       allocator is an arena whose pointers are NOT plain-malloc pointers,
+       so hand out a plain-malloc copy and js_free the original. */
+    uint8_t *copy = malloc(*out_len);
+    if (copy)
+        memcpy(copy, buf, *out_len);
+    else
+        *out_len = 0;
+    js_free(ctx, buf);
+    return copy; /* caller frees with wasm_free() */
 }
 
 /*
@@ -1021,6 +1040,35 @@ int qjs_get_class_id(JSValue *val) {
 }
 
 /*
+ * Get the engine-level class name of a value as a JS string — e.g.
+ * "Object", "Map", "Date", or the registered name of a class defined by
+ * an extension. Like the brand checks above this is trap-free: it reads
+ * the class table, so no Symbol.toStringTag lookups, constructor/name
+ * property reads, proxy traps, or prototype-chain walks — and it cannot
+ * be spoofed by guest code. Note the engine registers the Proxy class
+ * under the name "Object" (mirroring Object.prototype.toString); use
+ * qjs_is_proxy to detect proxies.
+ *
+ * Returns a heap-allocated JSValue*: a string, or JS_UNDEFINED for
+ * non-objects and for internal classes with no name.
+ *
+ * Requires quickjs-ng >= 0.16.2: earlier versions' JS_GetClassName
+ * returned the class id reinterpreted as an atom (garbage).
+ */
+__attribute__((export_name("qjs_get_class_name")))
+JSValue *qjs_get_class_name(JSValue *val) {
+    JSClassID class_id = JS_GetClassID(*val);
+    if (class_id == JS_INVALID_CLASS_ID)
+        return jsvalue_to_heap(JS_UNDEFINED);
+    JSAtom atom = JS_GetClassName(rt, class_id);
+    if (atom == JS_ATOM_NULL)
+        return jsvalue_to_heap(JS_UNDEFINED);
+    JSValue name = JS_AtomToString(ctx, atom);
+    JS_FreeAtom(ctx, atom);
+    return jsvalue_to_heap(name);
+}
+
+/*
  * Get the [[ProxyTarget]] of a Proxy, without firing any traps.
  * Returns a heap-allocated JSValue*, or JS_EXCEPTION if the value
  * is not a Proxy.
@@ -1208,6 +1256,31 @@ int qjs_promise_state(JSValue *promise) {
 __attribute__((export_name("qjs_promise_result")))
 JSValue *qjs_promise_result(JSValue *promise) {
     return jsvalue_to_heap(JS_PromiseResult(ctx, *promise));
+}
+
+/*
+ * Subscribe to a promise via the engine-level primitive: JS_PromiseThen
+ * does not consult Promise.prototype.then or Symbol.species, so guest
+ * code that patches either cannot intercept the subscription or swap in
+ * a foreign "promise". Returns a heap-allocated JSValue* holding the
+ * chained promise, or JS_EXCEPTION if the value is not a promise.
+ *
+ * Pass a JS_UNDEFINED handle for an absent on_fulfilled/on_rejected
+ * handler (spec pass-through behavior).
+ */
+__attribute__((export_name("qjs_promise_then")))
+JSValue *qjs_promise_then(JSValue *promise, JSValue *on_fulfilled, JSValue *on_rejected) {
+    return jsvalue_to_heap(JS_PromiseThen(ctx, *promise, *on_fulfilled, *on_rejected));
+}
+
+/*
+ * Mark a promise as handled: an eventual (or past) rejection will not be
+ * reported to the host promise-rejection tracker. No-op for non-promises.
+ */
+__attribute__((export_name("qjs_promise_mark_as_handled")))
+void qjs_promise_mark_as_handled(JSValue *promise) {
+    if (!JS_IsPromise(*promise)) return;
+    JS_PromiseMarkAsHandled(ctx, *promise);
 }
 
 /* ---- Job Queue ---- */

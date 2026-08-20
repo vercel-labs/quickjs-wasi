@@ -395,6 +395,7 @@ interface QuickJSExports {
   qjs_is_weak_set(valPtr: number): number;
   qjs_is_data_view(valPtr: number): number;
   qjs_get_class_id(valPtr: number): number;
+  qjs_get_class_name(valPtr: number): number;
   qjs_get_proxy_target(valPtr: number): number;
   qjs_get_proxy_handler(valPtr: number): number;
 
@@ -447,6 +448,8 @@ interface QuickJSExports {
   qjs_new_promise(resolveOutPtr: number, rejectOutPtr: number): number;
   qjs_promise_state(promisePtr: number): number;
   qjs_promise_result(promisePtr: number): number;
+  qjs_promise_then(promisePtr: number, onFulfilledPtr: number, onRejectedPtr: number): number;
+  qjs_promise_mark_as_handled(promisePtr: number): void;
 
   // Job queue
   qjs_is_job_pending(): number;
@@ -577,9 +580,6 @@ export class QuickJS {
    * @internal
    */
   _activeScope: Set<JSValueHandle> | null = null;
-
-  /** `Promise.prototype.then`, captured on first use. @internal */
-  private _promiseThen: JSValueHandle | null = null;
 
   /** Loaded extensions in deterministic order */
   private loadedExtensions: LoadedExtension[] = [];
@@ -1756,15 +1756,8 @@ export class QuickJS {
             return vm.undefined;
           });
 
-          const onSettleDup = onSettleFn.dup();
-          vm.callFunctionRaw(
-            vm.getPromiseThen(),
-            promiseHandle,
-            onSettleFn,
-            onSettleDup
-          ).dispose();
+          vm.promiseThenRaw(promiseHandle, onSettleFn, onSettleFn).dispose();
           onSettleFn.dispose();
-          onSettleDup.dispose();
         }
         return _settled;
       },
@@ -1829,38 +1822,38 @@ export class QuickJS {
         return this.undefined;
       });
 
-      // Use the captured intrinsic rather than reading `.then` off the value:
-      // a proxy or a patched own property would otherwise run guest code here.
-      this.callFunctionRaw(
-        this.getPromiseThen(),
-        promiseHandle,
-        onFulfilled,
-        onRejected
-      ).dispose();
+      // Subscribe via the engine-level primitive: JS_PromiseThen does not
+      // consult Promise.prototype.then or Symbol.species, so guest code
+      // that patches either cannot intercept the subscription (or run at
+      // all during it).
+      this.promiseThenRaw(promiseHandle, onFulfilled, onRejected).dispose();
       onFulfilled.dispose();
       onRejected.dispose();
     });
   }
 
   /**
-   * `Promise.prototype.then`, captured once and reused.
-   *
-   * `resolvePromise()` needs to subscribe to a promise without executing
-   * guest code, so it must not read `.then` off the value being resolved.
+   * Subscribe to a promise without executing guest code, via quickjs-ng's
+   * JS_PromiseThen: no Promise.prototype.then lookup, no Symbol.species.
+   * Returns the chained promise. Handler handles are borrowed (caller
+   * still owns and disposes them).
+   * @internal
    */
-  /** @internal */
-  getPromiseThen(): JSValueHandle {
-    if (!this._promiseThen) {
-      // capture outside any active scope, since this outlives it
-      const enclosing = this._activeScope;
-      this._activeScope = null;
-      try {
-        this._promiseThen = this.evalCode('Promise.prototype.then');
-      } finally {
-        this._activeScope = enclosing;
-      }
-    }
-    return this._promiseThen;
+  promiseThenRaw(promise: JSValueHandle, onFulfilled: JSValueHandle, onRejected: JSValueHandle): JSValueHandle {
+    return new JSValueHandle(this, this.exports.qjs_promise_then(promise.ptr, onFulfilled.ptr, onRejected.ptr));
+  }
+
+  /**
+   * Mark a promise as handled: an eventual (or already-recorded) rejection
+   * will not be reported to `onUnhandledRejection`. Useful when the host
+   * observes a rejection through other means (e.g. `resolvePromise()`) and
+   * wants to suppress the unhandled-rejection callback for it.
+   *
+   * No-op if the handle is not a promise.
+   */
+  markPromiseHandled(promise: JSValueHandle): void {
+    this.assertNotDisposed();
+    this.exports.qjs_promise_mark_as_handled(promise.ptr);
   }
 
   /**
@@ -2333,7 +2326,6 @@ export class QuickJS {
       this._ownedHandles.clear();
       this.hostCallbacks.clear();
       this._activeScope = null;
-      this._promiseThen = null;
       this.exports = null!;
       this.instance = null!;
       this.module = null!;
@@ -2799,6 +2791,29 @@ export class JSValueHandle {
    */
   get classId(): number {
     return this.vm._getExports().qjs_get_class_id(this.ptr);
+  }
+
+  /**
+   * The engine-level class name of this value — e.g. `"Object"`, `"Map"`,
+   * `"Date"`, `"RegExp"`, or the registered name of an extension-defined
+   * class like `"URL"` — or `undefined` for non-objects and unnamed
+   * internal classes.
+   *
+   * Unlike `constructorName` (which reads the `constructor` and `name`
+   * properties and can therefore fire getters/proxy traps and be spoofed),
+   * this is trap-free: it reads the engine's class table directly, never
+   * executes guest code, and cannot be forged by reassigning prototypes or
+   * constructors. Note that the engine registers the Proxy class under the
+   * name `"Object"` (mirroring `Object.prototype.toString`) — use `isProxy`
+   * to detect proxies and `getProxyTarget()` to read the target's brand.
+   */
+  get className(): string | undefined {
+    const h = new JSValueHandle(this.vm, this.vm._getExports().qjs_get_class_name(this.ptr));
+    try {
+      return h.isUndefined ? undefined : h.toString();
+    } finally {
+      h.dispose();
+    }
   }
 
   get promiseState(): number {

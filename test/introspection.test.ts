@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { QuickJS, type JSValueHandle } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 
@@ -223,6 +224,74 @@ describe('classId', () => {
     expect(map1.classId).toBe(map2.classId);
     expect(set.classId).toBeGreaterThan(0);
     expect(set.classId).not.toBe(map1.classId);
+  });
+});
+
+describe('className', () => {
+  it('returns the engine-level class name for objects, undefined for non-objects', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    for (const [expression, expected] of [
+      ['({})', 'Object'],
+      ['[]', 'Array'],
+      ['new Map()', 'Map'],
+      ['new Set()', 'Set'],
+      ['new Date(0)', 'Date'],
+      ['/x/', 'RegExp'],
+      ['new Error("boom")', 'Error'],
+      ['Promise.resolve()', 'Promise'],
+      ['(() => {})', 'Function'],
+      ['42', undefined],
+      ['"str"', undefined],
+      ['null', undefined],
+      ['undefined', undefined],
+    ] as const) {
+      using handle = vm.evalCode(expression);
+      expect(handle.className, expression).toBe(expected);
+    }
+  });
+
+  it('cannot be spoofed by reassigning prototypes or constructors', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using fakeMap = vm.evalCode(`
+      const o = { constructor: { name: 'Map' } };
+      Object.setPrototypeOf(o, Map.prototype);
+      o
+    `);
+    // constructorName is fooled; className is not
+    expect(fakeMap.constructorName).toBe('Map');
+    expect(fakeMap.className).toBe('Object');
+  });
+
+  it('fires zero traps on proxies; the unwrapped target reports its brand', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using proxy = vm.evalCode(`
+      globalThis.trapCount = 0;
+      const countingHandler = new Proxy({}, {
+        get(t, prop) { globalThis.trapCount++; return undefined; }
+      });
+      new Proxy(new Map(), countingHandler)
+    `);
+
+    // The engine registers the Proxy class under the name "Object"
+    // (mirroring Object.prototype.toString) — use isProxy to detect
+    // proxies, then unwrap to get the real brand.
+    expect(proxy.className).toBe('Object');
+    expect(proxy.isProxy).toBe(true);
+    using target = proxy.getProxyTarget();
+    expect(target.className).toBe('Map');
+
+    using count = vm.evalCode('globalThis.trapCount');
+    expect(count.toNumber()).toBe(0);
+  });
+
+  it('reports extension-defined classes', async () => {
+    const urlExtBytes = readFileSync(new globalThis.URL('../extensions/url/url.so', import.meta.url));
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      extensions: [{ name: 'url', wasm: urlExtBytes }],
+    });
+    using url = vm.evalCode('new URL("https://example.com/")');
+    expect(url.className).toBe('URL');
   });
 });
 
