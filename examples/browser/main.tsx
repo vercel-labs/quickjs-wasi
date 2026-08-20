@@ -389,22 +389,27 @@ const jsValueAccessor: DataAccessor = {
 
   getConstructorName(value: unknown): string | undefined {
     const h = value as JSValueHandle;
-    // Reading .constructor.name on a Proxy would fire its get trap
+    // Reading .constructor.name on a Proxy would fire its get trap. The
+    // engine registers the Proxy class as "Object", so this must come
+    // before the className read.
     if (h.isProxy) return 'Proxy';
 
-    // Prefer the engine brand: `.constructor.name` is two [[Get]]s that can
-    // run guest getters, and it is trivially spoofed (`{ constructor: Map }`
-    // reports "Map"). The brand cannot be forged or patched.
-    if (h.isMap) return 'Map';
-    if (h.isSet) return 'Set';
-    if (h.isDate) return 'Date';
-    if (h.isRegExp) return 'RegExp';
-    if (h.isWeakMap) return 'WeakMap';
-    if (h.isWeakSet) return 'WeakSet';
-    if (h.isWeakRef) return 'WeakRef';
-    if (h.isDataView) return 'DataView';
-    if (h.isArrayBuffer) return 'ArrayBuffer';
-    if (h.isPromise) return 'Promise';
+    // Prefer the engine's class table: `className` is a trap-free,
+    // unspoofable read that labels every registered class — including the
+    // typed arrays and extension-defined classes (URL, Headers,
+    // TextEncoder, …) the previous hand-rolled brand ladder missed.
+    // Generic names fall through: "Object"/"Function" so user classes get
+    // their real name from the prototype, and "Error" so TypeError
+    // instances (all native errors share the one Error class) do too.
+    const className = h.className;
+    if (
+      className !== undefined &&
+      className !== 'Object' &&
+      className !== 'Function' &&
+      className !== 'Error'
+    ) {
+      return className;
+    }
 
     // Unbranded: take the constructor from the *prototype*, never from the
     // value's own properties — `{ constructor: Map }` would otherwise be
