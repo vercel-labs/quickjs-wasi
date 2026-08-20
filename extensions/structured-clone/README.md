@@ -1,4 +1,4 @@
-# Structured Clone Extension
+# Structured clone extension
 
 WHATWG HTML Standard compliant `structuredClone()` global function. Deep clones values following the Structured Clone algorithm with circular reference detection.
 

@@ -410,7 +410,7 @@ describe('host-side devalue: guest code is not executed', () => {
     const harness = await createHarness();
     try {
       // `Object.prototype.toString` (what devalue classifies with by default)
-      // honours `Symbol.toStringTag`, so this object claims to be a Date.
+      // honors `Symbol.toStringTag`, so this object claims to be a Date.
       using spoofed = harness.vm.evalCode(
         'Object.defineProperty({ a: 1 }, Symbol.toStringTag, { value: "Date" })'
       );

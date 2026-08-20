@@ -1,4 +1,4 @@
-# Headers Extension
+# Headers extension
 
 A WHATWG Fetch Standard compliant `Headers` class, providing HTTP header manipulation with case-insensitive name matching, value normalization, and sorted iteration.
 

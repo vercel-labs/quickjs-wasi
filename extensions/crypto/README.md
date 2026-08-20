@@ -1,4 +1,4 @@
-# Crypto Extension
+# Crypto extension
 
 A W3C Web Cryptography API implementation backed by [mbedTLS 4.0](https://github.com/Mbed-TLS/mbedtls) (PSA Crypto). Provides the `crypto` global with `SubtleCrypto` for cryptographic operations.
 
@@ -40,7 +40,7 @@ All SubtleCrypto methods return Promises.
 - Properties: `type` (`"secret"`, `"public"`, `"private"`), `extractable`, `algorithm` (frozen), `usages` (frozen)
 - `Symbol.toStringTag` = `"CryptoKey"`
 
-### Global Constructors
+### Global constructors
 
 `Crypto`, `SubtleCrypto`, and `CryptoKey` are exposed as global constructors per the Web Crypto spec. Calling them with `new` throws `TypeError("Illegal constructor")`; instances are only created internally by the crypto API.
 

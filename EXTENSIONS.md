@@ -1,12 +1,12 @@
-# Native WASM Extensions
+# Native WASM extensions
 
-quickjs-wasi supports loading native C extensions compiled as WebAssembly shared libraries. Extensions link directly against the QuickJS C API through WASM dynamic linking: they share the same linear memory, function table, and heap allocator as the main QuickJS module, so there is zero marshalling overhead when calling QuickJS APIs.
+quickjs-wasi supports loading native C extensions compiled as WebAssembly shared libraries. Extensions link directly against the QuickJS C API through WASM dynamic linking: they share the same linear memory, function table, and heap allocator as the main QuickJS module, so there is zero marshaling overhead when calling QuickJS APIs.
 
 This enables implementing Web API polyfills (URL, FormData, Blob, etc.) and other performance-critical functionality in C rather than JavaScript, while keeping them loadable at runtime as separate `.so` files.
 
 ## Get started
 
-### Using a Built-in Extension
+### Using a built-in extension
 
 Each pre-built extension's compiled `.so` is exposed as a package sub-export. The caller is responsible for loading the bytes; quickjs-wasi never reads from disk or fetches over the network on your behalf:
 
@@ -59,7 +59,7 @@ const vm = await QuickJS.create({
 });
 ```
 
-### Building an Extension
+### Building an extension
 
 Extensions are C files that use the QuickJS C API, compiled with wasi-sdk as shared libraries:
 
@@ -114,9 +114,9 @@ const vm = await QuickJS.create({
 vm.evalCode('hello()').consume(h => h.toString()); // "Hello from a native extension!"
 ```
 
-## How It Works
+## How it works
 
-### WASM Dynamic Linking
+### WASM dynamic linking
 
 Extensions use the [WebAssembly dynamic linking convention](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md). The main `quickjs.wasm` module is a statically-linked WASI reactor that exports:
 
@@ -139,7 +139,7 @@ Extensions are compiled as WASM shared libraries (`.so` files) with `-fPIC --sha
 
 Because all modules share the same linear memory, a `JSContext*` pointer in the extension points to the same struct that QuickJS is using, so there is no serialization or copying when calling QuickJS APIs.
 
-### Extension Init Function
+### Extension init function
 
 Each extension must export an init function. The default naming convention is `qjs_ext_<name>_init`, where `<name>` matches the `name` field in the `ExtensionDescriptor`. You can override this with the `initFn` option.
 
@@ -159,7 +159,7 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 }
 ```
 
-### Version Reporting
+### Version reporting
 
 Extensions can optionally export a `qjs_ext_<name>_versions` function to report version information for native libraries they bundle. This information is surfaced via `vm.versions` on the host side.
 
@@ -202,7 +202,7 @@ console.log(vm.versions);
 // }
 ```
 
-### Snapshot/Restore with Extensions
+### Snapshot/restore with extensions
 
 Extensions are fully compatible with the snapshot/restore system. The snapshot includes:
 
@@ -247,7 +247,7 @@ vm2.evalCode('new URL("https://other.com").hostname')
   .consume(h => h.toString()); // 'other.com'
 ```
 
-## Writing Extensions
+## Writing extensions
 
 ### Available APIs
 
@@ -272,7 +272,7 @@ Extensions can call any function exported by the main module. This includes:
 - Sorting: `qsort`, `bsearch`
 - Other: `strerror`, `abort`
 
-### Registering a Class
+### Registering a class
 
 The typical pattern for registering a custom class with opaque C data:
 
@@ -346,7 +346,7 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 }
 ```
 
-### Compiler Flags
+### Compiler flags
 
 | Flag | Purpose |
 |------|---------|
@@ -356,7 +356,7 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 | `--target=wasm32-wasip1` | WASI target |
 | `--sysroot=...` | wasi-sdk sysroot |
 
-### Linker Flags
+### Linker flags
 
 | Flag | Purpose |
 |------|---------|
@@ -365,7 +365,7 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 | `--export-dynamic` | Export all non-hidden symbols |
 | `--allow-undefined` | Allow unresolved symbols (resolved at load time against the main module) |
 
-## Built-in Extensions
+## Built-in extensions
 
 | Extension | Subpath | Provides |
 |-----------|---------|----------|
@@ -379,7 +379,7 @@ int qjs_ext_myext_init(JSContext *ctx, JSRuntime *rt) {
 
 See each extension's README for full API documentation.
 
-## WASI Override Layering
+## WASI override layering
 
 Extensions that import `wasi_snapshot_preview1` functions (like the crypto extension importing `random_get`) receive WASI implementations from a three-layer merge:
 
@@ -414,7 +414,7 @@ const vm = await QuickJS.create({
 });
 ```
 
-## Known Limitations
+## Known limitations
 
 ### Unstable ABI
 
@@ -426,33 +426,33 @@ wasm-ld: warning: creating shared libraries, with -shared, is not yet stable
 
 The `dylink.0` section format and GOT conventions could change in a future wasi-sdk release. In practice, the convention has been stable since ~2020 (Emscripten uses the same format), but there is no formal stability guarantee.
 
-### Same Toolchain Requirement
+### Same toolchain requirement
 
 The main module and all extensions **must be compiled with the same wasi-sdk version**. If you upgrade wasi-sdk and rebuild `quickjs.wasm`, you must also rebuild all extensions. There is no versioning mechanism to detect mismatches: struct layouts, calling conventions, and symbol mangling could silently differ between toolchain versions.
 
 The current build uses **wasi-sdk 32** (clang 22.1.0).
 
-### No LTO for Extensions
+### No LTO for extensions
 
 The main module uses link-time optimization (`-flto`), but extensions cannot, because LTO is incompatible with `-fPIC --shared` in wasi-sdk. Extension code will not be as aggressively optimized. For most extensions this is irrelevant, but compute-heavy extensions may notice a difference.
 
-### Limited GOT Resolution
+### Limited GOT resolution
 
 The loader resolves `GOT.func.*` entries by looking up functions in the main module's exports and adding them to the indirect function table. This allows extensions to call main-module functions via function pointers (e.g. `memset` used by mbedTLS). `GOT.mem.*` entries are zero-initialized, so extensions that take the address of an external global variable may not work correctly.
 
-### Snapshot Portability
+### Snapshot portability
 
 A snapshot taken with extensions can **only** be restored with the exact same extensions, in the exact same order, compiled from the exact same source with the exact same toolchain. The snapshot stores raw memory addresses and function table indices. If any of these change (e.g., because an extension was recompiled), the restored snapshot will be corrupted.
 
-### No Hot-Swapping
+### No hot-swapping
 
 Extensions are loaded once at `QuickJS.create()` time and cannot be added, removed, or replaced on a running VM.
 
-### Extensions Must Be Ordered Consistently
+### Extensions must be ordered consistently
 
 If you load extensions `[A, B]`, you must restore with `[A, B]` in the same order. The function table layout depends on loading order.
 
-## Snapshot Format (Version 2)
+## Snapshot format (version 2)
 
 Version 2 of the snapshot format adds extension metadata:
 

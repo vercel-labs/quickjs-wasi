@@ -1,4 +1,4 @@
-# Encoding Extension
+# Encoding extension
 
 A WHATWG Encoding Standard compliant implementation of `TextEncoder` and `TextDecoder`. Supports UTF-8 encoding/decoding, and UTF-16LE/UTF-16BE decoding.
 

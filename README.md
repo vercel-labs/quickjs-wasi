@@ -10,7 +10,7 @@ npm install quickjs-wasi
 
 ## Usage
 
-### Loading the WASM Binary
+### Loading the WASM binary
 
 The caller is responsible for providing the WASM bytes (or a pre-compiled `WebAssembly.Module`): quickjs-wasi does no implicit filesystem or network I/O. The package ships the binary at the `quickjs-wasi/quickjs.wasm` subpath, which can be resolved by your environment's preferred mechanism.
 
@@ -40,7 +40,7 @@ const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
 
 Compiling a `WebAssembly.Module` once and reusing it across many VMs is highly recommended, since instantiation from a compiled module is much faster than re-compiling bytes for each call to `QuickJS.create()`.
 
-### Basic Evaluation
+### Basic evaluation
 
 Both `QuickJS` and `JSValueHandle` implement `Symbol.dispose`, so you can use `using` declarations for automatic cleanup:
 
@@ -56,7 +56,7 @@ import { QuickJS } from 'quickjs-wasi';
 } // vm and result are automatically disposed here
 ```
 
-### Working with Values
+### Working with values
 
 ```typescript
 using vm = await QuickJS.create(wasmBytes);
@@ -81,7 +81,7 @@ const dumped = vm.dump(handle); // { x: 1, y: [2, 3] }
 const value = vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
 ```
 
-### Host Functions
+### Host functions
 
 Register JavaScript functions backed by host (Node.js) callbacks:
 
@@ -100,7 +100,7 @@ using result = vm.evalCode('add(3, 4)');
 console.log(result.toNumber()); // 7
 ```
 
-### Promises and Async Host Functions
+### Promises and async host functions
 
 Bridge async host operations into the QuickJS sandbox:
 
@@ -131,7 +131,7 @@ using vm = await QuickJS.create(wasmBytes);
 }
 ```
 
-### ES Modules
+### ES modules
 
 Evaluate code as an ES module with `EvalFlags.TYPE_MODULE`. Module evaluation
 returns a handle to a Promise that resolves to the module's namespace object
@@ -187,7 +187,7 @@ if ('value' in result) {
 }
 ```
 
-#### Async Module Loading
+#### Async module loading
 
 The `load` and `normalize` callbacks are **synchronous**: the engine calls
 them from inside the WASM call stack, which cannot be suspended to await a
@@ -238,7 +238,7 @@ const result = await vm.resolvePromise(promise);
 Alternatively, pre-fetch all module sources up front and serve them from the
 cache directly.
 
-### Error Handling
+### Error handling
 
 ```typescript
 using vm = await QuickJS.create(wasmBytes);
@@ -259,7 +259,7 @@ try {
 }
 ```
 
-### WASI Overrides
+### WASI overrides
 
 The `wasi` option lets you override any `wasi_snapshot_preview1` host function. It's a factory that receives the WASM linear memory and returns an object of override functions. Overrides apply to both the main module and all loaded extensions.
 
@@ -317,7 +317,7 @@ currentTime += 1000n; // advance 1 second
 vm.evalCode('Date.now()').consume(h => h.toNumber()); // 1700000001000
 ```
 
-### Memory Limits
+### Memory limits
 
 Restrict how much memory the QuickJS runtime can allocate. When exceeded, allocations fail and surface as JS exceptions:
 
@@ -338,7 +338,7 @@ vm.evalCode(`
 
 The limit is re-applied after `QuickJS.restore()`, so you can use a different limit for restored VMs than the original.
 
-### Interrupt Handler
+### Interrupt handler
 
 Prevent infinite loops and enforce execution timeouts:
 
@@ -365,7 +365,7 @@ vm.evalCode('1 + 2').consume(h => h.toNumber()); // 3
 
 The handler is called approximately once per JS bytecode instruction, so it should be fast. When it returns `true`, the current execution is interrupted and throws a `JSException`. The VM remains usable after an interrupt.
 
-### Timezone Offset
+### Timezone offset
 
 By default, `Date` inside the sandbox mirrors the host environment's timezone. You can override this with a fixed offset or a dynamic callback:
 
@@ -403,7 +403,7 @@ The `timezoneOffset` option accepts:
 - **A number**: fixed UTC offset in minutes using the `getTimezoneOffset()` sign convention (positive values are west of UTC, e.g. `480` for UTC-8).
 - **A callback `(timeSecs: number) => number`**: called with seconds since epoch, must return the offset in minutes. Useful for custom timezone logic. The callback is invoked whenever QuickJS needs to convert between UTC and local time (e.g. `getHours()`, `toString()`, `new Date(year, month, ...)`, `getTimezoneOffset()`), so it may be called multiple times per Date operation.
 
-### Snapshot and Restore
+### Snapshot and restore
 
 The key differentiator: snapshot the entire VM state and restore it later.
 
@@ -456,7 +456,7 @@ const restored = QuickJS.deserializeSnapshot(loaded);
 }
 ```
 
-### Host Callbacks After Restore
+### Host callbacks after restore
 
 Host functions registered with `newFunction()` are keyed by their name, which gets baked into the snapshot. After restoring, re-register the callbacks by name:
 
@@ -487,9 +487,9 @@ let snapshot: Snapshot;
 
 Note: each call to `newFunction()` must use a unique name. Attempting to register two host functions with the same name will throw an error.
 
-### Native WASM Extensions
+### Native WASM extensions
 
-Load C-based extensions compiled as WASM shared libraries. Extensions link directly against the QuickJS C API with zero marshalling overhead: they share the same linear memory and can register custom classes, prototypes, and globals.
+Load C-based extensions compiled as WASM shared libraries. Extensions link directly against the QuickJS C API with zero marshaling overhead: they share the same linear memory and can register custom classes, prototypes, and globals.
 
 The package ships five pre-built extensions, each available as a subpath export. As with the main `quickjs.wasm` binary, the caller is responsible for loading the bytes:
 
@@ -544,9 +544,9 @@ using vm2 = await QuickJS.restore(snapshot, {
 
 See [EXTENSIONS.md](./EXTENSIONS.md) for how to build your own extensions, how dynamic linking works, and known limitations.
 
-## API Reference
+## API reference
 
-### `QuickJS` (VM Instance)
+### `QuickJS` (VM instance)
 
 | Method | Description |
 |--------|-------------|
@@ -599,7 +599,7 @@ See [EXTENSIONS.md](./EXTENSIONS.md) for how to build your own extensions, how d
 | `initFn?` | Init function name (default: `qjs_ext_${name}_init`) |
 | `wasi?` | Extension-provided WASI overrides: `(memory) => ({...})`. Layered between built-in defaults and user overrides |
 
-### Cached Properties
+### Cached properties
 
 These are singleton handles. Do **not** dispose them:
 
@@ -696,7 +696,7 @@ lifetime is managed elsewhere.
 | `deferred.resolve(handle)` | Resolve the promise with a QuickJS value |
 | `deferred.reject(handle)` | Reject the promise with a QuickJS value |
 
-### Data Marshalling
+### Data marshaling
 
 `dump()` and `hostToHandle()` automatically convert values between the host and the QuickJS VM. The following types are supported:
 
@@ -727,13 +727,13 @@ lifetime is managed elsewhere.
 - Binary data is always **copied** between host and WASM memory; there is no zero-copy view API
 - `dump()` for typed arrays determines the host constructor from bytes-per-element (1 → `Uint8Array`, 2 → `Uint16Array`, 4 → `Uint32Array`, 8 → `Float64Array`)
 
-## How It Works
+## How it works
 
-### The Core Insight
+### The core insight
 
 WebAssembly linear memory is a flat byte array. Everything QuickJS allocates (the runtime struct, all contexts, all JS objects, the GC heap, the atom table, the promise job queue, pending promises) lives in this linear memory. There are no external pointers, file handles, or OS resources. When you copy the memory wholesale to a new WASM instance, all internal pointer relationships are preserved because they reference the same linear address space.
 
-### One VM = One WASM Instance
+### One VM = one WASM instance
 
 Unlike quickjs-emscripten which has a two-level model (`QuickJSWASMModule` → `QuickJSContext`), quickjs-wasm uses a simpler one-level model: each `QuickJS.create()` call instantiates its own WASM module with its own linear memory, runtime, and context. This gives stronger isolation (no shared memory between VMs) and makes snapshotting clean: one instance, one context, one snapshot.
 
@@ -759,7 +759,7 @@ Host (Node.js / Deno / Bun / Browser)
            +-- Snapshot support (get/set runtime and context pointers)
 ```
 
-### Host Callback Mechanism
+### Host callback mechanism
 
 When `vm.newFunction(name, fn)` is called, a QuickJS C function is created via `JS_NewCFunctionData2` with the function name stored as a JS string in `func_data[0]`. When QuickJS code calls the function, the C trampoline extracts the name and calls the imported `host_call(name_ptr, name_len, this_ptr, argc, argv_ptr)` function, which dispatches to the registered host callback by name.
 
@@ -773,7 +773,7 @@ This design survives snapshot/restore: the name string is stored in QuickJS's he
 - Node.js >= 22
 - pnpm
 
-### Building Locally
+### Building locally
 
 ```sh
 # Clone with submodules
@@ -794,9 +794,9 @@ pnpm run build
 pnpm test
 ```
 
-## Technical Details
+## Technical details
 
-### WASM Binary
+### WASM binary
 
 - Built from [quickjs-ng](https://github.com/quickjs-ng/quickjs) (MIT license)
 - Compiled with wasi-sdk targeting `wasm32-wasip1` in reactor mode
@@ -804,7 +804,7 @@ pnpm test
 - 7 WASM imports: 6 WASI functions + 1 `env.host_call` for host callbacks
 - Exports `memory` and `__stack_pointer` for snapshot support
 
-### What Gets Snapshotted
+### What gets snapshotted
 
 The snapshot captures the entire WASM linear memory, which contains:
 
@@ -819,16 +819,16 @@ The snapshot captures the entire WASM linear memory, which contains:
 
 Plus the `__stack_pointer` WASM global (a single i32).
 
-### Limitations and Future Work
+### Limitations and future work
 
 - **Snapshot size**: Snapshots capture the entire WASM linear memory (~256 KB baseline, grows with heap). Use `serializeSnapshot()` to get a binary buffer, then apply your own compression (gzip/zstd). The memory compresses well due to its large zero regions.
 - **Stack size limit**: QuickJS-ng disables `JS_SetMaxStackSize` on WASI, so deep recursion causes a WASM trap (not a catchable exception).
-- **ES Modules**: Supported via `EvalFlags.TYPE_MODULE` and the `moduleLoader` option (see [ES Modules](#es-modules)). Dynamic `import()` resolves through the same loader.
+- **ES modules**: Supported via `EvalFlags.TYPE_MODULE` and the `moduleLoader` option (see [ES modules](#es-modules)). Dynamic `import()` resolves through the same loader.
 - **Extension ABI**: Native WASM extensions use an experimental dynamic linking ABI that is [not yet stabilized](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md). All extensions must be compiled with the same wasi-sdk version as the main module. See [EXTENSIONS.md](./EXTENSIONS.md) for details.
 
-### Browser Usage
+### Browser usage
 
-quickjs-wasi works in browsers: the TypeScript API uses only the standard `WebAssembly` API and the WASI shim is environment-agnostic. The package does no implicit I/O, so loading the WASM binary is up to you. See [Loading the WASM Binary](#loading-the-wasm-binary) above for `fetch()` and bundler-based examples.
+quickjs-wasi works in browsers: the TypeScript API uses only the standard `WebAssembly` API and the WASI shim is environment-agnostic. The package does no implicit I/O, so loading the WASM binary is up to you. See [Loading the WASM binary](#loading-the-wasm-binary) above for `fetch()` and bundler-based examples.
 
 ```typescript
 import { QuickJS } from 'quickjs-wasi';

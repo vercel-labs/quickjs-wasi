@@ -1,4 +1,4 @@
-# URL Extension
+# URL extension
 
 A fully WHATWG URL Standard compliant implementation of `URL` and `URLSearchParams`, backed by the [ada-url](https://github.com/ada-url/ada) library (the same URL parser used by Node.js).
 
