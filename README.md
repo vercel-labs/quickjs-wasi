@@ -38,7 +38,7 @@ import wasmUrl from 'quickjs-wasi/quickjs.wasm?url';
 const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
 ```
 
-Compiling a `WebAssembly.Module` once and reusing it across many VMs is highly recommended, since instantiation from a compiled module is much faster than re-compiling bytes for each call to `QuickJS.create()`.
+Compile a `WebAssembly.Module` once and reuse it across VMs: instantiation from a compiled module skips recompiling the ~620 KB binary on every `QuickJS.create()` call.
 
 ### Basic evaluation
 
@@ -261,7 +261,7 @@ try {
 
 ### WASI overrides
 
-The `wasi` option lets you override any `wasi_snapshot_preview1` host function. It's a factory that receives the WASM linear memory and returns an object of override functions. Overrides apply to both the main module and all loaded extensions.
+The `wasi` option lets you override any WebAssembly System Interface (WASI) `wasi_snapshot_preview1` host function. It's a factory that receives the WASM linear memory and returns an object of override functions. Overrides apply to both the main module and all loaded extensions.
 
 This is useful for deterministic execution: QuickJS uses a [xorshift64*](https://en.wikipedia.org/wiki/Xorshift) PRNG that is seeded once from the clock value during context creation. Override `clock_time_get` to control both `Date.now()` and the `Math.random()` seed:
 

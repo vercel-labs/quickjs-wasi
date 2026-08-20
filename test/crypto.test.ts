@@ -190,7 +190,7 @@ describe('crypto.getRandomValues()', () => {
     })()`);
     expect(result.isSame).toBe(true);
     expect(result.length).toBe(16);
-    // Very unlikely all 16 bytes are zero
+    // All 16 random bytes being zero has probability 2^-128
     expect(result.hasNonZero).toBe(true);
   });
 

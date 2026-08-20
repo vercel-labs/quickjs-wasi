@@ -18,7 +18,7 @@ const vm = await QuickJS.create({
 
 ### `crypto` global
 
-- `crypto.getRandomValues(typedArray)`: fill with cryptographically strong random values (max 65536 bytes)
+- `crypto.getRandomValues(typedArray)`: fill with cryptographically strong random values (max 65,536 bytes)
 - `crypto.randomUUID()`: generate a v4 UUID string
 - `crypto.subtle`: `SubtleCrypto` instance
 

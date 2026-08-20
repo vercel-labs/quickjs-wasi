@@ -32,7 +32,7 @@
 
 /* ---- Circular reference tracking ---- */
 
-/* Simple dynamic array mapping original values to their clones.
+/* Dynamic array mapping original values to their clones.
    We store pairs of (original JSValue tag+ptr, clone JSValue).
    For cycle detection, we only care about object-type values. */
 
