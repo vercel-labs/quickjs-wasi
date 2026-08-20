@@ -88,7 +88,9 @@ Register JavaScript functions backed by host (Node.js) callbacks:
 ```typescript
 using vm = await QuickJS.create(wasmBytes);
 
-// The first argument to the callback is always `this`
+// The callback receives the call arguments as handles. The guest `this`
+// value is the callback's `this` binding, so use a regular `function`
+// expression (not an arrow function) if you need to access it.
 {
   using add = vm.newFunction('add', (...args) => {
     return vm.newNumber(args[0].toNumber() + args[1].toNumber());
