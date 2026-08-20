@@ -375,12 +375,23 @@ static void qjs_wasi_free(void *opaque, void *ptr) {
 static void *qjs_wasi_realloc(void *opaque, void *ptr, size_t size) {
     (void)opaque;
     size_t old_usable = ptr ? malloc_usable_size(ptr) : 0;
+    /* Only consult the limiter when the block grows: a shrinking or
+       same-size realloc releases (or keeps) memory and must never be
+       refused — usage can legitimately sit above the soft limit, e.g.
+       right after qjs_set_memory_limit applies a tighter limit to a
+       restored snapshot, and refusing would turn a memory-RELEASING
+       operation into a spurious OOM. */
     size_t growth = size > old_usable ? size - old_usable : 0;
-    if (qjs_mem_refuse(growth)) return NULL;
+    if (growth > 0 && qjs_mem_refuse(growth)) return NULL;
     void *new_ptr = realloc(ptr, size);
     if (new_ptr) {
         qjs_mem_used -= old_usable <= qjs_mem_used ? old_usable : qjs_mem_used;
         qjs_mem_used += malloc_usable_size(new_ptr);
+    } else if (ptr && size == 0) {
+        /* Unreachable via quickjs (js_realloc_rt routes size==0 to
+           js_free_rt), but defensive: a libc whose realloc(ptr, 0) frees
+           and returns NULL must not leave the freed block accounted. */
+        qjs_mem_used -= old_usable <= qjs_mem_used ? old_usable : qjs_mem_used;
     }
     return new_ptr;
 }
