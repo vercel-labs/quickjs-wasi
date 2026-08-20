@@ -117,3 +117,38 @@ describe('onUnhandledRejection', () => {
     expect(rejections).toContain('post-restore');
   });
 });
+
+describe('markPromiseHandled', () => {
+  it('suppresses the unhandled-rejection callback for a marked promise', async () => {
+    const rejections: string[] = [];
+
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      onUnhandledRejection: (_promise, reason, isHandled) => {
+        if (!isHandled) rejections.push(reason.toString());
+      },
+    });
+
+    // A pending promise that will reject in a later microtask
+    using promise = vm.evalCode(`
+      globalThis.trigger = null;
+      new Promise((_, reject) => { globalThis.trigger = reject; })
+    `);
+    vm.markPromiseHandled(promise);
+
+    vm.evalCode('trigger("suppressed")').dispose();
+    vm.executePendingJobs();
+    expect(rejections).not.toContain('suppressed');
+
+    // An unmarked rejection still fires, proving the tracker is active
+    vm.evalCode('Promise.reject("reported")').dispose();
+    vm.executePendingJobs();
+    expect(rejections).toContain('reported');
+  });
+
+  it('is a no-op for non-promise handles', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using notAPromise = vm.evalCode('({})');
+    expect(() => vm.markPromiseHandled(notAPromise)).not.toThrow();
+  });
+});

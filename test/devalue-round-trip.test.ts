@@ -427,6 +427,58 @@ describe('host-side devalue: guest code is not executed', () => {
     }
   });
 
+  it('classifies via the engine class table, surviving constructor sabotage', async () => {
+    const harness = await createHarness();
+    try {
+      using value = harness.vm.evalCode(`(() => {
+        const value = {
+          bytes: new Uint8Array([1, 2, 3]),
+          when: new Date(1700000000000),
+          map: new Map([['k', 'v']]),
+        };
+        // Post-boot sabotage: classification must not depend on any of it.
+        globalThis.Uint8Array = undefined;
+        globalThis.Date = undefined;
+        globalThis.Map = undefined;
+        Object.defineProperty(value.map.constructor?.prototype ?? {}, 'x', { value: 1 });
+        return value;
+      })()`);
+
+      expect(harness.serialize(value)).toBe(
+        stringify({
+          bytes: new Uint8Array([1, 2, 3]),
+          when: new Date(1700000000000),
+          map: new Map([['k', 'v']]),
+        })
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('is not fooled by prototype swaps in either direction', async () => {
+    const harness = await createHarness();
+    try {
+      // A plain object dressed up as a typed array is still not one: it
+      // classifies as an object, and its foreign prototype makes it
+      // non-plain, so serialization refuses rather than fabricating bytes.
+      using fake = harness.vm.evalCode(
+        'Object.setPrototypeOf({ a: 1 }, Uint8Array.prototype)'
+      );
+      expect(() => harness.serialize(fake)).toThrow(/non-POJO/);
+
+      // A real typed array stripped of its prototype keeps its internal
+      // slots — the class table still says Uint8Array and the captured
+      // getters read the real buffer.
+      using stripped = harness.vm.evalCode(
+        'Object.setPrototypeOf(new Uint8Array([7, 8]), Object.prototype)'
+      );
+      expect(harness.serialize(stripped)).toBe(stringify(new Uint8Array([7, 8])));
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('rejects an object with enumerable symbol keys, without reading them', async () => {
     const harness = await createHarness();
     try {

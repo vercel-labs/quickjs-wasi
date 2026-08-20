@@ -10,7 +10,8 @@
  * Two halves, mirroring devalue's two pluggable operation sets:
  *
  * - `stringifyOperations` reads a handle without executing guest code:
- *   engine-level brand checks for classification, boot-captured intrinsics
+ *   the engine's class table for classification (`handle.className` — no
+ *   sample instances needed, not even at boot), boot-captured intrinsics
  *   for extraction, and descriptor reads instead of `[[Get]]`.
  * - `parseOperations` builds values inside the VM through boot-captured
  *   factories, returning a handle the guest can use directly.
@@ -28,31 +29,38 @@ import {
 } from 'devalue';
 import { QuickJS, type JSValueHandle } from '../src/index.ts';
 
-/** Tags devalue classifies values by, keyed on QuickJS class id. */
-const BRANDED_SAMPLES = `({
-  Number: new Number(0),
-  String: new String(''),
-  Boolean: new Boolean(false),
-  BigInt: Object(0n),
-  Date: new Date(0),
-  RegExp: /x/,
-  Array: [],
-  Set: new Set(),
-  Map: new Map(),
-  ArrayBuffer: new ArrayBuffer(0),
-  DataView: new DataView(new ArrayBuffer(0)),
-  Int8Array: new Int8Array(0),
-  Uint8Array: new Uint8Array(0),
-  Uint8ClampedArray: new Uint8ClampedArray(0),
-  Int16Array: new Int16Array(0),
-  Uint16Array: new Uint16Array(0),
-  Int32Array: new Int32Array(0),
-  Uint32Array: new Uint32Array(0),
-  Float32Array: new Float32Array(0),
-  Float64Array: new Float64Array(0),
-  BigInt64Array: new BigInt64Array(0),
-  BigUint64Array: new BigUint64Array(0),
-})`;
+/**
+ * The tags devalue classifies values by. QuickJS registers each of these
+ * classes under exactly this name, so `handle.className` — a trap-free
+ * read of the engine's class table (`JS_GetClassName`, fixed in
+ * quickjs-ng 0.16.2) — classifies values directly. No sample instances,
+ * no guest code, not even at boot: a VM built without some of these
+ * intrinsics classifies the rest just fine.
+ */
+const BRANDED_TAGS = new Set([
+  'Number',
+  'String',
+  'Boolean',
+  'BigInt',
+  'Date',
+  'RegExp',
+  'Array',
+  'Set',
+  'Map',
+  'ArrayBuffer',
+  'DataView',
+  'Int8Array',
+  'Uint8Array',
+  'Uint8ClampedArray',
+  'Int16Array',
+  'Uint16Array',
+  'Int32Array',
+  'Uint32Array',
+  'Float32Array',
+  'Float64Array',
+  'BigInt64Array',
+  'BigUint64Array',
+]);
 
 /**
  * Everything the host needs from the guest realm, captured once at boot.
@@ -150,15 +158,6 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
   };
 
   // --- boot-time capture -------------------------------------------------
-
-  const tagByClassId = new Map<number, string>();
-  {
-    using samples = vm.evalCode(BRANDED_SAMPLES);
-    for (const tag of samples.getOwnPropertyNames()) {
-      using sample = samples.getProp(tag);
-      tagByClassId.set(sample.classId, tag);
-    }
-  }
 
   const intrinsics = keep(vm.evalCode(CAPTURE_INTRINSICS));
   const at = (name: string) => keep(intrinsics.getProp(name));
@@ -280,10 +279,12 @@ export function createDevalueOperations(vm: QuickJS): DevalueOperations {
   };
 
   const tag = (handle: JSValueHandle): string => {
-    // A proxy is never one of the branded types; report it as a plain-object
-    // candidate so `shapeOf` can reject it without firing traps.
-    if (handle.isProxy) return 'Object';
-    return tagByClassId.get(handle.classId) ?? 'Object';
+    // Trap-free and unspoofable: the engine's registered class name.
+    // Everything unbranded — including proxies, whose class is registered
+    // as "Object" — reports as a plain-object candidate, which `shapeOf`
+    // then accepts or rejects without firing traps.
+    const name = handle.className;
+    return name !== undefined && BRANDED_TAGS.has(name) ? name : 'Object';
   };
 
   /** Collect the elements a Set/Map yields, via captured `forEach`. */

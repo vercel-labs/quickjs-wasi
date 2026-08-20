@@ -55,6 +55,11 @@ define wasm_opt
 endef
 
 # Compiler flags
+#
+# BUILDING_QJS_SHARED: since quickjs-ng 0.16 (commit 66adc82), JS_EXTERN only
+# carries default visibility when this is defined — without it, -fvisibility=hidden
+# hides the JS_* API from the dynamic symbol table and extension .so files can no
+# longer resolve them at runtime through -Wl,--export-dynamic.
 CFLAGS = \
 	--target=wasm32-wasip1 \
 	--sysroot=$(SYSROOT) \
@@ -65,6 +70,7 @@ CFLAGS = \
 	-D_WASI_EMULATED_PROCESS_CLOCKS \
 	-D_WASI_EMULATED_SIGNAL \
 	-DQJS_BUILD_LIBC=0 \
+	-DBUILDING_QJS_SHARED \
 	-fvisibility=hidden \
 	-Wall \
 	-Wno-implicit-fallthrough \
