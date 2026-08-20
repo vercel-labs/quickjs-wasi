@@ -2,7 +2,7 @@
  * -O2 vs -Oz A/B Benchmark
  *
  * Runs an identical set of CPU-bound JS workloads against two builds of our
- * own quickjs.wasm — one compiled with -O2 (speed) and one with -Oz (size) —
+ * own quickjs.wasm, one compiled with -O2 (speed) and one with -Oz (size),
  * to quantify the runtime cost of optimizing for size.
  *
  * Usage:

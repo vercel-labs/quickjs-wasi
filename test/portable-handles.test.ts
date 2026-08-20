@@ -4,7 +4,7 @@ import { wasmBytes } from './helpers.ts';
 
 /**
  * Snapshot-portable handles: exportHandle() turns a live handle into a
- * token that importHandle() re-materializes — on the same VM or on any
+ * token that importHandle() re-materializes, on the same VM or on any
  * VM restored from a snapshot taken while the handle was alive. The
  * headline use case is boot-time capture of pristine intrinsics before
  * user code runs (see the exportHandle docs).
@@ -33,13 +33,13 @@ describe('exportHandle / importHandle', () => {
     using iso = restored.callFunction(imported, date);
     expect(iso.toString()).toBe('2023-11-14T22:13:20.000Z');
 
-    // The patch is still what guest code observes — the import didn't
+    // The patch is still what guest code observes; the import didn't
     // mutate the heap, it only referenced a value the heap already held.
     using patched = restored.evalCode('new Date(0).toISOString()');
     expect(patched.toString()).toBe('patched');
   });
 
-  it('imports are independently owned — multiple imports, independent dispose', async () => {
+  it('imports are independently owned: multiple imports, independent dispose', async () => {
     using baseline = await QuickJS.create(wasmBytes);
     const obj = baseline.evalCode('({ tag: "kept" })');
     const token = baseline.exportHandle(obj);
@@ -75,7 +75,7 @@ describe('exportHandle / importHandle', () => {
     let dupToken: number | undefined;
     using fn = vm.newEphemeralFunction((arg) => {
       // The trampoline's argument handles wrap C-owned boxes freed when
-      // this callback returns — a token minted from one would dangle in
+      // this callback returns; a token minted from one would dangle in
       // every restored VM.
       try {
         vm.exportHandle(arg);

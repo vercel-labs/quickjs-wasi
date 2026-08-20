@@ -32,7 +32,7 @@
 
 /* ---- Circular reference tracking ---- */
 
-/* Simple dynamic array mapping original values to their clones.
+/* Dynamic array mapping original values to their clones.
    We store pairs of (original JSValue tag+ptr, clone JSValue).
    For cycle detection, we only care about object-type values. */
 
@@ -65,7 +65,7 @@ static JSValue memory_find(CloneMemory *m, JSValue original) {
     void *ptr = JS_VALUE_GET_PTR(original);
     int tag = JS_VALUE_GET_TAG(original);
     for (int i = 0; i < m->count; i++) {
-        /* Compare by pointer and tag — same object identity */
+        /* Compare by pointer and tag: same object identity */
         if (JS_VALUE_GET_PTR(m->originals[i]) == ptr &&
             JS_VALUE_GET_TAG(m->originals[i]) == tag) {
             return m->clones[i];
@@ -563,7 +563,7 @@ static JSValue structured_clone_internal(JSContext *ctx, JSValue value, CloneMem
         return result;
     }
 
-    /* DataView — check before TypedArray since DataView is not a typed array */
+    /* DataView: check before TypedArray since DataView is not a typed array */
     if (JS_IsDataView(value)) {
         JSValue result = clone_dataview(ctx, value);
         if (!JS_IsException(result))
@@ -650,7 +650,7 @@ static JSValue structured_clone_internal(JSContext *ctx, JSValue value, CloneMem
         }
 
         if (clone_properties(ctx, result, value, mem) < 0) {
-            /* Don't free result — it's in the memory table and may be referenced */
+            /* Don't free result; it's in the memory table and may be referenced */
             return JS_EXCEPTION;
         }
 

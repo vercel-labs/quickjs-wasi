@@ -114,7 +114,7 @@ describe('Intrinsics', () => {
       wasm: wasmBytes,
       intrinsics: Intrinsics.ALL & ~Intrinsics.BIG_INT,
     });
-    // BigInt is still available — it's part of the base engine
+    // BigInt is still available; it's part of the base engine
     expect(vm.evalCode('typeof BigInt').consume(h => h.toString())).toBe('function');
     expect(vm.evalCode('(123n).toString()').consume(h => h.toString())).toBe('123');
   });

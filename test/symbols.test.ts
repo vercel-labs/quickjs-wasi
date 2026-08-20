@@ -18,7 +18,7 @@ describe('Symbol.for() (global symbols)', () => {
     using hostSym = vm.newSymbolFor('MY_KEY');
     vm.setProp(vm.global, hostSym, vm.newString('hello from host'));
 
-    // QuickJS code uses Symbol.for('MY_KEY') — should find the same property
+    // QuickJS code uses Symbol.for('MY_KEY'); it should find the same property
     using result = vm.evalCode('globalThis[Symbol.for("MY_KEY")]');
     expect(result.toString()).toBe('hello from host');
   });

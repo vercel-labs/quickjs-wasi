@@ -158,10 +158,10 @@ describe('WASM memory growth', () => {
   it('should enforce memoryLimit and stop JS allocations', async () => {
     using vm = await QuickJS.create({
       wasm: wasmBytes,
-      memoryLimit: 512 * 1024, // 512 KB — tight limit
+      memoryLimit: 512 * 1024, // 512 KB, a tight limit
     });
 
-    // Try to allocate way more than 512 KB — QuickJS should throw OOM.
+    // Try to allocate way more than 512 KB; QuickJS should throw OOM.
     // Use the same pattern as limits.test.ts which is known to trigger OOM.
     const result = vm.evalCode(`
       try {
@@ -210,7 +210,7 @@ describe('WASM memory growth', () => {
           arr.push("x".repeat(1000));
         }
       } catch (e) {
-        // OOM — stop allocating
+        // OOM: stop allocating
       }
     `).dispose();
     const limitedPages = getPageCount(vmLimited);

@@ -26,9 +26,9 @@ describe('vm.gcThreshold', () => {
 
   it('should allow the VM to function with a custom threshold', async () => {
     using vm = await QuickJS.create(wasmBytes);
-    vm.gcThreshold = 64 * 1024; // Very low threshold — GC runs frequently
+    vm.gcThreshold = 64 * 1024; // Low threshold, so GC runs frequently
 
-    // Allocate a bunch of objects — this should still work, just with more GC runs
+    // Allocate a bunch of objects. This should still work, with more GC runs
     vm.evalCode(`
       for (let i = 0; i < 1000; i++) {
         let obj = { data: "x".repeat(100) };

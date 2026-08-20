@@ -745,7 +745,7 @@ static SortedEntry *headers_sort_and_combine(JSContext *ctx, HeadersData *h,
     }
     for (size_t i = 0; i < h->count; i++) indices[i] = i;
 
-    /* Simple insertion sort (stable) for correctness with set-cookie ordering */
+    /* Insertion sort: stable, which set-cookie ordering requires */
     for (size_t i = 1; i < h->count; i++) {
         size_t key = indices[i];
         size_t j = i;

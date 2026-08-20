@@ -84,7 +84,7 @@ export const EvalFlags = {
   TYPE_MODULE: (1 << 0) as 1,
   /** Force strict mode. */
   STRICT: (1 << 3) as 8,
-  /** Compile only — do not execute. */
+  /** Compile only; do not execute. */
   COMPILE_ONLY: (1 << 5) as 32,
   /** Omit stack frames before this eval from Error backtraces. */
   BACKTRACE_BARRIER: (1 << 6) as 64,
@@ -112,7 +112,7 @@ export const CompileFlags = {
  * built-in JavaScript features are available in the VM.
  *
  * By default all intrinsics are enabled. Pass a bitmask of these flags
- * to create a minimal context — for example, omit `Intrinsics.EVAL` to
+ * to create a minimal context. For example, omit `Intrinsics.EVAL` to
  * prevent `eval()` usage, or omit `Intrinsics.PROXY` to disallow `Proxy`.
  *
  * `BaseObjects` (Object, Array, Number, String, Boolean, Error, etc.)
@@ -254,7 +254,7 @@ export interface QuickJSOptions {
    * Module loader for ES module `import` statements. When provided, the VM
    * can resolve and load modules.
    *
-   * Both callbacks are **synchronous** — they must return their result
+   * Both callbacks are **synchronous**: they must return their result
    * immediately. The engine calls them from inside the WASM call stack,
    * which cannot be suspended to await a Promise; returning a Promise
    * throws a `TypeError`.
@@ -263,7 +263,7 @@ export interface QuickJSOptions {
    * pre-fetch all module sources before evaluating and serve them from a
    * cache, or use the fetch-and-retry pattern: throw from `load` on a
    * cache miss, fetch the missing module on the host, and re-run
-   * `evalCode()` — already-loaded modules are cached by the runtime and
+   * `evalCode()`. Already-loaded modules are cached by the runtime and
    * are not re-requested. See the "ES Modules" section of the README.
    *
    * Errors thrown by either callback propagate to the guest as the
@@ -620,7 +620,7 @@ export class QuickJS {
     return this._versions;
   }
 
-  /** The global object. Cached — do not dispose. */
+  /** The global object. Cached; do not dispose. */
   get global(): JSValueHandle {
     if (!this._global) {
       this._global = new JSValueHandle(this, this.exports.qjs_get_global(), true);
@@ -628,7 +628,7 @@ export class QuickJS {
     return this._global;
   }
 
-  /** The undefined value. Cached — do not dispose. */
+  /** The undefined value. Cached; do not dispose. */
   get undefined(): JSValueHandle {
     if (!this._undefined) {
       this._undefined = new JSValueHandle(this, this.exports.qjs_get_undefined(), true);
@@ -636,7 +636,7 @@ export class QuickJS {
     return this._undefined;
   }
 
-  /** The null value. Cached — do not dispose. */
+  /** The null value. Cached; do not dispose. */
   get null(): JSValueHandle {
     if (!this._null) {
       this._null = new JSValueHandle(this, this.exports.qjs_get_null(), true);
@@ -644,7 +644,7 @@ export class QuickJS {
     return this._null;
   }
 
-  /** The true value. Cached — do not dispose. */
+  /** The true value. Cached; do not dispose. */
   get true(): JSValueHandle {
     if (!this._true) {
       this._true = new JSValueHandle(this, this.exports.qjs_get_true(), true);
@@ -652,7 +652,7 @@ export class QuickJS {
     return this._true;
   }
 
-  /** The false value. Cached — do not dispose. */
+  /** The false value. Cached; do not dispose. */
   get false(): JSValueHandle {
     if (!this._false) {
       this._false = new JSValueHandle(this, this.exports.qjs_get_false(), true);
@@ -717,7 +717,7 @@ export class QuickJS {
     const mainExports = instance.exports as Record<string, WebAssembly.ExportValue>;
     const exportedMemory = vm.exports.memory;
 
-    // Grow memory FIRST — extensions need the memory to be large enough
+    // Grow memory FIRST: extensions need the memory to be large enough
     // for their __memory_base offsets (which were allocated in the original
     // larger memory during create()).
     const currentPages = exportedMemory.buffer.byteLength / 65536;
@@ -744,7 +744,7 @@ export class QuickJS {
     }
 
     // Copy snapshot data into the module's own memory.
-    // This overwrites EVERYTHING — including the regions that extensions
+    // This overwrites EVERYTHING, including the regions that extensions
     // just initialized. That's correct because the snapshot already contains
     // the complete state including extension data.
     const dst = new Uint8Array(exportedMemory.buffer);
@@ -769,7 +769,7 @@ export class QuickJS {
    *
    * The format includes a versioned header followed by the raw memory.
    * Apply your own compression (gzip, zstd, etc.) on top for smaller
-   * storage — the memory compresses very well due to large zero regions.
+   * storage. The memory compresses well due to its large zero regions.
    *
    * Format (version 1):
    * ```
@@ -1010,7 +1010,7 @@ export class QuickJS {
 
     const hostPromiseRejection = (promisePtr: number, reasonPtr: number, isHandled: number): void => {
       if (!vm.unhandledRejectionHandler) {
-        // No handler registered — free the heap-allocated values
+        // No handler registered; free the heap-allocated values
         vm.exports.qjs_free_value(promisePtr);
         vm.exports.qjs_free_value(reasonPtr);
         return;
@@ -1035,8 +1035,8 @@ export class QuickJS {
     };
 
     // Guard against async (or otherwise non-string-returning) module loader
-    // callbacks. The WASM boundary is synchronous — a Promise cannot be
-    // awaited here — so fail with a clear error instead of coercing the
+    // callbacks. The WASM boundary is synchronous (a Promise cannot be
+    // awaited here), so fail with a clear error instead of coercing the
     // Promise to source text.
     const assertSyncString = (value: unknown, callbackName: string): string => {
       if (typeof value === 'string') return value;
@@ -1045,7 +1045,7 @@ export class QuickJS {
         : `type ${typeof value}`;
       throw new TypeError(
         `moduleLoader.${callbackName} must synchronously return a string (got ${got}). ` +
-        `Async module loading is not supported — pre-fetch module sources instead ` +
+        `Async module loading is not supported. Pre-fetch module sources instead ` +
         `(see the "ES Modules" section of the quickjs-wasi README).`
       );
     };
@@ -1054,7 +1054,7 @@ export class QuickJS {
     // Returns a malloc'd null-terminated string in WASM memory, or 0 (NULL) on error.
     const hostModuleNormalize = (baseNamePtr: number, namePtr: number): number => {
       if (!vm.moduleNormalizeHandler) {
-        // No normalize handler — return a copy of the specifier as-is
+        // No normalize handler; return a copy of the specifier as-is
         const name = vm.readCString(namePtr);
         return vm.writeString(name).ptr;
       }
@@ -1119,16 +1119,16 @@ export class QuickJS {
       // ("calling it after the handle is disposed throws, because the
       // callback is gone") and `unregisterHostCallback` ("any QuickJS
       // function still referencing the name will throw when called").
-      // Silently returning `undefined` here masked real bugs — e.g. a
+      // Silently returning `undefined` here masked real bugs, e.g. a
       // snapshot-restored VM calling a host function that was never
       // re-registered would corrupt results instead of failing loud.
       // Guest code can catch this like any other error.
       // A string (not a host Error object): newError copies an Error's
       // host .stack into the guest, which would leak host file paths into
       // guest-observable space and shadow any guest backtrace. This error
-      // is library-generated — there is no host stack worth preserving.
+      // is library-generated; there is no host stack worth preserving.
       const errHandle = this.newError(
-        `Host callback "${name}" is not registered — it was unregistered, ` +
+        `Host callback "${name}" is not registered: it was unregistered, ` +
           'its ephemeral function handle was disposed, or it was never ' +
           're-registered after a snapshot restore.'
       );
@@ -1140,7 +1140,7 @@ export class QuickJS {
     // `thisPtr` and the argv entries are OWNED BY THE C TRAMPOLINE, which
     // frees them after this call returns. Wrap them as borrowed handles:
     // dispose() is a no-op and they are exempt from `withScope()`
-    // tracking — a scope active around guest execution (e.g. a host
+    // tracking: a scope active around guest execution (e.g. a host
     // serializer driving a `forEach` visitor) must not free them at its
     // boundary, which would double-free the guest values and corrupt the
     // heap. Callbacks retain arguments past their invocation via `dup()`.
@@ -1173,7 +1173,7 @@ export class QuickJS {
   /** Write a JS string into WASM memory, returning the pointer. Caller must free. */
   private writeString(str: string): { ptr: number; len: number } {
     // WTF-8 (not plain TextEncoder): lone surrogates in the input must
-    // reach the guest intact — quickjs's decoder accepts the 3-byte
+    // reach the guest intact: quickjs's decoder accepts the 3-byte
     // surrogate sequences, so a JS string round-trips exactly.
     const encoded = encodeWtf8(str);
     const ptr = this.exports.wasm_malloc(encoded.length + 1);
@@ -1213,12 +1213,12 @@ export class QuickJS {
   /**
    * Evaluate JavaScript code and return the result as a handle.
    * If the code throws, a `JSException` (which extends `Error`) is thrown
-   * on the host side — matching standard JavaScript semantics.
+   * on the host side, matching standard JavaScript semantics.
    *
    * @param code - The JavaScript source code to evaluate.
    * @param filename - Optional filename for error stack traces (default `'<eval>'`).
    * @param flags - Optional bitwise OR of `EvalFlags.*` constants.
-   *   For example, pass `EvalFlags.ASYNC` to allow top-level `await` — the
+   *   For example, pass `EvalFlags.ASYNC` to allow top-level `await`; the
    *   returned handle will be a Promise that resolves to the completion value.
    *   With `EvalFlags.TYPE_MODULE` the returned handle is a Promise that
    *   resolves to the module's namespace object (its exports).
@@ -1257,7 +1257,7 @@ export class QuickJS {
     this.exports.wasm_free(fnStr.ptr);
     if (bufPtr === 0) {
       this.exports.wasm_free(outLenPtr);
-      // Compilation failed — throw the QuickJS exception
+      // Compilation failed; throw the QuickJS exception
       const exc = this.getException();
       throw new Error(`Compilation error: ${exc.toString()}`);
     }
@@ -1523,7 +1523,7 @@ export class QuickJS {
    * disposed when it returns, except those passed to `scope.escape()`.
    *
    * This is the bulk alternative to disposing handles individually, for code
-   * that creates many intermediates — walking a large value, for example:
+   * that creates many intermediates, such as walking a large value:
    *
    * ```ts
    * const name = vm.withScope((scope) => {
@@ -1572,14 +1572,14 @@ export class QuickJS {
    * Export a handle as a snapshot-portable token.
    *
    * A handle's heap box lives in the VM's linear memory, so a
-   * `snapshot()` taken while the handle is alive carries it — and a VM
+   * `snapshot()` taken while the handle is alive carries it, and a VM
    * restored from that snapshot has the identical box at the identical
    * offset. `importHandle(token)` on the restored VM (or on this VM)
    * re-materializes an owned handle for the same guest value without
    * evaluating any guest code.
    *
    * Contract:
-   * - the handle must stay undisposed until after `snapshot()` — its
+   * - the handle must stay undisposed until after `snapshot()`; its
    *   box (and the reference it holds) must be part of the memory image;
    * - the token is only meaningful to THIS VM and VMs restored from a
    *   snapshot of it taken while the handle was alive;
@@ -1587,12 +1587,12 @@ export class QuickJS {
    *   fresh box), so it can be called any number of times and each
    *   returned handle is independently owned and disposable. The
    *   exported box's own reference is intentionally never released on
-   *   restored VMs (one retained reference per VM image — reclaimed
+   *   restored VMs (one retained reference per VM image, reclaimed
    *   with the VM).
    *
    * The intended use is boot-time capture: snapshot a VM after capturing
    * references to pristine intrinsics but BEFORE evaluating untrusted or
-   * user code, then restore per task and import the captured handles —
+   * user code, then restore per task and import the captured handles,
    * guaranteeing the references predate anything user code patched,
    * without re-running capture code in the restored VM (where user-
    * patched globals could observe it). See vercel/workflow's host-side
@@ -1608,13 +1608,13 @@ export class QuickJS {
     }
     if (handle._isBorrowed) {
       // Host-callback this/argument handles wrap boxes OWNED BY THE C
-      // TRAMPOLINE, freed when the callback returns — a token minted
+      // TRAMPOLINE, freed when the callback returns; a token minted
       // from one would point at freed memory in every restored VM.
       // Callbacks that need to persist an argument must dup() it first
       // (the duplicate is an owned box) and export the duplicate.
       throw new Error(
         'exportHandle: cannot export a borrowed handle (host-callback ' +
-          'this/argument) — its box is freed when the callback returns. ' +
+          'this/argument); its box is freed when the callback returns. ' +
           'dup() it and export the duplicate.'
       );
     }
@@ -1622,7 +1622,7 @@ export class QuickJS {
   }
 
   /**
-   * Re-materialize a handle from a token produced by `exportHandle` —
+   * Re-materialize a handle from a token produced by `exportHandle`,
    * on this VM, or on a VM restored from a snapshot taken while the
    * exported handle was alive. Returns a NEW owned handle (the
    * underlying value's refcount is incremented); dispose it like any
@@ -1634,7 +1634,7 @@ export class QuickJS {
     // which dereferences it as a raw JSValue* inside the WASM instance.
     // A malformed token (0, negative, fractional, out of address range)
     // would otherwise read arbitrary memory. A well-formed but FORGED
-    // token remains undefined behavior — like any raw pointer, tokens
+    // token remains undefined behavior: like any raw pointer, tokens
     // are only meaningful under the exportHandle contract.
     if (
       !Number.isInteger(token) ||
@@ -1651,8 +1651,8 @@ export class QuickJS {
    * tied to the returned handle: disposing the handle unregisters the
    * callback.
    *
-   * Use this for short-lived callbacks — e.g. a visitor passed to
-   * `Map.prototype.forEach` — where the name is an implementation detail.
+   * Use this for short-lived callbacks (e.g. a visitor passed to
+   * `Map.prototype.forEach`) where the name is an implementation detail.
    * `newFunction()` keeps its callback registered for the lifetime of the VM
    * (by design, so that names can be re-registered after a snapshot is
    * restored), which makes it unsuitable for callbacks created in a loop.
@@ -1737,7 +1737,7 @@ export class QuickJS {
     vm._ownedHandles.add(resolveHandle);
     vm._ownedHandles.add(rejectHandle);
 
-    // Lazily-created settled promise — only attaches .then() handler when accessed
+    // Lazily-created settled promise: only attaches .then() handler when accessed
     let _settled: Promise<void> | null = null;
 
     return {
@@ -1801,7 +1801,7 @@ export class QuickJS {
       return Promise.resolve({ error: new JSValueHandle(this, this.exports.qjs_promise_result(promiseHandle.ptr)) });
     }
 
-    // Pending — attach a .then/.catch to get notified
+    // Pending: attach a .then/.catch to get notified
     return new Promise((hostResolve) => {
       const id = this.nextInternalId++;
       const fulfilledName = `__onFulfilled:${id}`;
@@ -1866,8 +1866,8 @@ export class QuickJS {
 
   /**
    * Invoke a QuickJS constructor with `new`, i.e. `new ctor(...args)`.
-   * If the constructor throws — including when `ctor` is not a constructor
-   * — a `JSException` is thrown on the host side.
+   * If the constructor throws (including when `ctor` is not a constructor),
+   * a `JSException` is thrown on the host side.
    *
    * This is the counterpart to `callFunction` for building values inside
    * the VM from the host, e.g. `new Date(iso)` on a constructor captured
@@ -2051,13 +2051,13 @@ export class QuickJS {
       const descPtr = view.getUint32(descOutPtr, true);
       e.wasm_free(descOutPtr);
       if (kind === 1) {
-        // Global symbol — reconstruct as Symbol.for(description)
+        // Global symbol: reconstruct as Symbol.for(description)
         const descHandle = new JSValueHandle(this, descPtr);
         const description = descHandle.toString();
         descHandle.dispose();
         return Symbol.for(description);
       } else if (kind === 2) {
-        // Local (anonymous) symbol — can't be reconstructed on host
+        // Local (anonymous) symbol: can't be reconstructed on host
         const descHandle = new JSValueHandle(this, descPtr);
         descHandle.dispose();
         return undefined;
@@ -2087,7 +2087,7 @@ export class QuickJS {
       }
     }
 
-    // Check for typed arrays (before regular array check — typed arrays are not Array.isArray)
+    // Check for typed arrays (before the regular array check; typed arrays are not Array.isArray)
     if (e.qjs_is_object(handle.ptr)) {
       const byteOffsetPtr = e.wasm_malloc(4);
       const byteLengthPtr = e.wasm_malloc(4);
@@ -2247,7 +2247,7 @@ export class QuickJS {
     }
 
     if (ArrayBuffer.isView(value)) {
-      // Other typed arrays — convert via Uint8Array view of the underlying buffer
+      // Other typed arrays: convert via Uint8Array view of the underlying buffer
       return this.newArrayBuffer(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
     }
 
@@ -2380,8 +2380,8 @@ export class QuickJS {
 /**
  * Whether a string-typed property key survives the NUL-terminated
  * C-string key APIs: embedded U+0000 truncates the key, and an UNPAIRED
- * surrogate cannot be UTF-8 encoded (paired surrogates — e.g. emoji —
- * encode fine). Keys that don't survive are routed through length-aware
+ * surrogate cannot be UTF-8 encoded (paired surrogates, such as those
+ * that encode emoji, are fine). Keys that don't survive are routed through length-aware
  * guest string values instead.
  */
 function stringKeyNeedsValuePath(key: string): boolean {
@@ -2396,10 +2396,10 @@ const LONE_SURROGATE_RE =
 
 /**
  * Encode a JS string to WTF-8 bytes. Well-formed strings (including
- * paired surrogates — emoji) take the native TextEncoder; strings with
+ * paired surrogates, such as emoji) take the native TextEncoder; strings with
  * LONE surrogates take a manual encode that writes each unpaired
  * surrogate as the 3-byte sequence quickjs's tolerant UTF-8 decoder
- * accepts — TextEncoder would replace them with U+FFFD, silently
+ * accepts; TextEncoder would replace them with U+FFFD, silently
  * corrupting every host→guest string (sources, property keys,
  * newString values).
  */
@@ -2415,7 +2415,7 @@ function encodeWtf8(str: string): Uint8Array {
     } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
       const next = str.charCodeAt(i + 1);
       if (next >= 0xdc00 && next <= 0xdfff) {
-        // Well-formed pair — 4-byte UTF-8.
+        // Well-formed pair: 4-byte UTF-8.
         const cp = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
         bytes.push(
           0xf0 | (cp >> 18),
@@ -2426,10 +2426,10 @@ function encodeWtf8(str: string): Uint8Array {
         i++;
         continue;
       }
-      // Lone high surrogate — 3-byte WTF-8.
+      // Lone high surrogate: 3-byte WTF-8.
       bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
     } else {
-      // BMP char or lone (low / trailing high) surrogate — 3-byte form.
+      // BMP char or lone (low / trailing high) surrogate: 3-byte form.
       bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
     }
   }
@@ -2442,8 +2442,8 @@ function encodeWtf8(str: string): Uint8Array {
  * is how quickjs's JS_ToCStringLen2 encodes lone surrogates ("keep
  * unmatched surrogate code points"). TextDecoder replaces those
  * sequences with U+FFFD, so they are detected first and the rare strings
- * containing them take a manual decode; everything else — the
- * overwhelming majority — uses the native decoder.
+ * containing them take a manual decode; everything else (the
+ * overwhelming majority) uses the native decoder.
  */
 function decodeWtf8(bytes: Uint8Array): string {
   let hasSurrogateSequence = false;
@@ -2466,7 +2466,7 @@ function decodeWtf8(bytes: Uint8Array): string {
       out += String.fromCharCode(((b0 & 0x1f) << 6) | (bytes[i + 1] & 0x3f));
       i += 2;
     } else if (b0 < 0xf0) {
-      // 3-byte sequence — may decode into the surrogate range, which is
+      // 3-byte sequence: may decode into the surrogate range, which is
       // exactly the WTF-8 extension: emit the code unit as-is.
       out += String.fromCharCode(
         ((b0 & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f)
@@ -2490,7 +2490,7 @@ function decodeWtf8(bytes: Uint8Array): string {
 /**
  * An exception thrown from QuickJS code. Extends `Error` so it works with
  * standard error handling (`instanceof Error`, `.message`, `.stack`), and
- * also exposes a `handle` property — a live `JSValueHandle` to the QuickJS
+ * also exposes a `handle` property, a live `JSValueHandle` to the QuickJS
  * exception value, allowing direct inspection of custom properties.
  *
  * The `handle` must be disposed when you're done with it (or use `using`).
@@ -2581,20 +2581,20 @@ export class JSValueHandle {
   private readonly singleton: boolean;
 
   /**
-   * When true, this handle wraps a `JSValue*` OWNED BY THE C CALLER — the
+   * When true, this handle wraps a `JSValue*` OWNED BY THE C CALLER: the
    * `this`/argument handles the host-call trampoline passes to a host
    * callback (`handleHostCall`). The C side frees those values after the
    * call returns, so `dispose()` is a no-op and the handle is never
    * registered with an active `withScope()` (either would double-free
    * the guest value and corrupt the heap). A callback that needs to
-   * retain an argument past its own invocation must `dup()` it — the
+   * retain an argument past its own invocation must `dup()` it; the
    * duplicate takes a fresh reference and behaves like any owned handle.
    * @internal
    */
   private readonly borrowed: boolean;
 
   /**
-   * Extra cleanup to run when this handle is disposed — used by
+   * Extra cleanup to run when this handle is disposed. Used by
    * `newEphemeralFunction()` to unregister its host callback.
    * @internal
    */
@@ -2613,7 +2613,7 @@ export class JSValueHandle {
   /**
    * Whether this handle wraps a C-owned pointer (host-callback
    * `this`/arguments). Borrowed handles must never be exported as
-   * snapshot tokens — the trampoline frees their boxes after the
+   * snapshot tokens: the trampoline frees their boxes after the
    * callback returns. @internal
    */
   get _isBorrowed(): boolean {
@@ -2624,7 +2624,7 @@ export class JSValueHandle {
    * Whether `dispose()` has been called on this handle.
    *
    * Note that handle methods do not currently guard against use after
-   * disposal — reading from a disposed handle reads freed memory. Check this
+   * disposal: reading from a disposed handle reads freed memory. Check this
    * when a handle's lifetime is managed elsewhere (e.g. by `withScope()`).
    */
   get disposed(): boolean {
@@ -2701,7 +2701,7 @@ export class JSValueHandle {
   }
 
   /**
-   * Whether this value is a Map (engine brand check — trap-free,
+   * Whether this value is a Map (engine brand check: trap-free,
    * spoof-proof, and unaffected by prototype/constructor mutation).
    * A Proxy wrapping a Map returns false.
    */
@@ -2710,7 +2710,7 @@ export class JSValueHandle {
   }
 
   /**
-   * Whether this value is a Set (engine brand check — trap-free,
+   * Whether this value is a Set (engine brand check: trap-free,
    * spoof-proof, and unaffected by prototype/constructor mutation).
    * A Proxy wrapping a Set returns false.
    */
@@ -2719,7 +2719,7 @@ export class JSValueHandle {
   }
 
   /**
-   * Whether this value is a Date (engine brand check — trap-free,
+   * Whether this value is a Date (engine brand check: trap-free,
    * spoof-proof, and unaffected by prototype/constructor mutation).
    * A Proxy wrapping a Date returns false.
    */
@@ -2728,7 +2728,7 @@ export class JSValueHandle {
   }
 
   /**
-   * Whether this value is a RegExp (engine brand check — trap-free,
+   * Whether this value is a RegExp (engine brand check: trap-free,
    * spoof-proof, and unaffected by prototype/constructor mutation).
    * A Proxy wrapping a RegExp returns false.
    */
@@ -2762,13 +2762,13 @@ export class JSValueHandle {
    *
    * Two handles to the same underlying object always report the same
    * identity, and two live handles to different objects always report
-   * different identities — so this is the value to key a `Map` on when
+   * different identities, so this is the value to key a `Map` on when
    * deduplicating or detecting cycles across handles (`dump()` uses it for
    * exactly that).
    *
    * The identity is only meaningful while the value is alive; it is an
    * address, so it may be reused after every handle to the value has been
-   * disposed. Do not persist it, and do not treat it as unforgeable — a
+   * disposed. Do not persist it, and do not treat it as unforgeable: a
    * number read out of the guest can trivially collide with one.
    */
   get identity(): number {
@@ -2787,16 +2787,16 @@ export class JSValueHandle {
    * The internal QuickJS class ID of this value, or 0 for non-objects.
    * Useful as a generic engine-level brand when no dedicated `is*`
    * getter exists. Class IDs are stable within a VM instance but are an
-   * engine implementation detail — prefer the dedicated getters.
+   * engine implementation detail, so prefer the dedicated getters.
    */
   get classId(): number {
     return this.vm._getExports().qjs_get_class_id(this.ptr);
   }
 
   /**
-   * The engine-level class name of this value — e.g. `"Object"`, `"Map"`,
+   * The engine-level class name of this value, e.g. `"Object"`, `"Map"`,
    * `"Date"`, `"RegExp"`, or the registered name of an extension-defined
-   * class like `"URL"` — or `undefined` for non-objects and unnamed
+   * class like `"URL"`, or `undefined` for non-objects and unnamed
    * internal classes.
    *
    * Unlike `constructorName` (which reads the `constructor` and `name`
@@ -2804,7 +2804,7 @@ export class JSValueHandle {
    * this is trap-free: it reads the engine's class table directly, never
    * executes guest code, and cannot be forged by reassigning prototypes or
    * constructors. Note that the engine registers the Proxy class under the
-   * name `"Object"` (mirroring `Object.prototype.toString`) — use `isProxy`
+   * name `"Object"` (mirroring `Object.prototype.toString`), so use `isProxy`
    * to detect proxies and `getProxyTarget()` to read the target's brand.
    */
   get className(): string | undefined {
@@ -2918,7 +2918,7 @@ export class JSValueHandle {
   }
 
   /**
-   * Get ALL own property keys — strings and symbols, including
+   * Get ALL own property keys (strings and symbols), including
    * non-enumerable (equivalent to Reflect.ownKeys()).
    *
    * String keys are returned as strings; symbol keys are returned as
@@ -3049,7 +3049,7 @@ export class JSValueHandle {
 
   /**
    * Get the `[[ProxyTarget]]` of this Proxy without firing any traps.
-   * Throws {@link JSException} if this value is not a Proxy — check
+   * Throws {@link JSException} if this value is not a Proxy; check
    * {@link isProxy} first. Note the target may itself be a Proxy.
    */
   getProxyTarget(): JSValueHandle {
@@ -3064,7 +3064,7 @@ export class JSValueHandle {
 
   /**
    * Get the `[[ProxyHandler]]` of this Proxy without firing any traps.
-   * Throws {@link JSException} if this value is not a Proxy — check
+   * Throws {@link JSException} if this value is not a Proxy; check
    * {@link isProxy} first.
    */
   getProxyHandler(): JSValueHandle {
@@ -3245,13 +3245,13 @@ export class JSValueHandle {
     // points as 3-byte WTF-8 sequences, decoded back to their original
     // code units). The previous JS_ToCString/NUL-terminated read
     // silently truncated at the first NUL and replaced lone surrogates
-    // with U+FFFD — and the two corruptions could cancel each other's
+    // with U+FFFD, and the two corruptions could cancel each other's
     // length changes, defeating length-based detection downstream.
     const e = this.vm._getExports();
     const lenPtr = e.wasm_malloc(4);
     // Same failure check as writeString(): a 0 return would make
     // qjs_get_string_len write the length to address 0 and the DataView
-    // read below read from it — silent corruption instead of an error.
+    // read below read from it: silent corruption instead of an error.
     if (lenPtr === 0) throw new Error('wasm_malloc failed');
     try {
       const cstrPtr = e.qjs_get_string_len(this.ptr, lenPtr);
@@ -3294,13 +3294,13 @@ export class JSValueHandle {
     // here would leave the cached handle pointing at freed memory, so disposing
     // a singleton is intentionally a no-op. Borrowed handles (host-callback
     // `this`/arguments) wrap pointers owned by the C caller, which frees them
-    // itself after the call returns — freeing here would double-free.
+    // itself after the call returns; freeing here would double-free.
     if (this.singleton || this.borrowed) return;
     if (!this.disposed_) {
       this.disposed_ = true;
       this._onDispose?.();
       this._onDispose = undefined;
-      // If the VM is already disposed, the WASM instance is gone —
+      // If the VM is already disposed, the WASM instance is gone;
       // no need to (and we can't) call qjs_free_value.
       const exports = this.vm._getExports();
       if (exports) {

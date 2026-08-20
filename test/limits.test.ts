@@ -32,7 +32,7 @@ describe('memoryLimit', () => {
     });
 
     // Regression: quickjs-ng's default usable-size returns 0 on
-    // wasm32-wasi, so allocations were recorded as overhead only — the
+    // wasm32-wasi, so allocations were recorded as overhead only: the
     // per-allocation limit check saw each incoming size, but nothing
     // accumulated in malloc_size. Many sub-limit buffers (each well
     // under 8 MiB) therefore grew real linear memory without bound:
@@ -75,7 +75,7 @@ describe('memoryLimit', () => {
 
     // Regression: once #33 made the accounting real, a guest that filled
     // memory with small objects left no room for JS_ThrowOutOfMemory to
-    // allocate the "out of memory" InternalError — the engine's limit
+    // allocate the "out of memory" InternalError: the engine's limit
     // check refused that allocation too, and quickjs fell back to
     // throwing a bare JS_NULL. In-guest catch saw `null` and the host
     // JSException had name/message "<null>", indistinguishable from a

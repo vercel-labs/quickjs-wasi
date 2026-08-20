@@ -409,8 +409,8 @@ describe('host-side devalue: guest code is not executed', () => {
   it('is not fooled by a spoofed brand', async () => {
     const harness = await createHarness();
     try {
-      // `Object.prototype.toString` — what devalue classifies with by default
-      // — honours `Symbol.toStringTag`, so this object claims to be a Date.
+      // `Object.prototype.toString` (what devalue classifies with by default)
+      // honors `Symbol.toStringTag`, so this object claims to be a Date.
       using spoofed = harness.vm.evalCode(
         'Object.defineProperty({ a: 1 }, Symbol.toStringTag, { value: "Date" })'
       );
@@ -468,7 +468,7 @@ describe('host-side devalue: guest code is not executed', () => {
       expect(() => harness.serialize(fake)).toThrow(/non-POJO/);
 
       // A real typed array stripped of its prototype keeps its internal
-      // slots — the class table still says Uint8Array and the captured
+      // slots: the class table still says Uint8Array and the captured
       // getters read the real buffer.
       using stripped = harness.vm.evalCode(
         'Object.setPrototypeOf(new Uint8Array([7, 8]), Object.prototype)'

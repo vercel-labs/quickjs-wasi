@@ -156,7 +156,7 @@ describe('EvalFlags.TYPE_MODULE', () => {
 
   it('should make import.meta available', async () => {
     const vm = await QuickJS.create(wasmBytes);
-    // Module eval doesn't return the last expression value — use globalThis
+    // Module eval doesn't return the last expression value; use globalThis
     const result = vm.evalCode(
       'globalThis.__metaType = typeof import.meta',
       '<eval>',
@@ -208,7 +208,7 @@ describe('EvalFlags.COMPILE_ONLY', () => {
     using vm = await QuickJS.create(wasmBytes);
     // With COMPILE_ONLY, the code is compiled but not executed
     using result = vm.evalCode('1 + 2', '<eval>', EvalFlags.COMPILE_ONLY);
-    // The result should not be the number 3 — it's a bytecode object
+    // The result should not be the number 3; it's a bytecode object
     expect(vm.typeof(result)).not.toBe('number');
   });
 

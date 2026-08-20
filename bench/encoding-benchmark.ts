@@ -169,7 +169,7 @@ async function main() {
 
     await bench.run();
 
-    console.log(`### ${name}${nativeOnly ? ' (native only — polyfill lacks encodeInto)' : ''}`);
+    console.log(`### ${name}${nativeOnly ? ' (native only; polyfill lacks encodeInto)' : ''}`);
     console.table(bench.table());
     console.log('');
   }
