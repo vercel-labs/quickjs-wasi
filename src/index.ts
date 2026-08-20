@@ -2380,8 +2380,8 @@ export class QuickJS {
 /**
  * Whether a string-typed property key survives the NUL-terminated
  * C-string key APIs: embedded U+0000 truncates the key, and an UNPAIRED
- * surrogate cannot be UTF-8 encoded (paired surrogates, e.g. emoji,
- * encode fine). Keys that don't survive are routed through length-aware
+ * surrogate cannot be UTF-8 encoded (paired surrogates, such as those
+ * that encode emoji, are fine). Keys that don't survive are routed through length-aware
  * guest string values instead.
  */
 function stringKeyNeedsValuePath(key: string): boolean {
@@ -2396,7 +2396,7 @@ const LONE_SURROGATE_RE =
 
 /**
  * Encode a JS string to WTF-8 bytes. Well-formed strings (including
- * paired surrogates and emoji) take the native TextEncoder; strings with
+ * paired surrogates, such as emoji) take the native TextEncoder; strings with
  * LONE surrogates take a manual encode that writes each unpaired
  * surrogate as the 3-byte sequence quickjs's tolerant UTF-8 decoder
  * accepts; TextEncoder would replace them with U+FFFD, silently

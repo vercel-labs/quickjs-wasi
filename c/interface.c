@@ -91,7 +91,8 @@ static char *module_normalizer_trampoline(JSContext *ctx,
     char *result = host_module_normalize(module_base_name, module_name);
     if (!result) {
         /* The host may have already thrown a more specific error via
-           qjs_throw; only throw the generic error if it did not. */
+           qjs_throw; only throw the generic error if the host has not
+           thrown one already. */
         if (!JS_HasException(ctx))
             JS_ThrowReferenceError(ctx, "could not normalize module '%s'", module_name);
         return NULL;
@@ -122,7 +123,8 @@ static JSModuleDef *module_loader_trampoline(JSContext *ctx,
     char *source = host_module_load(module_name, &source_len);
     if (!source) {
         /* The host may have already thrown a more specific error via
-           qjs_throw; only throw the generic error if it did not. */
+           qjs_throw; only throw the generic error if the host has not
+           thrown one already. */
         if (!JS_HasException(ctx))
             JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
         return NULL;
