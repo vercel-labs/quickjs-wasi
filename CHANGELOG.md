@@ -1,5 +1,13 @@
 # quickjs-wasi
 
+## 3.6.0
+
+### Minor Changes
+
+- [#44](https://github.com/vercel-labs/quickjs-wasi/pull/44) [`28e4b60`](https://github.com/vercel-labs/quickjs-wasi/commit/28e4b6006ff04fdae98fb31e7c44e162f2e9d9ca) Thanks [@aayush-kapoor](https://github.com/aayush-kapoor)! - Add the `maxStackSize` option and `MAX_STACK_SIZE` ceiling so WASI stack
+  overflow can be caught by guest JavaScript without exhausting the physical
+  WebAssembly stack.
+
 ## 3.5.0
 
 ### Minor Changes
