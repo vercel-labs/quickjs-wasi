@@ -20,6 +20,14 @@ import { VERSION } from './version.js';
 
 // ---- Public types ----
 
+/**
+ * Largest supported QuickJS native stack limit for the shipped WASM binary.
+ *
+ * The binary has a 1 MiB linker-defined stack; reserving half of it leaves
+ * headroom for native frames and stack-overflow exception handling.
+ */
+export const MAX_STACK_SIZE = 512 * 1024;
+
 export type HostFunction = (this: JSValueHandle, ...args: JSValueHandle[]) => JSValueHandle;
 
 /**
@@ -228,6 +236,12 @@ export interface QuickJSOptions {
    * (e.g. `InternalError: out of memory`).
    */
   memoryLimit?: number;
+  /**
+   * Maximum native stack space QuickJS may consume, in bytes.
+   * Must be an integer between 0 and {@link MAX_STACK_SIZE}. Set to 0 to
+   * disable the QuickJS stack guard.
+   */
+  maxStackSize?: number;
   /**
    * Called periodically during JS execution. Return `true` to interrupt
    * the current execution with an `InternalError: interrupted` exception.
@@ -917,7 +931,20 @@ export class QuickJS {
       return { wasm: undefined as unknown as BufferSource };
     }
     if (options instanceof WebAssembly.Module) return { wasm: options };
-    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'moduleLoader' in options || 'intrinsics' in options || 'extensions' in options || 'timezoneOffset' in options)) return options as QuickJSOptions;
+    if (typeof options === 'object' && ('wasm' in options || 'wasi' in options || 'memoryLimit' in options || 'maxStackSize' in options || 'interruptHandler' in options || 'onUnhandledRejection' in options || 'moduleLoader' in options || 'intrinsics' in options || 'extensions' in options || 'timezoneOffset' in options)) {
+      const opts = options as QuickJSOptions;
+      if (
+        opts.maxStackSize !== undefined &&
+        (!Number.isInteger(opts.maxStackSize) ||
+          opts.maxStackSize < 0 ||
+          opts.maxStackSize > MAX_STACK_SIZE)
+      ) {
+        throw new RangeError(
+          `maxStackSize must be an integer between 0 and ${MAX_STACK_SIZE}`,
+        );
+      }
+      return opts;
+    }
     // BufferSource (ArrayBuffer or ArrayBufferView)
     return { wasm: options as BufferSource };
   }
@@ -925,6 +952,9 @@ export class QuickJS {
   private static applyLimits(vm: QuickJS, opts: QuickJSOptions): void {
     if (opts.memoryLimit !== undefined) {
       vm.exports.qjs_set_memory_limit(opts.memoryLimit);
+    }
+    if (opts.maxStackSize !== undefined) {
+      vm.exports.qjs_set_max_stack_size(opts.maxStackSize);
     }
     if (opts.interruptHandler) {
       vm.interruptHandler = opts.interruptHandler;

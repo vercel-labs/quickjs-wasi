@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { QuickJS, JSException } from '../src/index.ts';
+import { QuickJS, JSException, MAX_STACK_SIZE } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 
 describe('memoryLimit', () => {
@@ -158,6 +158,84 @@ describe('memoryLimit', () => {
     const msg = result.consume(h => h.toString());
     expect(msg).not.toBe('ok');
   });
+});
+
+describe('maxStackSize', () => {
+  const recurseUntilOverflow = `
+    (() => {
+      let depth = 0;
+      function recurse() {
+        depth++;
+        return recurse();
+      }
+      try {
+        recurse();
+        return "no-throw";
+      } catch (error) {
+        return {
+          name: error.name,
+          message: error.message,
+          depth,
+        };
+      }
+    })()
+  `;
+
+  it('makes recursive stack exhaustion catchable and keeps the VM usable', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      maxStackSize: 64 * 1024,
+    });
+
+    const overflow = vm.evalCode(recurseUntilOverflow).consume((handle) => vm.dump(handle));
+    expect(overflow).toMatchObject({
+      name: 'RangeError',
+      message: 'Maximum call stack size exceeded',
+    });
+
+    expect(vm.evalCode('1 + 2').consume((handle) => handle.toNumber())).toBe(3);
+  });
+
+  it('re-applies the configured limit after snapshot restore', async () => {
+    const vm1 = await QuickJS.create(wasmBytes);
+    vm1.evalCode('globalThis.beforeSnapshot = 42').dispose();
+    const snapshot = vm1.snapshot();
+    vm1.dispose();
+
+    using vm2 = await QuickJS.restore(snapshot, {
+      wasm: wasmBytes,
+      maxStackSize: 64 * 1024,
+    });
+
+    expect(vm2.evalCode('beforeSnapshot').consume((handle) => handle.toNumber())).toBe(42);
+    expect(vm2.evalCode(recurseUntilOverflow).consume((handle) => vm2.dump(handle))).toMatchObject({
+      name: 'RangeError',
+      message: 'Maximum call stack size exceeded',
+    });
+  });
+
+  it('allows disabling the stack guard with zero', async () => {
+    using vm = await QuickJS.create({
+      wasm: wasmBytes,
+      maxStackSize: 0,
+    });
+
+    const depth = vm.evalCode(`
+      (function recurse(remaining) {
+        return remaining === 0 ? 1000 : recurse(remaining - 1);
+      })(1000)
+    `).consume((handle) => handle.toNumber());
+    expect(depth).toBe(1000);
+  });
+
+  it.each([-1, 1.5, MAX_STACK_SIZE + 1])(
+    'rejects invalid value %s',
+    async (maxStackSize) => {
+      await expect(QuickJS.create({ wasm: wasmBytes, maxStackSize })).rejects.toThrow(
+        `maxStackSize must be an integer between 0 and ${MAX_STACK_SIZE}`,
+      );
+    },
+  );
 });
 
 describe('interruptHandler', () => {
