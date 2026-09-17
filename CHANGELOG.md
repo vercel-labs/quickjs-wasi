@@ -1,5 +1,13 @@
 # quickjs-wasi
 
+## 3.6.1
+
+### Patch Changes
+
+- [#50](https://github.com/vercel-labs/quickjs-wasi/pull/50) [`93a7b0b`](https://github.com/vercel-labs/quickjs-wasi/commit/93a7b0b7defdf5dfd1863201f3d068464d7f2ecb) Thanks [@vimeh](https://github.com/vimeh)! - Settle synchronous module namespace promises without draining unrelated guest jobs. Preserve deferred resolution for asynchronous modules and namespaces exporting `then`.
+
+- [#51](https://github.com/vercel-labs/quickjs-wasi/pull/51) [`066475d`](https://github.com/vercel-labs/quickjs-wasi/commit/066475d399936cd40a38cabde6935d5f7b080dec) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Include the wrapper's MIT license and copyright notice in the npm package.
+
 ## 3.6.0
 
 ### Minor Changes
