@@ -844,3 +844,9 @@ using vm = await QuickJS.create({ wasm: wasmModule });
 ```
 
 See [`examples/browser/`](./examples/browser/) for a complete Vite demo app.
+
+## License
+
+The quickjs-wasi wrapper is licensed under the [MIT License](./LICENSE), copyright (c) 2026 Vercel, Inc. The root `LICENSE` file contains the canonical copyright and permission notice and is included in the npm package.
+
+The bundled QuickJS-NG engine and other third-party components retain their own copyright and license notices. The wrapper's notice does not replace those upstream notices.
