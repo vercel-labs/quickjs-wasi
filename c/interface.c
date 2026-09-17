@@ -652,14 +652,13 @@ static JSValue resolve_to_func_data(JSContext *ctx, JSValueConst this_val,
  * eval) and return a promise that resolves to the module's namespace
  * object (its exports) instead of undefined.
  *
- * Per spec, module evaluation produces a promise that resolves to
- * undefined, so we chain it: eval_promise.then(() => namespace).
- * Rejections (e.g. a throw during module evaluation) propagate through
- * the chained promise unchanged.
+ * Module evaluation resolves to undefined. Already-settled evaluations
+ * expose their namespace or rejection without adding a job; pending ones
+ * chain eval_promise.then(() => namespace). Namespaces exporting "then"
+ * retain the chain so queued jobs can update that binding before assimilation.
  *
- * The chaining uses JS_PromiseThen, the engine-level primitive that does
- * not consult Promise.prototype.then or Symbol.species, so guest code that
- * patches either cannot intercept or observe module namespace resolution.
+ * Both paths use engine intrinsics, so patched Promise.prototype.then or
+ * Symbol.species cannot intercept namespace resolution.
  *
  * Consumes func_obj.
  */
@@ -678,13 +677,26 @@ static JSValue eval_module_to_namespace(JSValue func_obj)
     }
 
     JSValue eval_result = JS_EvalFunction(ctx, func_obj); /* consumes func_obj */
-    if (JS_IsException(eval_result))
+    if (JS_IsException(eval_result) ||
+        JS_PromiseState(ctx, eval_result) == JS_PROMISE_REJECTED)
         return eval_result;
 
     JSValue ns = JS_GetModuleNamespace(ctx, m);
     if (JS_IsException(ns)) {
         JS_FreeValue(ctx, eval_result);
         return ns;
+    }
+
+    if (JS_PromiseState(ctx, eval_result) == JS_PROMISE_FULFILLED) {
+        JSAtom then_atom = JS_NewAtom(ctx, "then");
+        int has_then = JS_HasProperty(ctx, ns, then_atom);
+        JS_FreeAtom(ctx, then_atom);
+        if (has_then == 0) {
+            JSValue result = JS_NewSettledPromise(ctx, false, ns);
+            JS_FreeValue(ctx, ns);
+            JS_FreeValue(ctx, eval_result);
+            return result;
+        }
     }
 
     JSValue then_fn = JS_NewCFunctionData(ctx, resolve_to_func_data, 0, 0, 1, &ns);

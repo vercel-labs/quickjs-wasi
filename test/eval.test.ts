@@ -174,6 +174,103 @@ describe('EvalFlags.TYPE_MODULE', () => {
   });
 });
 
+describe.each(['source', 'bytecode'])('module completion (%s)', (mode) => {
+  const evaluate = (vm: QuickJS, source: string) => mode === 'source'
+    ? vm.evalCode(source, 'entry.js', EvalFlags.TYPE_MODULE)
+    : vm.evalBytecode(vm.compile(source, 'entry.js', EvalFlags.TYPE_MODULE));
+
+  it('should expose synchronous exports without running unrelated jobs', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = evaluate(vm, `
+      export let count = 0;
+      Promise.resolve().then(() => { count = 1; });
+    `);
+    expect(promise.isPromise).toBe(true);
+    expect(promise.promiseState).toBe(1);
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('count').consume(h => h.toNumber())).toBe(0);
+    vm.executePendingJobs();
+    expect(ns.getProp('count').consume(h => h.toNumber())).toBe(1);
+  });
+
+  it('should expose synchronous rejection without running unrelated jobs', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = evaluate(vm, `
+      globalThis.count = 0;
+      Promise.resolve().then(() => { globalThis.count = 1; });
+      throw new Error('init failed');
+    `);
+    expect(promise.promiseState).toBe(2);
+    const resolved = await vm.resolvePromise(promise);
+    if ('value' in resolved) {
+      resolved.value.dispose();
+      expect.unreachable('module evaluation should reject');
+    }
+    using error = resolved.error;
+    expect(error.toString()).toContain('init failed');
+    expect(vm.evalCode('count').consume(h => h.toNumber())).toBe(0);
+  });
+
+  it('should settle without consulting guest Promise hooks', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = evaluate(vm, `
+      Promise.prototype.then = () => { throw new Error('then intercepted'); };
+      Object.defineProperty(Promise, Symbol.species, {
+        get() { throw new Error('species intercepted'); }
+      });
+      globalThis.Promise = () => { throw new Error('constructor intercepted'); };
+      export const value = 7;
+    `);
+    expect(promise.promiseState).toBe(1);
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('value').consume(h => h.toNumber())).toBe(7);
+  });
+
+  it('should keep top-level await pending until its jobs run', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = evaluate(vm, 'export const value = await Promise.resolve(7);');
+    expect(promise.promiseState).toBe(0);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using ns = resolved.value;
+    expect(ns.getProp('value').consume(h => h.toNumber())).toBe(7);
+  });
+
+  it.each([
+    'export function then(resolve) { resolve(7); }',
+    'export let then; Promise.resolve().then(() => { then = resolve => resolve(7); });',
+    'export const then = 7;',
+  ])('should preserve deferred resolution of a then export: %s', async (source) => {
+    using vm = await QuickJS.create(wasmBytes);
+    using promise = evaluate(vm, source);
+    expect(promise.promiseState).toBe(0);
+    vm.executePendingJobs();
+    const resolved = await vm.resolvePromise(promise);
+    if ('error' in resolved) {
+      resolved.error.dispose();
+      expect.unreachable('module evaluation should not reject');
+    }
+    using value = resolved.value;
+    expect(value.isObject
+      ? value.getProp('then').consume(h => h.toNumber())
+      : value.toNumber()).toBe(7);
+  });
+});
+
 describe('EvalFlags.STRICT', () => {
   it('should reject assignment to undeclared variables', async () => {
     using vm = await QuickJS.create(wasmBytes);
