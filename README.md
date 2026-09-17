@@ -849,6 +849,4 @@ See [`examples/browser/`](./examples/browser/) for a complete Vite demo app.
 
 The quickjs-wasi wrapper is licensed under the [MIT License](./LICENSE), copyright (c) 2026 Vercel, Inc. The root `LICENSE` file contains the canonical copyright and permission notice and is included in the npm package.
 
-This notice also applies to the wrapper in quickjs-wasi **3.6.0**, published from commit [`54c4d2dd4be2445409aeab603ecfc3bb209c7310`](https://github.com/vercel-labs/quickjs-wasi/commit/54c4d2dd4be2445409aeab603ecfc3bb209c7310). That release declared the MIT license in `package.json` but omitted the license file. When redistributing that version's wrapper, include the full text of `LICENSE` from this repository.
-
 The bundled QuickJS-NG engine and other third-party components retain their own copyright and license notices. The wrapper's notice does not replace those upstream notices.
