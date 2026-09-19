@@ -1,5 +1,11 @@
 # quickjs-wasi
 
+## 3.6.2
+
+### Patch Changes
+
+- [#53](https://github.com/vercel-labs/quickjs-wasi/pull/53) [`1f38685`](https://github.com/vercel-labs/quickjs-wasi/commit/1f3868510c47f34fab2f4784c9dd7aed5257448f) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Update QuickJS-NG to v0.17.0, replacing the unreleased commit pin with an upstream release that includes WASI stack overflow protection.
+
 ## 3.6.1
 
 ### Patch Changes
