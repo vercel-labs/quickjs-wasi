@@ -1767,6 +1767,23 @@ export class QuickJS {
     vm._ownedHandles.add(resolveHandle);
     vm._ownedHandles.add(rejectHandle);
 
+    let resolved = false;
+    const settle = (resolver: JSValueHandle, value: JSValueHandle): void => {
+      if (resolved) return;
+      // Mark as settled before calling the resolver: resolving with an object
+      // synchronously reads its `then` property, which can re-enter host code
+      // that calls resolve()/reject() again. Those nested calls must be no-ops
+      // so they don't free the resolver that is still executing.
+      resolved = true;
+      vm.callFunctionRaw(resolver, vm.undefined, value).dispose();
+      // Both functions retain the promise, including its eventual value.
+      // Once either is called, subsequent settlement attempts are no-ops.
+      vm._ownedHandles.delete(resolveHandle);
+      vm._ownedHandles.delete(rejectHandle);
+      resolveHandle.dispose();
+      rejectHandle.dispose();
+    };
+
     // Lazily-created settled promise: only attaches .then() handler when accessed
     let _settled: Promise<void> | null = null;
 
@@ -1792,14 +1809,10 @@ export class QuickJS {
         return _settled;
       },
       resolve(value: JSValueHandle) {
-        vm.callFunctionRaw(resolveHandle, vm.undefined, value).dispose();
-        vm._ownedHandles.delete(resolveHandle);
-        resolveHandle.dispose();
+        settle(resolveHandle, value);
       },
       reject(value: JSValueHandle) {
-        vm.callFunctionRaw(rejectHandle, vm.undefined, value).dispose();
-        vm._ownedHandles.delete(rejectHandle);
-        rejectHandle.dispose();
+        settle(rejectHandle, value);
       },
     };
   }
