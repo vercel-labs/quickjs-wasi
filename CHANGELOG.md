@@ -1,5 +1,11 @@
 # quickjs-wasi
 
+## 3.6.3
+
+### Patch Changes
+
+- [#56](https://github.com/vercel-labs/quickjs-wasi/pull/56) [`2d87476`](https://github.com/vercel-labs/quickjs-wasi/commit/2d87476e631bb37f78e1c852eb9dc1bcb2e2ca70) Thanks [@asafyish](https://github.com/asafyish)! - Release both deferred promise resolvers after the first settlement so the unused resolver does not retain the promise and its payload until VM disposal.
+
 ## 3.6.2
 
 ### Patch Changes
