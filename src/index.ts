@@ -1180,8 +1180,10 @@ export class QuickJS {
   }
 
   private exceptionToHandle(err: unknown): JSValueHandle {
-    if (err instanceof JSException && err.handle.vm === this) {
-      return err.handle;
+    if (err instanceof JSException && err.handle.vm === this && !err.handle.disposed) {
+      // Our duplicate keeps the caller's live value reusable. Disposed errors
+      // still have cached Error fields and use ordinary host-error conversion.
+      return err.handle.dup();
     }
     try {
       return this.newError(err instanceof Error ? err : String(err));
@@ -2335,8 +2337,12 @@ export class QuickJS {
       const arr = this.newArray();
       try {
         for (let i = 0; i < value.length; i++) {
-          using elemHandle = this.hostToHandle(value[i]);
-          if (this.exports.qjs_set_prop_uint32(arr.ptr, i, elemHandle.ptr) < 0) this.throwPendingException();
+          const elemHandle = this.hostToHandle(value[i]);
+          try {
+            if (this.exports.qjs_set_prop_uint32(arr.ptr, i, elemHandle.ptr) < 0) this.throwPendingException();
+          } finally {
+            elemHandle.dispose();
+          }
         }
         return arr;
       } catch (err) {
@@ -2349,8 +2355,12 @@ export class QuickJS {
       const obj = this.newObject();
       try {
         for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-          using valHandle = this.hostToHandle(val);
-          obj.setProp(key, valHandle);
+          const valHandle = this.hostToHandle(val);
+          try {
+            obj.setProp(key, valHandle);
+          } finally {
+            valHandle.dispose();
+          }
         }
         return obj;
       } catch (err) {

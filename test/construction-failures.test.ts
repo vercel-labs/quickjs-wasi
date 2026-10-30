@@ -91,6 +91,48 @@ describe('guest allocation failures during host construction', () => {
       .consume(h => vm.dump(h))).toBe(true);
   });
 
+  it.each(['callback', 'normalize', 'load', 'promise'] as const)(
+    'does not consume a retained exception forwarded through %s', async (path) => {
+      let retained!: JSException;
+      using vm = await QuickJS.create({ wasm: wasmBytes, moduleLoader: {
+        normalize: (_base, name) => { if (path === 'normalize') throw retained; return name; },
+        load: () => { throw retained; },
+      } });
+      try { vm.evalCode('globalThis.failure = { message: "retained", marker: 42 }; throw failure'); }
+      catch (err) { if (!(err instanceof JSException)) throw err; retained = err; }
+      expect(retained).toBeInstanceOf(JSException);
+      using owned = retained;
+      using fn = vm.newFunction('fail', () => { throw retained; });
+      vm.global.setProp('fail', fn);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (path === 'callback') {
+          expect(vm.evalCode('try { fail() } catch (e) { e === failure && e.marker === 42 }')
+            .consume(h => h.toBoolean())).toBe(true);
+        } else if (path === 'promise') {
+          using pending = vm.hostToHandle(Promise.resolve({ get value() { throw retained; } }));
+          await Promise.resolve();
+          const settled = await vm.resolvePromise(pending);
+          expect('error' in settled).toBe(true);
+          using error = 'error' in settled ? settled.error : settled.value;
+          expect(retained.handle.disposed).toBe(false);
+          expect(error.identity).toBe(retained.handle.identity);
+        } else {
+          using pending = vm.evalCode(`(async () => {
+            try { await import('failure-${attempt}.js'); return false; }
+            catch (e) { return e === failure && e.marker === 42; }
+          })()`);
+          vm.executePendingJobs();
+          const settled = await vm.resolvePromise(pending);
+          expect('value' in settled).toBe(true);
+          using result = 'value' in settled ? settled.value : settled.error;
+          expect(result.toBoolean()).toBe(true);
+        }
+        expect(retained.handle.disposed).toBe(false);
+        expect(retained.handle.getProp('marker').consume(h => h.toNumber())).toBe(42);
+      }
+    }
+  );
+
   it.each(['fulfillment', 'rejection'] as const)(
     'rejects the guest promise when converting its %s exhausts the limit', async (kind) => {
       using vm = await QuickJS.create({ wasm: wasmBytes, memoryLimit });
@@ -105,6 +147,21 @@ describe('guest allocation failures during host construction', () => {
       expect(error.getProp('message').consume(h => h.toString())).toBe('out of memory');
     }
   );
+  it('copies cached error fields when a forwarded exception handle was disposed', async () => {
+    using vm = await QuickJS.create(wasmBytes);
+    let retained!: JSException;
+    try { vm.evalCode('throw new RangeError("retained")'); }
+    catch (err) { if (!(err instanceof JSException)) throw err; retained = err; }
+    expect(retained).toBeInstanceOf(JSException);
+    retained.dispose();
+    using fn = vm.newFunction('fail', () => { throw retained; });
+    vm.global.setProp('fail', fn);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(vm.evalCode('try { fail() } catch (e) { e.name + ": " + e.message }')
+        .consume(h => h.toString())).toBe('RangeError: retained');
+    }
+    expect(vm.evalCode('6 * 7').consume(h => h.toNumber())).toBe(42);
+  });
   it.each(['normalize', 'load'] as const)(
     'keeps a module %s error conversion OOM catchable in the guest', async (phase) => {
       using vm = await QuickJS.create({
