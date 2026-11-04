@@ -1055,15 +1055,6 @@ export class QuickJS {
       }
     };
 
-    // Throw a host-side error into the QuickJS context so module loader
-    // failures surface with their real message instead of the generic
-    // "could not load module" error.
-    const throwIntoContext = (err: unknown): void => {
-      const errHandle = vm.newError(err instanceof Error ? err : String(err));
-      vm.exports.qjs_throw(errHandle.ptr);
-      errHandle.dispose();
-    };
-
     // Guard against async (or otherwise non-string-returning) module loader
     // callbacks. The WASM boundary is synchronous (a Promise cannot be
     // awaited here), so fail with a clear error instead of coercing the
@@ -1094,8 +1085,7 @@ export class QuickJS {
         const normalized = assertSyncString(vm.moduleNormalizeHandler(baseName, specifier), 'normalize');
         return vm.writeString(normalized).ptr;
       } catch (err) {
-        throwIntoContext(err);
-        return 0;
+        return vm.throwHostException(err);
       }
     };
 
@@ -1110,8 +1100,7 @@ export class QuickJS {
         new Uint32Array(vm.exports.memory.buffer, outLenPtr, 1)[0] = len;
         return ptr;
       } catch (err) {
-        throwIntoContext(err);
-        return 0;
+        return vm.throwHostException(err);
       }
     };
 
@@ -1157,14 +1146,11 @@ export class QuickJS {
       // host .stack into the guest, which would leak host file paths into
       // guest-observable space and shadow any guest backtrace. This error
       // is library-generated; there is no host stack worth preserving.
-      const errHandle = this.newError(
+      return this.throwHostException(
         `Host callback "${name}" is not registered: it was unregistered, ` +
           'its ephemeral function handle was disposed, or it was never ' +
           're-registered after a snapshot restore.'
       );
-      this.exports.qjs_throw(errHandle.ptr);
-      errHandle.dispose();
-      return 0;
     }
 
     // `thisPtr` and the argv entries are OWNED BY THE C TRAMPOLINE, which
@@ -1189,13 +1175,30 @@ export class QuickJS {
       const result = callback.call(thisHandle, ...args);
       return this.exports.qjs_dup_value(result.ptr);
     } catch (err) {
-      // Throw an exception inside QuickJS and return NULL to signal
-      // to the C trampoline that an exception was thrown.
-      const errHandle = this.newError(err instanceof Error ? err : String(err));
-      this.exports.qjs_throw(errHandle.ptr);
-      errHandle.dispose();
-      return 0;
+      return this.throwHostException(err);
     }
+  }
+
+  private exceptionToHandle(err: unknown): JSValueHandle {
+    if (err instanceof JSException && err.handle.vm === this && !err.handle.disposed) {
+      // Our duplicate keeps the caller's live value reusable. Disposed errors
+      // still have cached Error fields and use ordinary host-error conversion.
+      return err.handle.dup();
+    }
+    try {
+      return this.newError(err instanceof Error ? err : String(err));
+    } catch (conversionError) {
+      // Translating a host error may itself exhaust the guest limit. Forward
+      // that native exception instead of allocating another Error recursively.
+      if (!(conversionError instanceof JSException) || conversionError.handle.vm !== this) throw conversionError;
+      return conversionError.handle;
+    }
+  }
+
+  private throwHostException(err: unknown): number {
+    using handle = this.exceptionToHandle(err);
+    using result = new JSValueHandle(this, this.exports.qjs_throw(handle.ptr));
+    return 0; // The C trampoline returns JS_EXCEPTION to the guest.
   }
 
   // ---- String helpers ----
@@ -1226,18 +1229,23 @@ export class QuickJS {
 
   /**
    * Check if a result handle is an exception and throw a JSException if so.
-   * Used internally by evalCode and callFunction.
+   * Used for evaluation, calls, and host value construction.
    */
   private throwIfException(result: JSValueHandle): JSValueHandle {
     if (this.exports.qjs_is_exception(result.ptr) !== 0) {
-      const exc = this.getException();
       result.dispose();
-      // Track the handle so it gets cleaned up if the VM is disposed
-      // before the caller disposes the exception.
-      this._ownedHandles.add(exc);
-      throw new JSException(exc);
+      this.throwPendingException();
     }
     return result;
+  }
+
+  private throwPendingException(): never {
+    const exc = this.getException();
+    // An exception outlives a scope that unwinds while propagating it.
+    this._activeScope?.delete(exc);
+    this._ownedHandles.add(exc);
+    exc._onDispose = () => this._ownedHandles.delete(exc);
+    throw new JSException(exc);
   }
 
   /**
@@ -1417,9 +1425,11 @@ export class QuickJS {
   newString(str: string): JSValueHandle {
     this.assertNotDisposed();
     const { ptr, len } = this.writeString(str);
-    const resultPtr = this.exports.qjs_new_string(ptr, len);
-    this.exports.wasm_free(ptr);
-    return new JSValueHandle(this, resultPtr);
+    try {
+      return this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_string(ptr, len)));
+    } finally {
+      this.exports.wasm_free(ptr);
+    }
   }
 
   /**
@@ -1438,7 +1448,7 @@ export class QuickJS {
     // Split the bigint into lo/hi 32-bit halves
     const lo = Number(val & 0xFFFFFFFFn);
     const hi = Number((val >> 32n) & 0xFFFFFFFFn);
-    return new JSValueHandle(this, this.exports.qjs_new_big_int64(lo, hi));
+    return this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_big_int64(lo, hi)));
   }
 
   /**
@@ -1446,7 +1456,7 @@ export class QuickJS {
    */
   newObject(): JSValueHandle {
     this.assertNotDisposed();
-    return new JSValueHandle(this, this.exports.qjs_new_object());
+    return this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_object()));
   }
 
   /**
@@ -1454,7 +1464,7 @@ export class QuickJS {
    */
   newArray(): JSValueHandle {
     this.assertNotDisposed();
-    return new JSValueHandle(this, this.exports.qjs_new_array());
+    return this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_array()));
   }
 
   /**
@@ -1465,9 +1475,11 @@ export class QuickJS {
   newSymbolFor(description: string): JSValueHandle {
     this.assertNotDisposed();
     const { ptr, len } = this.writeString(description);
-    const result = new JSValueHandle(this, this.exports.qjs_new_symbol(ptr, len, 1));
-    this.exports.wasm_free(ptr);
-    return result;
+    try {
+      return this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_symbol(ptr, len, 1)));
+    } finally {
+      this.exports.wasm_free(ptr);
+    }
   }
 
   /**
@@ -1478,10 +1490,12 @@ export class QuickJS {
     const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
     const ptr = this.exports.wasm_malloc(bytes.length);
     if (ptr === 0) throw new Error('wasm_malloc failed');
-    new Uint8Array(this.exports.memory.buffer).set(bytes, ptr);
-    const result = new JSValueHandle(this, this.exports.qjs_new_array_buffer(ptr, bytes.length));
-    this.exports.wasm_free(ptr);
-    return result;
+    try {
+      new Uint8Array(this.exports.memory.buffer).set(bytes, ptr);
+      return this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_array_buffer(ptr, bytes.length)));
+    } finally {
+      this.exports.wasm_free(ptr);
+    }
   }
 
   /**
@@ -1491,10 +1505,12 @@ export class QuickJS {
     this.assertNotDisposed();
     const ptr = this.exports.wasm_malloc(data.length);
     if (ptr === 0) throw new Error('wasm_malloc failed');
-    new Uint8Array(this.exports.memory.buffer).set(data, ptr);
-    const result = new JSValueHandle(this, this.exports.qjs_new_uint8_array(ptr, data.length));
-    this.exports.wasm_free(ptr);
-    return result;
+    try {
+      new Uint8Array(this.exports.memory.buffer).set(data, ptr);
+      return this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_uint8_array(ptr, data.length)));
+    } finally {
+      this.exports.wasm_free(ptr);
+    }
   }
 
   /**
@@ -1966,13 +1982,23 @@ export class QuickJS {
    */
   setProp(obj: JSValueHandle, key: string | JSValueHandle, value: JSValueHandle): void {
     this.assertNotDisposed();
+    let status: number;
     if (typeof key === 'string') {
+      if (stringKeyNeedsValuePath(key)) {
+        using keyHandle = this.newString(key);
+        this.setProp(obj, keyHandle, value);
+        return;
+      }
       const { ptr: namePtr } = this.writeString(key);
-      this.exports.qjs_set_prop_string(obj.ptr, namePtr, value.ptr);
-      this.exports.wasm_free(namePtr);
+      try {
+        status = this.exports.qjs_set_prop_string(obj.ptr, namePtr, value.ptr);
+      } finally {
+        this.exports.wasm_free(namePtr);
+      }
     } else {
-      this.exports.qjs_set_prop_value(obj.ptr, key.ptr, value.ptr);
+      status = this.exports.qjs_set_prop_value(obj.ptr, key.ptr, value.ptr);
     }
+    if (status < 0) this.throwPendingException();
   }
 
   /**
@@ -1989,13 +2015,23 @@ export class QuickJS {
     if (descriptor?.configurable) flags |= 1; // JS_PROP_CONFIGURABLE
     if (descriptor?.writable) flags |= 2;     // JS_PROP_WRITABLE
     if (descriptor?.enumerable) flags |= 4;   // JS_PROP_ENUMERABLE
+    let status: number;
     if (typeof key === 'string') {
+      if (stringKeyNeedsValuePath(key)) {
+        using keyHandle = this.newString(key);
+        this.defineProp(obj, keyHandle, value, descriptor);
+        return;
+      }
       const { ptr: namePtr } = this.writeString(key);
-      this.exports.qjs_define_prop_string(obj.ptr, namePtr, value.ptr, flags);
-      this.exports.wasm_free(namePtr);
+      try {
+        status = this.exports.qjs_define_prop_string(obj.ptr, namePtr, value.ptr, flags);
+      } finally {
+        this.exports.wasm_free(namePtr);
+      }
     } else {
-      this.exports.qjs_define_prop_value(obj.ptr, key.ptr, value.ptr, flags);
+      status = this.exports.qjs_define_prop_value(obj.ptr, key.ptr, value.ptr, flags);
     }
+    if (status < 0) this.throwPendingException();
   }
 
   /**
@@ -2022,31 +2058,25 @@ export class QuickJS {
   newError(messageOrError: string | Error): JSValueHandle {
     this.assertNotDisposed();
     const errPtr = this.exports.qjs_new_error();
-    const errHandle = new JSValueHandle(this, errPtr);
+    const errHandle = this.throwIfException(new JSValueHandle(this, errPtr));
 
-    if (typeof messageOrError === 'string') {
-      const msgHandle = this.newString(messageOrError);
+    try {
+      using msgHandle = this.newString(typeof messageOrError === 'string' ? messageOrError : messageOrError.message);
       errHandle.setProp('message', msgHandle);
-      msgHandle.dispose();
-    } else {
-      const msgHandle = this.newString(messageOrError.message);
-      errHandle.setProp('message', msgHandle);
-      msgHandle.dispose();
-
-      if (messageOrError.name) {
-        const nameHandle = this.newString(messageOrError.name);
+      if (typeof messageOrError !== 'string' && messageOrError.name) {
+        using nameHandle = this.newString(messageOrError.name);
         errHandle.setProp('name', nameHandle);
-        nameHandle.dispose();
       }
 
-      if (messageOrError.stack) {
-        const stackHandle = this.newString(messageOrError.stack);
+      if (typeof messageOrError !== 'string' && messageOrError.stack) {
+        using stackHandle = this.newString(messageOrError.stack);
         errHandle.setProp('stack', stackHandle);
-        stackHandle.dispose();
       }
+      return errHandle;
+    } catch (err) {
+      errHandle.dispose();
+      throw err;
     }
-
-    return errHandle;
   }
 
   /**
@@ -2264,15 +2294,24 @@ export class QuickJS {
 
     if (value instanceof Promise) {
       const deferred = this.newPromise();
-      value.then(
-        (r: unknown) => {
-          deferred.resolve(this.hostToHandle(r));
+      const settle = (result: unknown, reject: boolean): void => {
+        let handle: JSValueHandle;
+        try {
+          handle = this.hostToHandle(result);
+        } catch (err) {
+          using error = this.exceptionToHandle(err);
+          deferred.reject(error);
           this.executePendingJobs();
-        },
-        (err: unknown) => {
-          deferred.reject(this.hostToHandle(err));
-          this.executePendingJobs();
+          return;
         }
+        using converted = handle;
+        if (reject) deferred.reject(converted);
+        else deferred.resolve(converted);
+        this.executePendingJobs();
+      };
+      value.then(
+        (r: unknown) => settle(r, false),
+        (err: unknown) => settle(err, true)
       );
       return deferred.handle;
     }
@@ -2296,22 +2335,38 @@ export class QuickJS {
 
     if (Array.isArray(value)) {
       const arr = this.newArray();
-      for (let i = 0; i < value.length; i++) {
-        const elemHandle = this.hostToHandle(value[i]);
-        this.exports.qjs_set_prop_uint32(arr.ptr, i, elemHandle.ptr);
-        elemHandle.dispose();
+      try {
+        for (let i = 0; i < value.length; i++) {
+          const elemHandle = this.hostToHandle(value[i]);
+          try {
+            if (this.exports.qjs_set_prop_uint32(arr.ptr, i, elemHandle.ptr) < 0) this.throwPendingException();
+          } finally {
+            elemHandle.dispose();
+          }
+        }
+        return arr;
+      } catch (err) {
+        arr.dispose();
+        throw err;
       }
-      return arr;
     }
 
     if (typeof value === 'object' && value !== null) {
       const obj = this.newObject();
-      for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-        const valHandle = this.hostToHandle(val);
-        obj.setProp(key, valHandle);
-        valHandle.dispose();
+      try {
+        for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+          const valHandle = this.hostToHandle(val);
+          try {
+            obj.setProp(key, valHandle);
+          } finally {
+            valHandle.dispose();
+          }
+        }
+        return obj;
+      } catch (err) {
+        obj.dispose();
+        throw err;
       }
-      return obj;
     }
 
     return this.undefined;
@@ -3140,14 +3195,7 @@ export class JSValueHandle {
    * Set a property by name.
    */
   setProp(name: string, value: JSValueHandle): void {
-    if (stringKeyNeedsValuePath(name)) {
-      using keyHandle = this.vm.newString(name);
-      this.vm.setProp(this, keyHandle, value);
-      return;
-    }
-    const { ptr: namePtr } = this.vm._writeString(name);
-    this.vm._getExports().qjs_set_prop_string(this.ptr, namePtr, value.ptr);
-    this.vm._getExports().wasm_free(namePtr);
+    this.vm.setProp(this, name, value);
   }
 
   /**
@@ -3159,22 +3207,7 @@ export class JSValueHandle {
    * All flags default to `false` when not specified.
    */
   defineProp(key: string | JSValueHandle, value: JSValueHandle, descriptor?: JSPropertyDescriptor): void {
-    let flags = 0;
-    if (descriptor?.configurable) flags |= 1; // JS_PROP_CONFIGURABLE
-    if (descriptor?.writable) flags |= 2;     // JS_PROP_WRITABLE
-    if (descriptor?.enumerable) flags |= 4;   // JS_PROP_ENUMERABLE
-    if (typeof key === 'string') {
-      if (stringKeyNeedsValuePath(key)) {
-        using keyHandle = this.vm.newString(key);
-        this.vm._getExports().qjs_define_prop_value(this.ptr, keyHandle.ptr, value.ptr, flags);
-        return;
-      }
-      const { ptr: namePtr } = this.vm._writeString(key);
-      this.vm._getExports().qjs_define_prop_string(this.ptr, namePtr, value.ptr, flags);
-      this.vm._getExports().wasm_free(namePtr);
-    } else {
-      this.vm._getExports().qjs_define_prop_value(this.ptr, key.ptr, value.ptr, flags);
-    }
+    this.vm.defineProp(this, key, value, descriptor);
   }
 
   /**
