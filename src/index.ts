@@ -1751,19 +1751,20 @@ export class QuickJS {
    */
   newPromise(): Deferred {
     this.assertNotDisposed();
-    const resolveOutPtr = this.exports.wasm_malloc(4);
-    const rejectOutPtr = this.exports.wasm_malloc(4);
-
-    const promisePtr = this.exports.qjs_new_promise(resolveOutPtr, rejectOutPtr);
-
-    const view = new DataView(this.exports.memory.buffer);
-    const resolvePtr = view.getUint32(resolveOutPtr, true);
-    const rejectPtr = view.getUint32(rejectOutPtr, true);
-
-    this.exports.wasm_free(resolveOutPtr);
-    this.exports.wasm_free(rejectOutPtr);
-
-    const promiseHandle = new JSValueHandle(this, promisePtr);
+    const outPtr = this.exports.wasm_malloc(8);
+    if (!outPtr) throw new Error('Failed to allocate promise output buffer');
+    let promiseHandle: JSValueHandle;
+    let resolvePtr: number;
+    let rejectPtr: number;
+    try {
+      // Failed native creation must throw before reading or tracking resolver outputs.
+      promiseHandle = this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_promise(outPtr, outPtr + 4)));
+      const view = new DataView(this.exports.memory.buffer);
+      resolvePtr = view.getUint32(outPtr, true);
+      rejectPtr = view.getUint32(outPtr + 4, true);
+    } finally {
+      this.exports.wasm_free(outPtr);
+    }
     const resolveHandle = new JSValueHandle(this, resolvePtr);
     const rejectHandle = new JSValueHandle(this, rejectPtr);
 

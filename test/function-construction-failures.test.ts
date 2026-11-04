@@ -71,6 +71,17 @@ function setPending(vm: QuickJS, value: JSValueHandle): void {
   using ignored = new JSValueHandle(vm, vm._getExports().qjs_throw(value.ptr));
 }
 
+function expectRecovery(vm: QuickJS): void {
+  // A fresh eval also constructs a function. Restore memory only after the
+  // constrained construction and callback rollback assertions have completed.
+  vm._getExports().qjs_set_memory_limit(ampleMemory);
+  using before = vm.getException();
+  expect(vm._getExports().qjs_typeof(before.ptr)).toBe(4); // No pending exception.
+  expect(vm.evalCode('6 * 7').consume(handle => handle.toNumber())).toBe(42);
+  using after = vm.getException();
+  expect(vm._getExports().qjs_typeof(after.ptr)).toBe(4);
+}
+
 describe('host function construction failures', () => {
   it.each(['name', 'properties'] as const)('rejects failed %s initialization without reserving the name', async kind => {
     const fixture = await capture(kind);
@@ -79,7 +90,7 @@ describe('host function construction failures', () => {
     expectFailure(() => vm.newFunction(fixture.name, () => { calls++; return vm.true; }));
     expect(vm.unregisterHostCallback(fixture.name)).toBe(false);
     expect(calls).toBe(0);
-    expect(vm.evalCode('6 * 7').consume(handle => handle.toNumber())).toBe(42);
+    expectRecovery(vm);
   });
 
   it.each(['name', 'properties'] as const)('preserves complete %s controls with sufficient memory', async kind => {
@@ -119,7 +130,7 @@ describe('host function construction failures', () => {
     setPending(vm, vm.true);
     expectFailure(() => vm.newFunction(fixture.name, () => vm.true));
     expect(vm.unregisterHostCallback(fixture.name)).toBe(false);
-    expect(vm.evalCode('6 * 7').consume(handle => handle.toNumber())).toBe(42);
+    expectRecovery(vm);
   });
 });
 
