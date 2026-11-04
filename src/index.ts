@@ -546,6 +546,7 @@ const SNAPSHOT_HEADER_SIZE = 24;
 
 // ---- Deferred promise type ----
 
+/** Resolver failures throw on the host; resolve/reject remain one-shot. */
 export interface Deferred {
   /** Handle to the QuickJS promise object */
   handle: JSValueHandle;
