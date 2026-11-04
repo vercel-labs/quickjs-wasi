@@ -1248,10 +1248,27 @@ JSValue *qjs_call(JSValue *func, JSValue *this_val, int argc, JSValue **argv) {
  */
 __attribute__((export_name("qjs_new_host_function")))
 JSValue *qjs_new_host_function(const char *name, int name_len, int arg_count) {
+    /* Isolate new construction errors from an earlier pending exception.
+       Successful construction preserves that earlier state, including throw null. */
+    JSValue previous_exception = JS_GetException(ctx);
     JSValue name_val = JS_NewStringLen(ctx, name, name_len);
+    if (JS_IsException(name_val)) {
+        JS_FreeValue(ctx, previous_exception);
+        return jsvalue_to_heap(name_val);
+    }
     JSValue func = JS_NewCFunctionData2(ctx, host_callback_trampoline,
                                          name, arg_count, 0, 1, &name_val);
     JS_FreeValue(ctx, name_val);
+    /* Function-property initialization can leave an exception while returning
+       a function. Do not publish that partially initialized result. */
+    if (JS_HasException(ctx)) {
+        JS_FreeValue(ctx, func);
+        func = JS_EXCEPTION;
+    }
+    if (JS_IsException(func))
+        JS_FreeValue(ctx, previous_exception);
+    else
+        JS_Throw(ctx, previous_exception); /* Transfers ownership, even if uninitialized. */
     return jsvalue_to_heap(func);
 }
 
