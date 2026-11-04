@@ -21,9 +21,10 @@ describe('settled deferred ownership', () => {
       const failure = new Error('native invocation failed');
       // Substitute only the fallible call boundary. Native exception creation,
       // exception ownership, and resolver disposal still use the real WASM.
-      const call = vi.fn(stage === 'host throw'
-        ? () => { throw failure; }
-        : (_func, thisVal, argc, argv) => original.qjs_call(thrower.ptr, thisVal, argc, argv));
+      const call = vi.fn((...args: Parameters<typeof original.qjs_call>) => {
+        if (stage === 'host throw') throw failure;
+        return original.qjs_call(thrower.ptr, args[1], args[2], args[3]);
+      });
       owner.exports = { ...original, qjs_call: call };
       let caught: unknown;
       try {
