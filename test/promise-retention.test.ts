@@ -10,6 +10,7 @@ describe('settled deferred ownership', () => {
   ] as const)('releases the one-shot pair after %s %s', async (settle, stage) => {
     using vm = await QuickJS.create(wasmBytes);
     using reason = vm.newError('resolver failed');
+    using value = vm.newString('retained input');
     vm.global.setProp('reason', reason);
     using thrower = vm.evalCode('() => { throw reason; }');
     const original = vm._getExports();
@@ -34,7 +35,7 @@ describe('settled deferred ownership', () => {
     owner.exports = { ...original, qjs_call: call };
     let caught: unknown;
     try {
-      try { deferred[settle](vm.true); } catch (error) { caught = error; }
+      try { deferred[settle](value); } catch (error) { caught = error; }
       if (stage === 'native exception') {
         expect(caught).toBeInstanceOf(JSException);
         expect((caught as JSException).handle.identity).toBe(reason.identity);
@@ -62,6 +63,7 @@ describe('settled deferred ownership', () => {
       escaped!.dispose();
     }
     expect(owner._ownedHandles.size).toBe(before);
+    expect(value.toString()).toBe('retained input');
     using pending = vm.getException();
     expect(original.qjs_typeof(pending.ptr)).toBe(4);
 
@@ -81,6 +83,7 @@ describe('settled deferred ownership', () => {
       using sentinel = new JSValueHandle(vm, e.qjs_throw(reason.ptr));
       deferred[settle](vm.true);
       using pending = vm.getException();
+      expect(e.qjs_typeof(pending.ptr)).toBe(e.qjs_typeof(reason.ptr));
       expect(pending.identity).toBe(reason.identity);
       expect(handle.promiseState).toBe(settle === 'resolve' ? 1 : 2);
     }
