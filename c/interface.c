@@ -184,6 +184,9 @@ static JSValue host_callback_trampoline(JSContext *ctx, JSValueConst this_val,
     /* Extract the function name from func_data[0] */
     size_t name_len;
     const char *name = JS_ToCStringLen(ctx, &name_len, func_data[0]);
+    /* Failed encoding leaves an exception, not an empty callback name. */
+    if (!name)
+        return JS_EXCEPTION;
 
     /* Heap-allocate this_val for the host */
     JSValue *this_ptr = jsvalue_to_heap(JS_DupValue(ctx, this_val));
