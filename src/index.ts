@@ -1783,13 +1783,16 @@ export class QuickJS {
       // that calls resolve()/reject() again. Those nested calls must be no-ops
       // so they don't free the resolver that is still executing.
       resolved = true;
-      vm.callFunctionRaw(resolver, vm.undefined, value).dispose();
-      // Both functions retain the promise, including its eventual value.
-      // Once either is called, subsequent settlement attempts are no-ops.
-      vm._ownedHandles.delete(resolveHandle);
-      vm._ownedHandles.delete(rejectHandle);
-      resolveHandle.dispose();
-      rejectHandle.dispose();
+      try {
+        vm.callFunction(resolver, vm.undefined, value).dispose();
+      } finally {
+        // Both functions retain the promise. Release them even when invocation
+        // fails; the one-shot transition still forbids retrying this pair.
+        vm._ownedHandles.delete(resolveHandle);
+        vm._ownedHandles.delete(rejectHandle);
+        resolveHandle.dispose();
+        rejectHandle.dispose();
+      }
     };
 
     // Lazily-created settled promise: only attaches .then() handler when accessed
