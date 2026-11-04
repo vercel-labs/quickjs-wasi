@@ -1276,11 +1276,22 @@ JSValue *qjs_new_host_function(const char *name, int name_len, int arg_count) {
 
 __attribute__((export_name("qjs_new_promise")))
 JSValue *qjs_new_promise(JSValue **resolve_out, JSValue **reject_out) {
-    JSValue resolving_funcs[2];
+    /* Early capability failures need not initialize the resolver outputs. */
+    JSValue resolving_funcs[2] = { JS_UNDEFINED, JS_UNDEFINED };
+    *resolve_out = NULL;
+    *reject_out = NULL;
+    JSValue previous_exception = JS_GetException(ctx);
     JSValue promise = JS_NewPromiseCapability(ctx, resolving_funcs);
-
-    /* Heap-allocate the resolve and reject functions and write their
-       pointers to the output locations */
+    /* Resolver-property initialization can return a promise with a fresh
+       pending exception. Release all partial ownership before publishing. */
+    if (JS_IsException(promise) || JS_HasException(ctx)) {
+        JS_FreeValue(ctx, promise);
+        JS_FreeValue(ctx, resolving_funcs[0]);
+        JS_FreeValue(ctx, resolving_funcs[1]);
+        JS_FreeValue(ctx, previous_exception);
+        return jsvalue_to_heap(JS_EXCEPTION);
+    }
+    JS_Throw(ctx, previous_exception); /* Successful creation preserves earlier state. */
     *resolve_out = jsvalue_to_heap(resolving_funcs[0]);
     *reject_out  = jsvalue_to_heap(resolving_funcs[1]);
 
