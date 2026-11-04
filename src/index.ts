@@ -1556,12 +1556,7 @@ export class QuickJS {
     if (this.hostCallbacks.has(name)) {
       throw new Error(`Host callback with name "${name}" is already registered`);
     }
-    this.hostCallbacks.set(name, fn);
-
-    const { ptr: namePtr, len: nameLen } = this.writeString(name);
-    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, 0);
-    this.exports.wasm_free(namePtr);
-    return new JSValueHandle(this, resultPtr);
+    return this.newInternalFunction(name, fn);
   }
 
   /**
@@ -1711,13 +1706,7 @@ export class QuickJS {
     this.assertNotDisposed();
 
     const name = `__ephemeral:${this.nextInternalId++}`;
-    this.hostCallbacks.set(name, fn);
-
-    const { ptr: namePtr, len: nameLen } = this.writeString(name);
-    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, 0);
-    this.exports.wasm_free(namePtr);
-
-    const handle = new JSValueHandle(this, resultPtr);
+    const handle = this.newInternalFunction(name, fn);
     handle._onDispose = () => {
       this.hostCallbacks.delete(name);
     };
@@ -1736,17 +1725,19 @@ export class QuickJS {
   }
 
   /**
-   * Create an internal host function that bypasses the duplicate-name check.
-   * Used for ephemeral callbacks (promise settle handlers, resolvePromise, etc.)
-   * that are not intended to survive snapshot/restore.
+   * Construct and register a host function only after native success.
+   * Callers own duplicate-name checks and callback registration lifetimes.
    */
   private newInternalFunction(name: string, fn: HostFunction): JSValueHandle {
-    this.hostCallbacks.set(name, fn);
-
     const { ptr: namePtr, len: nameLen } = this.writeString(name);
-    const resultPtr = this.exports.qjs_new_host_function(namePtr, nameLen, 0);
-    this.exports.wasm_free(namePtr);
-    return new JSValueHandle(this, resultPtr);
+    try {
+      const handle = this.throwIfException(new JSValueHandle(this, this.exports.qjs_new_host_function(namePtr, nameLen, 0)));
+      // Failed construction must not retain a callback or reserve its name.
+      this.hostCallbacks.set(name, fn);
+      return handle;
+    } finally {
+      this.exports.wasm_free(namePtr);
+    }
   }
 
   /**
@@ -1808,19 +1799,25 @@ export class QuickJS {
       get settled(): Promise<void> {
         if (!_settled) {
           let settledResolve: () => void;
-          _settled = new Promise<void>((res) => {
+          const settled = new Promise<void>((res) => {
             settledResolve = res;
           });
 
           const settleName = `__settle:${vm.nextInternalId++}`;
-          const onSettleFn = vm.newInternalFunction(settleName, () => {
+          using onSettleFn = vm.newInternalFunction(settleName, () => {
             settledResolve!();
             vm.hostCallbacks.delete(settleName);
             return vm.undefined;
           });
 
-          vm.promiseThenRaw(promiseHandle, onSettleFn, onSettleFn).dispose();
-          onSettleFn.dispose();
+          try {
+            vm.promiseThenRaw(promiseHandle, onSettleFn, onSettleFn).dispose();
+            // Cache only after setup succeeds; a failed access must be retryable.
+            _settled = settled;
+          } catch (error) {
+            vm.hostCallbacks.delete(settleName);
+            throw error;
+          }
         }
         return _settled;
       },
@@ -1866,28 +1863,40 @@ export class QuickJS {
       const fulfilledName = `__onFulfilled:${id}`;
       const rejectedName = `__onRejected:${id}`;
 
-      const onFulfilled = this.newInternalFunction(fulfilledName, (...args) => {
-        const val = args[0]?.dup() ?? this.undefined;
-        this.hostCallbacks.delete(fulfilledName);
-        this.hostCallbacks.delete(rejectedName);
-        hostResolve({ value: val });
-        return this.undefined;
-      });
-      const onRejected = this.newInternalFunction(rejectedName, (...args) => {
-        const val = args[0]?.dup() ?? this.undefined;
-        this.hostCallbacks.delete(fulfilledName);
-        this.hostCallbacks.delete(rejectedName);
-        hostResolve({ error: val });
-        return this.undefined;
-      });
+      let onFulfilled: JSValueHandle | undefined;
+      let onRejected: JSValueHandle | undefined;
+      let subscribed = false;
+      try {
+        onFulfilled = this.newInternalFunction(fulfilledName, (...args) => {
+          const val = args[0]?.dup() ?? this.undefined;
+          this.hostCallbacks.delete(fulfilledName);
+          this.hostCallbacks.delete(rejectedName);
+          hostResolve({ value: val });
+          return this.undefined;
+        });
+        onRejected = this.newInternalFunction(rejectedName, (...args) => {
+          const val = args[0]?.dup() ?? this.undefined;
+          this.hostCallbacks.delete(fulfilledName);
+          this.hostCallbacks.delete(rejectedName);
+          hostResolve({ error: val });
+          return this.undefined;
+        });
 
-      // Subscribe via the engine-level primitive: JS_PromiseThen does not
-      // consult Promise.prototype.then or Symbol.species, so guest code
-      // that patches either cannot intercept the subscription (or run at
-      // all during it).
-      this.promiseThenRaw(promiseHandle, onFulfilled, onRejected).dispose();
-      onFulfilled.dispose();
-      onRejected.dispose();
+        // Subscribe via the engine-level primitive: JS_PromiseThen does not
+        // consult Promise.prototype.then or Symbol.species, so guest code
+        // that patches either cannot intercept the subscription (or run at
+        // all during it).
+        this.promiseThenRaw(promiseHandle, onFulfilled, onRejected).dispose();
+        subscribed = true;
+      } finally {
+        if (!subscribed) {
+          // The first callback may exist when the second creation/subscription fails.
+          this.hostCallbacks.delete(fulfilledName);
+          this.hostCallbacks.delete(rejectedName);
+        }
+        onFulfilled?.dispose();
+        onRejected?.dispose();
+      }
     });
   }
 
@@ -1899,7 +1908,7 @@ export class QuickJS {
    * @internal
    */
   promiseThenRaw(promise: JSValueHandle, onFulfilled: JSValueHandle, onRejected: JSValueHandle): JSValueHandle {
-    return new JSValueHandle(this, this.exports.qjs_promise_then(promise.ptr, onFulfilled.ptr, onRejected.ptr));
+    return this.throwIfException(new JSValueHandle(this, this.exports.qjs_promise_then(promise.ptr, onFulfilled.ptr, onRejected.ptr)));
   }
 
   /**
