@@ -46,6 +46,17 @@ function setPending(vm: QuickJS, value: JSValueHandle): void {
   using ignored = new JSValueHandle(vm, vm._getExports().qjs_throw(value.ptr));
 }
 
+function expectRecovery(vm: QuickJS): void {
+  // The exhausted cap may also reject a new eval function. Lift it only after
+  // the failed Promise and its native ownership cleanup have been checked.
+  vm._getExports().qjs_set_memory_limit(ampleMemory);
+  using before = vm.getException();
+  expect(vm._getExports().qjs_typeof(before.ptr)).toBe(4); // No pending exception.
+  expect(vm.evalCode('6 * 7').consume(value => value.toNumber())).toBe(42);
+  using after = vm.getException();
+  expect(vm._getExports().qjs_typeof(after.ptr)).toBe(4);
+}
+
 describe('host Promise construction failures', () => {
   it.each([22, 23])('throws and releases partial native ownership with %i filler shapes', async fillers => {
     const { snapshot } = await capture(fillers);
@@ -54,7 +65,7 @@ describe('host Promise construction failures', () => {
     expectFailure(() => vm.newPromise());
     vm.runGC();
     expect(vm.getMemoryUsage().objCount).toBe(before);
-    expect(vm.evalCode('6 * 7').consume(value => value.toNumber())).toBe(42);
+    expectRecovery(vm);
   });
 
   it.each([[22, 'resolve'], [22, 'reject'], [23, 'resolve'], [23, 'reject']] as const)(
@@ -99,7 +110,7 @@ describe('host Promise construction failures', () => {
       using previous = kind === 'object' ? vm.importHandle(holderToken) : vm[kind].dup();
       setPending(vm, previous);
       expectFailure(() => vm.newPromise());
-      expect(vm.evalCode('6 * 7').consume(value => value.toNumber())).toBe(42);
+      expectRecovery(vm);
     },
   );
 
