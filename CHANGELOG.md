@@ -1,5 +1,23 @@
 # quickjs-wasi
 
+## 3.6.4
+
+### Patch Changes
+
+- [#59](https://github.com/vercel-labs/quickjs-wasi/pull/59) [`c9cbb11`](https://github.com/vercel-labs/quickjs-wasi/commit/c9cbb11d23dddc1d4478f04788b805a864930f46) Thanks [@vincentkoc](https://github.com/vincentkoc)! - Preserve native exceptions instead of dispatching a host callback when callback-name encoding fails.
+
+- [#62](https://github.com/vercel-labs/quickjs-wasi/pull/62) [`6596aea`](https://github.com/vercel-labs/quickjs-wasi/commit/6596aea5365cb4f597547195f8f981da13e0950c) Thanks [@vincentkoc](https://github.com/vincentkoc)! - Surface native Deferred resolver failures and release both resolvers even when invocation fails, while preserving one-shot settlement.
+
+- [#60](https://github.com/vercel-labs/quickjs-wasi/pull/60) [`9c659ce`](https://github.com/vercel-labs/quickjs-wasi/commit/9c659ce988b84f710014c2464f847c331eaf8879) Thanks [@vincentkoc](https://github.com/vincentkoc)! - Reject failed host-function construction without retaining callbacks, preserve earlier pending exceptions on success, and roll back incomplete Promise subscriptions.
+
+- [#58](https://github.com/vercel-labs/quickjs-wasi/pull/58) [`5adbf50`](https://github.com/vercel-labs/quickjs-wasi/commit/5adbf500332d00aeba808a03e8af269a96b48f10) Thanks [@vincentkoc](https://github.com/vincentkoc)! - Propagate guest allocation and property write exceptions from host data construction instead of returning exception handles or partially populated values. Release partial conversions and preserve native exceptions across host callbacks, module loaders, and handle-scope boundaries.
+
+- [#61](https://github.com/vercel-labs/quickjs-wasi/pull/61) [`1de024c`](https://github.com/vercel-labs/quickjs-wasi/commit/1de024c56320de25fbfd2a096951261e1a5f68a5) Thanks [@vincentkoc](https://github.com/vincentkoc)! - Throw on failed host Promise construction before publishing a Deferred, release partial resolver ownership, and preserve earlier pending exceptions on success.
+
+- [#63](https://github.com/vercel-labs/quickjs-wasi/pull/63) [`6380a3b`](https://github.com/vercel-labs/quickjs-wasi/commit/6380a3bc8f6ea49af07d2ca40a8932aec280c877) Thanks [@vincentkoc](https://github.com/vincentkoc)! - Terminate the VM and reject its host Promise observers when automatic host-Promise settlement or draining fails. Preserve the original host failure, ignore late completions after disposal, and keep private resolver handles alive across scope exit. Ordinary guest rejection remains a resolved error result; synchronous failures and `interruptHandler` interrupts remain recoverable.
+
+  `executePendingJobs()` now throws the job's original exception as a `JSException` (for example, message `interrupted`) instead of a plain `Error` with a `Job execution error: ...` message.
+
 ## 3.6.3
 
 ### Patch Changes
