@@ -177,6 +177,18 @@ describe('host Promise lifecycle', () => {
     }
   });
 
+  it('owns cancellation of abandoned host observers during disposal', async () => {
+    const vm = await QuickJS.create(wasmBytes);
+    const deferred = vm.newPromise();
+    using guest = deferred.handle;
+    void vm.resolvePromise(guest);
+    void deferred.settled;
+    vm.dispose();
+    // The test runner also treats an unhandled rejection as a suite failure.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(vm._isDisposed).toBe(true);
+  });
+
   it('handles disposal reentered during host-value conversion', async () => {
     const vm = await QuickJS.create(wasmBytes);
     const source = sourcePromise();

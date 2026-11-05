@@ -1907,6 +1907,9 @@ export class QuickJS {
       cleanup();
       if (staged) release?.(staged.value);
       staged = undefined;
+      // Teardown owns cancellation even when an observer was abandoned.
+      // Awaiters still reject without creating another detached host failure.
+      void promise.catch(() => {});
       reject(error);
     };
     this.promiseWaiters.add(cancel);
