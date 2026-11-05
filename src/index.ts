@@ -550,13 +550,15 @@ const SNAPSHOT_HEADER_SIZE = 24;
 export interface Deferred {
   /** Handle to the QuickJS promise object */
   handle: JSValueHandle;
-  /** A host-side Promise that resolves when the QuickJS promise settles */
+  /** Resolves on guest settlement; rejects if the VM terminates first. */
   settled: Promise<void>;
   /** Resolve the QuickJS promise with a value */
   resolve(value: JSValueHandle): void;
   /** Reject the QuickJS promise with a value */
   reject(value: JSValueHandle): void;
 }
+
+type PromiseResult = { value: JSValueHandle } | { error: JSValueHandle };
 
 // ---- QuickJS VM ----
 
@@ -567,6 +569,8 @@ export class QuickJS {
   private encoder = new TextEncoder();
   private decoder = new TextDecoder();
   private disposed = false;
+  private asyncFailure: { error: unknown } | undefined;
+  private promiseWaiters = new Set<(error: unknown) => void>();
 
   /** Registry of host callbacks, keyed by function name */
   private hostCallbacks = new Map<string, HostFunction>();
@@ -1336,10 +1340,7 @@ export class QuickJS {
     let count = 0;
     while (this.exports.qjs_is_job_pending()) {
       const result = this.exports.qjs_execute_pending_job();
-      if (result < 0) {
-        const exc = this.getException();
-        throw new Error(`Job execution error: ${exc.toString()}`);
-      }
+      if (result < 0) this.throwPendingException();
       count++;
     }
     return count;
@@ -1773,6 +1774,10 @@ export class QuickJS {
 
     // Track resolve/reject handles so they can be freed on VM dispose
     // if the promise is never resolved/rejected
+    // Private resolvers outlive the caller's scope; only the public Promise
+    // handle remains scoped. Otherwise late settlement reads freed values.
+    vm._activeScope?.delete(resolveHandle);
+    vm._activeScope?.delete(rejectHandle);
     vm._ownedHandles.add(resolveHandle);
     vm._ownedHandles.add(rejectHandle);
 
@@ -1803,26 +1808,16 @@ export class QuickJS {
       handle: promiseHandle,
       get settled(): Promise<void> {
         if (!_settled) {
-          let settledResolve: () => void;
-          const settled = new Promise<void>((res) => {
-            settledResolve = res;
-          });
-
+          vm.assertNotDisposed();
           const settleName = `__settle:${vm.nextInternalId++}`;
-          using onSettleFn = vm.newInternalFunction(settleName, () => {
-            settledResolve!();
-            vm.hostCallbacks.delete(settleName);
-            return vm.undefined;
-          });
-
-          try {
+          const settled = vm.observePromise<void>((resolve) => {
+            using onSettleFn = vm.newInternalFunction(settleName, () => {
+              resolve();
+              return vm.undefined;
+            });
             vm.promiseThenRaw(promiseHandle, onSettleFn, onSettleFn).dispose();
-            // Cache only after setup succeeds; a failed access must be retryable.
-            _settled = settled;
-          } catch (error) {
-            vm.hostCallbacks.delete(settleName);
-            throw error;
-          }
+          }, () => vm.hostCallbacks.delete(settleName));
+          _settled = settled;
         }
         return _settled;
       },
@@ -1842,67 +1837,92 @@ export class QuickJS {
    * If the handle is not a promise, it is treated as an already-fulfilled value.
    *
    * The returned host Promise resolves to `{ value: JSValueHandle }` on
-   * fulfillment or `{ error: JSValueHandle }` on rejection.
+   * fulfillment or `{ error: JSValueHandle }` on guest rejection. It rejects
+   * if the VM is disposed or its automatic host-Promise bridge fails.
    */
-  resolvePromise(promiseHandle: JSValueHandle): Promise<{ value: JSValueHandle } | { error: JSValueHandle }> {
+  resolvePromise(promiseHandle: JSValueHandle): Promise<PromiseResult> {
     this.assertNotDisposed();
 
-    // If the handle is not a promise, treat it as a fulfilled value
-    if (!this.exports.qjs_is_promise(promiseHandle.ptr)) {
-      return Promise.resolve({ value: promiseHandle.dup() });
+    const isPromise = this.exports.qjs_is_promise(promiseHandle.ptr);
+    const state = isPromise ? this.exports.qjs_promise_state(promiseHandle.ptr) : 1;
+    if (state !== 0) {
+      return this.observePromise<PromiseResult>(resolve => {
+        const value = isPromise
+          ? new JSValueHandle(this, this.exports.qjs_promise_result(promiseHandle.ptr))
+          : promiseHandle.dup();
+        resolve(state === 2 ? { error: value } : { value });
+      }, undefined, result => ('value' in result ? result.value : result.error).dispose());
     }
 
-    // Check if already settled
-    const state = this.exports.qjs_promise_state(promiseHandle.ptr);
-    if (state === 1) {
-      // fulfilled
-      return Promise.resolve({ value: new JSValueHandle(this, this.exports.qjs_promise_result(promiseHandle.ptr)) });
-    } else if (state === 2) {
-      // rejected
-      return Promise.resolve({ error: new JSValueHandle(this, this.exports.qjs_promise_result(promiseHandle.ptr)) });
-    }
-
-    // Pending: attach a .then/.catch to get notified
-    return new Promise((hostResolve) => {
-      const id = this.nextInternalId++;
-      const fulfilledName = `__onFulfilled:${id}`;
-      const rejectedName = `__onRejected:${id}`;
-
-      let onFulfilled: JSValueHandle | undefined;
-      let onRejected: JSValueHandle | undefined;
-      let subscribed = false;
-      try {
-        onFulfilled = this.newInternalFunction(fulfilledName, (...args) => {
-          const val = args[0]?.dup() ?? this.undefined;
-          this.hostCallbacks.delete(fulfilledName);
-          this.hostCallbacks.delete(rejectedName);
-          hostResolve({ value: val });
-          return this.undefined;
-        });
-        onRejected = this.newInternalFunction(rejectedName, (...args) => {
-          const val = args[0]?.dup() ?? this.undefined;
-          this.hostCallbacks.delete(fulfilledName);
-          this.hostCallbacks.delete(rejectedName);
-          hostResolve({ error: val });
-          return this.undefined;
-        });
-
-        // Subscribe via the engine-level primitive: JS_PromiseThen does not
-        // consult Promise.prototype.then or Symbol.species, so guest code
-        // that patches either cannot intercept the subscription (or run at
-        // all during it).
-        this.promiseThenRaw(promiseHandle, onFulfilled, onRejected).dispose();
-        subscribed = true;
-      } finally {
-        if (!subscribed) {
-          // The first callback may exist when the second creation/subscription fails.
-          this.hostCallbacks.delete(fulfilledName);
-          this.hostCallbacks.delete(rejectedName);
+    // Pending: attach a .then/.catch to get notified.
+    const id = this.nextInternalId++;
+    const fulfilledName = `__onFulfilled:${id}`;
+    const rejectedName = `__onRejected:${id}`;
+    const cleanup = () => {
+      this.hostCallbacks.delete(fulfilledName);
+      this.hostCallbacks.delete(rejectedName);
+    };
+    try {
+      return this.observePromise<PromiseResult>((resolve) => {
+        let onFulfilled: JSValueHandle | undefined;
+        let onRejected: JSValueHandle | undefined;
+        try {
+          onFulfilled = this.newInternalFunction(fulfilledName, (...args) => {
+            resolve({ value: args[0]?.dup() ?? this.undefined });
+            return this.undefined;
+          });
+          onRejected = this.newInternalFunction(rejectedName, (...args) => {
+            resolve({ error: args[0]?.dup() ?? this.undefined });
+            return this.undefined;
+          });
+          // Native subscription cannot be intercepted by guest then/species.
+          this.promiseThenRaw(promiseHandle, onFulfilled, onRejected).dispose();
+        } finally {
+          onFulfilled?.dispose();
+          onRejected?.dispose();
         }
-        onFulfilled?.dispose();
-        onRejected?.dispose();
-      }
-    });
+      }, cleanup, result => ('value' in result ? result.value : result.error).dispose());
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  /** Stage host observations until the synchronous drain has finished. */
+  private observePromise<T>(subscribe: (resolve: (value: T) => void) => void,
+    cleanup: () => void = () => {}, release?: (value: T) => void): Promise<T> {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    let staged: { value: T } | undefined;
+    const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail; });
+    const cancel = (error: unknown) => {
+      this.promiseWaiters.delete(cancel);
+      cleanup();
+      if (staged) release?.(staged.value);
+      staged = undefined;
+      reject(error);
+    };
+    this.promiseWaiters.add(cancel);
+    try {
+      subscribe(value => {
+        staged = { value };
+        // A later job in this drain may fail after a guest callback succeeds.
+        // Keep ownership until this commit so terminal failure wins safely.
+        queueMicrotask(() => {
+          if (!this.promiseWaiters.delete(cancel)) return;
+          cleanup();
+          staged = undefined;
+          resolve(value);
+        });
+      });
+    } catch (error) {
+      this.promiseWaiters.delete(cancel);
+      cleanup();
+      if (staged) release?.(staged.value);
+      // No Promise escapes a failed subscription; preserve the getter's
+      // synchronous throw without leaving a detached rejected Promise.
+      throw error;
+    }
+    return promise;
   }
 
   /**
@@ -2286,6 +2306,8 @@ export class QuickJS {
 
   /**
    * Convert a host JavaScript value to a QuickJS handle.
+   * A failure escaping asynchronous Promise settlement terminates this VM
+   * and rejects its host observers. Create a fresh VM after that failure.
    */
   hostToHandle(value: unknown): JSValueHandle {
     this.assertNotDisposed();
@@ -2309,19 +2331,30 @@ export class QuickJS {
     if (value instanceof Promise) {
       const deferred = this.newPromise();
       const settle = (result: unknown, reject: boolean): void => {
-        let handle: JSValueHandle;
+        if (this.disposed) return;
         try {
-          handle = this.hostToHandle(result);
-        } catch (err) {
-          using error = this.exceptionToHandle(err);
-          deferred.reject(error);
+          let handle: JSValueHandle;
+          try {
+            handle = this.hostToHandle(result);
+          } catch (err) {
+            if (this.disposed) return;
+            using error = this.exceptionToHandle(err);
+            deferred.reject(error);
+            this.executePendingJobs();
+            return;
+          }
+          using converted = handle;
+          if (reject) deferred.reject(converted);
+          else deferred.resolve(converted);
           this.executePendingJobs();
-          return;
+        } catch (error) {
+          if (!this.disposed) {
+            // The resolver is one-shot and the drain is VM-wide. Retrying
+            // rejection cannot repair this failure; end its host observers.
+            this.asyncFailure = { error };
+            this.dispose();
+          }
         }
-        using converted = handle;
-        if (reject) deferred.reject(converted);
-        else deferred.resolve(converted);
-        this.executePendingJobs();
       };
       value.then(
         (r: unknown) => settle(r, false),
@@ -2427,6 +2460,11 @@ export class QuickJS {
   dispose(): void {
     if (!this.disposed) {
       this.disposed = true;
+      if (this.promiseWaiters.size) {
+        const error = this.asyncFailure ? this.asyncFailure.error : new Error('QuickJS instance has been disposed');
+        for (const cancel of this.promiseWaiters) cancel(error);
+        this.promiseWaiters.clear();
+      }
 
       // Release references so the WASM instance and its linear memory
       // can be garbage collected even if someone holds onto this QuickJS object.
@@ -2460,6 +2498,7 @@ export class QuickJS {
 
   private assertNotDisposed(): void {
     if (this.disposed) {
+      if (this.asyncFailure) throw this.asyncFailure.error;
       throw new Error('QuickJS instance has been disposed');
     }
   }

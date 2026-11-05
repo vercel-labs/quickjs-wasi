@@ -694,7 +694,7 @@ lifetime is managed elsewhere.
 | Property / Method | Description |
 |--------------------|-------------|
 | `deferred.handle` | The QuickJS promise object |
-| `deferred.settled` | Host `Promise<void>` that resolves on settlement |
+| `deferred.settled` | Host `Promise<void>` that resolves on settlement, or rejects if the VM terminates first |
 | `deferred.resolve(handle)` | Resolve the promise with a QuickJS value |
 | `deferred.reject(handle)` | Reject the promise with a QuickJS value |
 
@@ -718,6 +718,19 @@ lifetime is managed elsewhere.
 | Other typed arrays | typed array | Corresponding typed array (copy) | `ArrayBuffer` (via view) |
 | `Promise` | Promise | — | QuickJS Promise (bridged via `Deferred`) |
 | Plain object | Object | `Record<string, unknown>` (recursive, own enumerable keys) | Object (recursive) |
+
+Host Promises settle their guest Promise and drain jobs automatically. Ordinary guest
+rejection still resolves `vm.resolvePromise()` to `{ error }`. If conversion cannot
+be translated to guest rejection, or settlement/draining throws, the bridge
+terminates the VM and rejects its pending host observers with the original failure.
+Successful observations commit after the synchronous drain, so a later job failure
+cannot publish an unusable success handle. Create a fresh VM after this failure.
+
+Manual disposal also rejects pending `resolvePromise()` and `deferred.settled`
+observers. Later host completions are ignored without reading their payloads.
+A terminal `JSException` retains its cached `name`, `message` and `stack`; disposal
+ends the lifetime of its guest `handle`. This does not change recovery after a
+synchronous public-API failure or successfully translated conversion failures.
 
 **Notes:**
 
