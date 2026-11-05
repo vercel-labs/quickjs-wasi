@@ -570,6 +570,7 @@ export class QuickJS {
   private decoder = new TextDecoder();
   private disposed = false;
   private asyncFailure: { error: unknown } | undefined;
+  private hostSettlementDepth = 0;
   private promiseWaiters = new Set<(error: unknown) => void>();
 
   /** Registry of host callbacks, keyed by function name */
@@ -1846,12 +1847,15 @@ export class QuickJS {
     const isPromise = this.exports.qjs_is_promise(promiseHandle.ptr);
     const state = isPromise ? this.exports.qjs_promise_state(promiseHandle.ptr) : 1;
     if (state !== 0) {
-      return this.observePromise<PromiseResult>(resolve => {
-        const value = isPromise
-          ? new JSValueHandle(this, this.exports.qjs_promise_result(promiseHandle.ptr))
-          : promiseHandle.dup();
-        resolve(state === 2 ? { error: value } : { value });
-      }, undefined, result => ('value' in result ? result.value : result.error).dispose());
+      const value = isPromise
+        ? new JSValueHandle(this, this.exports.qjs_promise_result(promiseHandle.ptr))
+        : promiseHandle.dup();
+      this._activeScope?.delete(value);
+      const result: PromiseResult = state === 2 ? { error: value } : { value };
+      return this.hostSettlementDepth
+        ? this.observePromise<PromiseResult>(resolve => resolve(result), undefined,
+            result => ('value' in result ? result.value : result.error).dispose())
+        : Promise.resolve(result);
     }
 
     // Pending: attach a .then/.catch to get notified.
@@ -1868,11 +1872,15 @@ export class QuickJS {
         let onRejected: JSValueHandle | undefined;
         try {
           onFulfilled = this.newInternalFunction(fulfilledName, (...args) => {
-            resolve({ value: args[0]?.dup() ?? this.undefined });
+            const value = args[0]?.dup() ?? this.undefined;
+            this._activeScope?.delete(value);
+            resolve({ value });
             return this.undefined;
           });
           onRejected = this.newInternalFunction(rejectedName, (...args) => {
-            resolve({ error: args[0]?.dup() ?? this.undefined });
+            const error = args[0]?.dup() ?? this.undefined;
+            this._activeScope?.delete(error);
+            resolve({ error });
             return this.undefined;
           });
           // Native subscription cannot be intercepted by guest then/species.
@@ -1907,17 +1915,20 @@ export class QuickJS {
         staged = { value };
         // A later job in this drain may fail after a guest callback succeeds.
         // Keep ownership until this commit so terminal failure wins safely.
-        queueMicrotask(() => {
+        const commit = () => {
           if (!this.promiseWaiters.delete(cancel)) return;
           cleanup();
           staged = undefined;
           resolve(value);
-        });
+        };
+        if (this.hostSettlementDepth) queueMicrotask(commit);
+        else commit();
       });
     } catch (error) {
       this.promiseWaiters.delete(cancel);
       cleanup();
-      if (staged) release?.(staged.value);
+      const pending = staged as { value: T } | undefined;
+      if (pending) release?.(pending.value);
       // No Promise escapes a failed subscription; preserve the getter's
       // synchronous throw without leaving a detached rejected Promise.
       throw error;
@@ -2332,6 +2343,7 @@ export class QuickJS {
       const deferred = this.newPromise();
       const settle = (result: unknown, reject: boolean): void => {
         if (this.disposed) return;
+        this.hostSettlementDepth++;
         try {
           let handle: JSValueHandle;
           try {
@@ -2354,6 +2366,8 @@ export class QuickJS {
             this.asyncFailure = { error };
             this.dispose();
           }
+        } finally {
+          this.hostSettlementDepth--;
         }
       };
       value.then(

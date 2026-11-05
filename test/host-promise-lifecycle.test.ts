@@ -211,6 +211,23 @@ describe('host Promise lifecycle', () => {
     expect(owned.size).toBe(0);
   });
 
+  it.each(['settled', 'pending'] as const)('transfers %s host-result ownership out of a synchronous scope', async kind => {
+    using vm = await QuickJS.create(wasmBytes);
+    const deferred = vm.newPromise();
+    using guest = deferred.handle;
+    if (kind === 'settled') deferred.resolve(vm.true);
+    const observed = vm.withScope(() => {
+      const result = vm.resolvePromise(guest);
+      if (kind === 'pending') { deferred.resolve(vm.true); vm.executePendingJobs(); }
+      return result;
+    });
+    const result = await observed;
+    const value = 'value' in result ? result.value : result.error;
+    expect(value.disposed).toBe(false);
+    expect(vm.dump(value)).toBe(true);
+    value.dispose();
+  });
+
   it('preserves a job failure through the canonical exception owner and permits synchronous recovery', async () => {
     using vm = await QuickJS.create(wasmBytes);
     using reason = vm.newError('job failed');
