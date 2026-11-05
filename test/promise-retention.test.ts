@@ -1,8 +1,94 @@
-import { describe, expect, it } from 'vitest';
-import { QuickJS } from '../src/index.ts';
+import { describe, expect, it, vi } from 'vitest';
+import { JSException, JSValueHandle, QuickJS } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 
 describe('settled deferred ownership', () => {
+  it.each([
+    ['resolve', 'native exception'], ['reject', 'native exception'],
+    ['resolve', 'host throw'], ['reject', 'host throw'],
+    ['resolve', 'error shaping'], ['reject', 'error shaping'],
+  ] as const)('releases the one-shot pair after %s %s', async (settle, stage) => {
+    using vm = await QuickJS.create(wasmBytes);
+    using reason = vm.newError('resolver failed');
+    using value = vm.newString('retained input');
+    vm.global.setProp('reason', reason);
+    using thrower = vm.evalCode('() => { throw reason; }');
+    const original = vm._getExports();
+    const owner = vm as unknown as { exports: typeof original; _ownedHandles: Set<JSValueHandle> };
+    const before = owner._ownedHandles.size;
+
+    const deferred = vm.newPromise();
+    using source = deferred.handle;
+    const resolvers = [...owner._ownedHandles];
+    expect(resolvers).toHaveLength(before + 2);
+    const releases = resolvers.map(resolver => vi.spyOn(resolver, 'dispose'));
+    const failure = new Error('native invocation failed');
+    // Substitute only the fallible call boundary. Native exception creation,
+    // exception ownership, and resolver disposal still use the real WASM.
+    const call = vi.fn((...args: Parameters<typeof original.qjs_call>) => {
+      if (stage === 'host throw') throw failure;
+      return original.qjs_call(thrower.ptr, args[1], args[2], args[3]);
+    });
+    const format = stage === 'error shaping'
+      ? vi.spyOn(JSValueHandle.prototype, 'getProp').mockImplementationOnce(() => { throw failure; })
+      : undefined;
+    owner.exports = { ...original, qjs_call: call };
+    let caught: unknown;
+    try {
+      try { deferred[settle](value); } catch (error) { caught = error; }
+      if (stage === 'native exception') {
+        expect(caught).toBeInstanceOf(JSException);
+        expect((caught as JSException).handle.identity).toBe(reason.identity);
+        expect((caught as JSException).message).toBe('resolver failed');
+      } else {
+        expect(caught).toBe(failure);
+      }
+      deferred.resolve(vm.undefined);
+      deferred.reject(vm.undefined);
+      expect(call).toHaveBeenCalledTimes(1);
+      for (const release of releases) expect(release).toHaveBeenCalledTimes(1);
+      expect(source.promiseState).toBe(0);
+    } finally {
+      owner.exports = original;
+      format?.mockRestore();
+      if (caught instanceof JSException) caught.dispose();
+      for (const release of releases) release.mockRestore();
+    }
+    if (stage === 'error shaping') {
+      // Error shaping failed after the native reason escaped into VM ownership.
+      // Resolver cleanup must preserve that reason until its owner releases it.
+      expect(owner._ownedHandles.size).toBe(before + 1);
+      const escaped = [...owner._ownedHandles].find(value => value.identity === reason.identity);
+      expect(escaped).toBeDefined();
+      escaped!.dispose();
+    }
+    expect(owner._ownedHandles.size).toBe(before);
+    expect(value.toString()).toBe('retained input');
+    using pending = vm.getException();
+    expect(original.qjs_typeof(pending.ptr)).toBe(4);
+
+    const fresh = vm.newPromise();
+    using handle = fresh.handle;
+    fresh.resolve(vm.true);
+    expect(handle.promiseState).toBe(1);
+  });
+
+  it.each(['resolve', 'reject'] as const)('preserves earlier pending exceptions on successful %s', async settle => {
+    using vm = await QuickJS.create(wasmBytes);
+    const e = vm._getExports();
+    for (const previous of [vm.newError('previous'), vm.null, vm.undefined]) {
+      using reason = previous;
+      const deferred = vm.newPromise();
+      using handle = deferred.handle;
+      using sentinel = new JSValueHandle(vm, e.qjs_throw(reason.ptr));
+      deferred[settle](vm.true);
+      using pending = vm.getException();
+      expect(e.qjs_typeof(pending.ptr)).toBe(e.qjs_typeof(reason.ptr));
+      expect(pending.identity).toBe(reason.identity);
+      expect(handle.promiseState).toBe(settle === 'resolve' ? 1 : 2);
+    }
+  });
+
   it.each(['resolve', 'reject'] as const)('releases both resolvers after %s', async (settle) => {
     using vm = await QuickJS.create({ wasm: wasmBytes, memoryLimit: 4 * 1024 * 1024 });
     vm.evalCode('globalThis.total = 0').dispose();
