@@ -383,6 +383,7 @@ interface QuickJSExports {
   qjs_free_cstring(strPtr: number): void;
   qjs_typeof(valPtr: number): number;
   qjs_is_exception(valPtr: number): number;
+  qjs_is_uncatchable_error(valPtr: number): number;
   qjs_is_undefined(valPtr: number): number;
   qjs_is_null(valPtr: number): number;
   qjs_is_bool(valPtr: number): number;
@@ -1199,6 +1200,11 @@ export class QuickJS {
       if (!(conversionError instanceof JSException) || conversionError.handle.vm !== this) throw conversionError;
       return conversionError.handle;
     }
+  }
+
+  private isInterrupt(err: unknown): err is JSException {
+    return err instanceof JSException && err.handle.vm === this && !err.handle.disposed &&
+      this.exports.qjs_is_uncatchable_error(err.handle.ptr) !== 0;
   }
 
   private throwHostException(err: unknown): number {
@@ -2363,12 +2369,17 @@ export class QuickJS {
           else deferred.resolve(converted);
           this.executePendingJobs();
         } catch (error) {
-          if (!this.disposed) {
-            // The resolver is one-shot and the drain is VM-wide. Retrying
-            // rejection cannot repair this failure; end its host observers.
-            this.asyncFailure = { error };
-            this.dispose();
+          if (this.disposed) return;
+          if (this.isInterrupt(error)) {
+            // The host's interruptHandler requested this stop. As after a
+            // synchronous interrupt, the VM stays usable and later jobs stay queued.
+            error.dispose();
+            return;
           }
+          // The resolver is one-shot and the drain is VM-wide. Retrying
+          // rejection cannot repair this failure; end its host observers.
+          this.asyncFailure = { error };
+          this.dispose();
         } finally {
           this.hostSettlementDepth--;
         }

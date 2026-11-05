@@ -726,6 +726,10 @@ terminates the VM and rejects its pending host observers with the original failu
 Successful observations commit after the synchronous drain, so a later job failure
 cannot publish an unusable success handle. Create a fresh VM after this failure.
 
+An `interruptHandler` interrupt during automatic draining is not a terminal failure.
+It stops that drain like a synchronous interrupt: the VM stays usable, observations
+already delivered still commit, and remaining jobs stay queued for the next drain.
+
 Manual disposal also rejects pending `resolvePromise()` and `deferred.settled`
 observers. Later host completions are ignored without reading their payloads.
 A terminal `JSException` retains its cached `name`, `message` and `stack`; disposal

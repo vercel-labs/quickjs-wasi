@@ -936,6 +936,12 @@ int qjs_is_exception(JSValue *val) {
     return JS_IsException(*val);
 }
 
+/* Only interrupt-handler errors are uncatchable in QuickJS-NG. */
+__attribute__((export_name("qjs_is_uncatchable_error")))
+int qjs_is_uncatchable_error(JSValue *val) {
+    return JS_IsUncatchableError(*val);
+}
+
 __attribute__((export_name("qjs_is_undefined")))
 int qjs_is_undefined(JSValue *val) {
     return JS_IsUndefined(*val);

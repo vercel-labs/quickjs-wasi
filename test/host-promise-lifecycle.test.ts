@@ -143,6 +143,30 @@ describe('host Promise lifecycle', () => {
     (late as JSException).dispose();
   });
 
+  it('keeps the VM usable when interruptHandler stops an automatic drain', async () => {
+    let interrupt = false;
+    using vm = await QuickJS.create({ wasm: wasmBytes, interruptHandler: () => interrupt });
+    const source = sourcePromise();
+    using guest = vm.hostToHandle(source.promise);
+    vm.global.setProp('bridged', guest);
+    const direct = vm.resolvePromise(guest);
+    using stop = vm.newFunction('stop', () => { interrupt = true; return vm.undefined; });
+    vm.global.setProp('stop', stop);
+    vm.evalCode('globalThis.later = 0; bridged.then(() => { stop(); for (;;) {} }); bridged.then(() => { later = 1; })').dispose();
+    source.resolve(42);
+    await finish(source);
+    // Delivered before the interrupt; the VM was not terminated underneath it.
+    const outcome = await direct;
+    expect('value' in outcome && vm.dump(outcome.value)).toBe(42);
+    release(outcome);
+    expect(vm.evalCode('later').consume(value => value.toNumber())).toBe(0);
+    interrupt = false;
+    expect(vm.executePendingJobs()).toBe(1);
+    expect(vm.evalCode('later').consume(value => value.toNumber())).toBe(1);
+    const owned = (vm as unknown as { _ownedHandles: Set<JSValueHandle> })._ownedHandles;
+    expect(owned.size).toBe(0);
+  });
+
   it('terminates if guest conversion of a conversion failure also fails', async () => {
     using vm = await QuickJS.create(wasmBytes);
     const source = sourcePromise();
