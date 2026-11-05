@@ -186,7 +186,7 @@ describe('host Promise lifecycle', () => {
     vm.dispose();
     // The test runner also treats an unhandled rejection as a suite failure.
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(vm._isDisposed).toBe(true);
+    expect(vm._getExports()).toBeNull();
   });
 
   it('handles disposal reentered during host-value conversion', async () => {
