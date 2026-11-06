@@ -321,7 +321,7 @@ vm.evalCode('Date.now()').consume(h => h.toNumber()); // 1700000001000
 
 ### Memory limits
 
-Restrict how much memory the QuickJS runtime can allocate. When exceeded, allocations fail and surface as JS exceptions:
+Restrict how much memory the QuickJS runtime can allocate. When exceeded, allocation fails with an `InternalError: out of memory` exception. Guest `try`/`catch` cannot intercept it, so it propagates to the host as a `JSException` and the VM stays usable afterwards:
 
 ```typescript
 using vm = await QuickJS.create({
@@ -329,13 +329,17 @@ using vm = await QuickJS.create({
   memoryLimit: 4 * 1024 * 1024, // 4 MB
 });
 
-vm.evalCode(`
-  try {
-    const huge = new Array(10000000).fill("x".repeat(1000));
-  } catch (e) {
-    console.log(e.message); // allocation failure
-  }
-`);
+try {
+  vm.evalCode(`
+    try {
+      const huge = new Array(10000000).fill("x".repeat(1000));
+    } catch (e) {
+      // not reached: out-of-memory errors are uncatchable in the guest
+    }
+  `);
+} catch (err) {
+  console.log((err as JSException).message); // "out of memory"
+}
 ```
 
 The limit is re-applied after `QuickJS.restore()`, so you can use a different limit for restored VMs than the original.

@@ -53,9 +53,9 @@ extern int host_interrupt(void);
 /*
  * Interrupt handler trampoline: dispatches to the host_interrupt import.
  */
-static int interrupt_handler_trampoline(JSRuntime *rt, void *opaque)
+static int interrupt_handler_trampoline(JSContext *ctx, void *opaque)
 {
-    (void)rt;
+    (void)ctx;
     (void)opaque;
     return host_interrupt();
 }
@@ -317,7 +317,7 @@ const char *qjs_get_quickjs_version(void) {
  * refused at a SOFT limit that sits QJS_OOM_HEADROOM below the
  * configured memoryLimit. Once a refusal happens, allocations may dip
  * into the reserved headroom (up to the full memoryLimit) so that the
- * InternalError object, and the guest/host code that inspects it, can
+ * InternalError object, and the host code that inspects it, can
  * allocate. The reserve re-arms as soon as usage drops back below the
  * soft limit, and the configured memoryLimit remains a hard ceiling at
  * all times.

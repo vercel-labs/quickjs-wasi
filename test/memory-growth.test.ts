@@ -163,20 +163,13 @@ describe('WASM memory growth', () => {
 
     // Try to allocate way more than 512 KB; QuickJS should throw OOM.
     // Use the same pattern as limits.test.ts which is known to trigger OOM.
-    const result = vm.evalCode(`
-      try {
-        var arr = [];
-        for (var i = 0; i < 100000; i++) {
-          arr.push("x".repeat(1000));
-        }
-        "should not reach here";
-      } catch (e) {
-        e.message || e.toString();
+    // OOM errors are uncatchable in the guest, so the host sees the throw.
+    expect(() => vm.evalCode(`
+      var arr = [];
+      for (var i = 0; i < 100000; i++) {
+        arr.push("x".repeat(1000));
       }
-    `);
-    const msg = result.consume(h => h.toString());
-    // QuickJS's allocator limit should have triggered an OOM error
-    expect(msg).not.toBe('should not reach here');
+    `)).toThrow('out of memory');
 
     // The VM should still be functional after the OOM
     expect(vm.evalCode('1 + 1').consume(h => h.toNumber())).toBe(2);
@@ -203,16 +196,14 @@ describe('WASM memory growth', () => {
       wasm: wasmBytes,
       memoryLimit: 512 * 1024, // 512 KB
     });
-    vmLimited.evalCode(`
+    // OOM is uncatchable in the guest, so it stops allocation and reaches
+    // the host.
+    expect(() => vmLimited.evalCode(`
       globalThis.arr = [];
-      try {
-        for (var i = 0; i < 100000; i++) {
-          arr.push("x".repeat(1000));
-        }
-      } catch (e) {
-        // OOM: stop allocating
+      for (var i = 0; i < 100000; i++) {
+        arr.push("x".repeat(1000));
       }
-    `).dispose();
+    `)).toThrow('out of memory');
     const limitedPages = getPageCount(vmLimited);
 
     // The limited VM should have allocated fewer items than unlimited
