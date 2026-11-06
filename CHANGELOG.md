@@ -1,5 +1,11 @@
 # quickjs-wasi
 
+## 3.7.0
+
+### Minor Changes
+
+- [#65](https://github.com/vercel-labs/quickjs-wasi/pull/65) [`13c0813`](https://github.com/vercel-labs/quickjs-wasi/commit/13c0813c31750ddd6983f49e4f0d23c733800c7a) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Update QuickJS-NG from v0.17.0 to v0.18.0. Out-of-memory errors (`InternalError: out of memory`) can no longer be caught by guest code: guest `catch`/`finally` blocks are skipped and the error propagates to the host as a `JSException`, leaving the VM usable. The release also includes fixes for `String.prototype.repeat`, `Reflect.set`, computed property assignment order, template literal conversion, `Date.parse` with Unicode spaces, and several memory leaks.
+
 ## 3.6.4
 
 ### Patch Changes
