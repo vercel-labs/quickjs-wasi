@@ -178,8 +178,9 @@ describe('guest allocation failures during host construction', () => {
         catch (e) { globalThis.caught = true; return 'caught' }
       })()`);
       // OOM errors are uncatchable in the guest: the job fails host-side
-      // instead of resuming the async function's catch block.
-      expect(() => vm.executePendingJobs()).toThrow('InternalError: out of memory');
+      // with a JSException instead of resuming the async function's catch
+      // block. expectOOM() checks the exception and disposes its handle.
+      expectOOM(() => vm.executePendingJobs());
       expect(vm.evalCode('typeof caught').consume(h => h.toString())).toBe('undefined');
       expect(vm.evalCode('6 * 7').consume(h => h.toNumber())).toBe(42);
     }
