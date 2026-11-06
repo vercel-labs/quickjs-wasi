@@ -68,15 +68,16 @@ describe('guest allocation failures during host construction', () => {
   });
 
   it.each(['construction', 'host error'] as const)(
-    'makes callback %s OOM catchable in the guest', async (kind) => {
+    'propagates callback %s OOM past guest catch blocks', async (kind) => {
       using vm = await QuickJS.create({ wasm: wasmBytes, memoryLimit });
       using fn = vm.newFunction('fail', () => {
         if (kind === 'host error') throw new Error(oversized);
         return vm.hostToHandle({ nested: [oversized] });
       });
       vm.global.setProp('fail', fn);
-      expect(vm.evalCode('try { fail(); "completed" } catch (e) { e.name + ": " + e.message }')
-        .consume(h => h.toString())).toBe('InternalError: out of memory');
+      // OOM errors are uncatchable in the guest, so the catch block is skipped.
+      expectOOM(() => vm.evalCode('try { fail(); "completed" } catch (e) { globalThis.caught = true }'));
+      expect(vm.evalCode('typeof caught').consume(h => h.toString())).toBe('undefined');
       expectOOM(() => vm.evalCode('fail()'));
       expect(vm.evalCode('6 * 7').consume(h => h.toNumber())).toBe(42);
     }
@@ -163,7 +164,7 @@ describe('guest allocation failures during host construction', () => {
     expect(vm.evalCode('6 * 7').consume(h => h.toNumber())).toBe(42);
   });
   it.each(['normalize', 'load'] as const)(
-    'keeps a module %s error conversion OOM catchable in the guest', async (phase) => {
+    'propagates a module %s error conversion OOM past guest catch blocks', async (phase) => {
       using vm = await QuickJS.create({
         wasm: wasmBytes,
         memoryLimit,
@@ -174,13 +175,14 @@ describe('guest allocation failures during host construction', () => {
       });
       using pending = vm.evalCode(`(async () => {
         try { await import('failure.js'); return 'completed' }
-        catch (e) { return e.name + ': ' + e.message }
+        catch (e) { globalThis.caught = true; return 'caught' }
       })()`);
-      vm.executePendingJobs();
-      const settled = await vm.resolvePromise(pending);
-      using result = 'value' in settled ? settled.value : settled.error;
-      expect('value' in settled).toBe(true);
-      expect(result.toString()).toBe('InternalError: out of memory');
+      // OOM errors are uncatchable in the guest: the job fails host-side
+      // with a JSException instead of resuming the async function's catch
+      // block. expectOOM() checks the exception and disposes its handle.
+      expectOOM(() => vm.executePendingJobs());
+      expect(vm.evalCode('typeof caught').consume(h => h.toString())).toBe('undefined');
+      expect(vm.evalCode('6 * 7').consume(h => h.toNumber())).toBe(42);
     }
   );
 });

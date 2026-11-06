@@ -232,8 +232,9 @@ export interface QuickJSOptions {
   wasi?: WasiOptions;
   /**
    * Maximum memory the QuickJS runtime can allocate, in bytes.
-   * When exceeded, allocations fail and surface as JS exceptions
-   * (e.g. `InternalError: out of memory`).
+   * When exceeded, allocations fail with `InternalError: out of memory`.
+   * Guest code cannot catch this error: it propagates to the host as a
+   * {@link JSException}.
    */
   memoryLimit?: number;
   /**

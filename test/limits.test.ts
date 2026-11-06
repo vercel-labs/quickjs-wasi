@@ -2,6 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { QuickJS, JSException, MAX_STACK_SIZE } from '../src/index.ts';
 import { wasmBytes } from './helpers.ts';
 
+// Since quickjs-ng v0.18.0, out-of-memory errors are uncatchable by guest
+// code: `catch`/`finally` blocks are skipped and the error propagates to the
+// host as a JSException.
+function expectUncaughtOOM(fn: () => unknown): void {
+  try {
+    fn();
+    expect.unreachable('should have thrown');
+  } catch (err) {
+    try {
+      expect(err).toBeInstanceOf(JSException);
+      expect((err as JSException).name).toBe('InternalError');
+      expect((err as JSException).message).toBe('out of memory');
+    } finally {
+      if (err instanceof JSException) err.dispose();
+    }
+  }
+}
+
 describe('memoryLimit', () => {
   it('should throw when memory limit is exceeded', async () => {
     using vm = await QuickJS.create({
@@ -9,8 +27,9 @@ describe('memoryLimit', () => {
       memoryLimit: 512 * 1024, // 512 KB
     });
 
-    // Progressively allocate until we hit the limit
-    const result = vm.evalCode(`
+    // Progressively allocate until we hit the limit. The guest catch block
+    // must not swallow the OOM.
+    expectUncaughtOOM(() => vm.evalCode(`
       try {
         var arr = [];
         for (var i = 0; i < 100000; i++) {
@@ -18,11 +37,11 @@ describe('memoryLimit', () => {
         }
         "ok";
       } catch (e) {
-        e.message;
+        globalThis.caught = true;
       }
-    `);
-    const msg = result.consume(h => h.toString());
-    expect(msg).not.toBe('ok');
+    `));
+    expect(vm.evalCode('typeof caught').consume(h => h.toString())).toBe('undefined');
+    expect(vm.evalCode('1 + 2').consume(h => h.toNumber())).toBe(3);
   });
 
   it('bounds RETAINED ArrayBuffer/TypedArray memory (issue #30)', async () => {
@@ -40,24 +59,17 @@ describe('memoryLimit', () => {
     // with no exception. With wasi-libc's malloc_usable_size wired into
     // the runtime's malloc functions, retention is accounted and the
     // loop must throw close to the limit.
-    const result = vm.evalCode(`
+    expectUncaughtOOM(() => vm.evalCode(`
       globalThis.keep = [];
-      try {
-        for (var i = 0; i < 300; i++) {
-          var b = new Uint8Array(512 * 1024);
-          b[0] = 1;
-          keep.push(b);
-        }
-        "no-throw";
-      } catch (e) {
-        "threw at " + keep.length;
+      for (var i = 0; i < 300; i++) {
+        var b = new Uint8Array(512 * 1024);
+        b[0] = 1;
+        keep.push(b);
       }
-    `);
-    const msg = result.consume((h) => h.toString());
-    expect(msg).not.toBe('no-throw');
+    `));
     // 8 MiB limit / 512 KiB buffers ⇒ must stop well before 32 pushes
     // (heap baseline eats some budget; the pre-fix behavior was 300).
-    const count = Number(msg.replace('threw at ', ''));
+    const count = vm.evalCode('keep.length').consume((h) => h.toNumber());
     expect(count).toBeGreaterThan(0);
     expect(count).toBeLessThan(32);
 
@@ -80,19 +92,19 @@ describe('memoryLimit', () => {
     // throwing a bare JS_NULL. In-guest catch saw `null` and the host
     // JSException had name/message "<null>", indistinguishable from a
     // guest `throw null`. The malloc layer now reserves headroom below
-    // memoryLimit so the error object can always be constructed.
-    const result = vm.evalCode(`
+    // memoryLimit so the error object can always be constructed. The
+    // guest catch block is skipped because OOM errors are uncatchable.
+    expectUncaughtOOM(() => vm.evalCode(`
       (() => {
         try {
           const c = [];
           for (;;) c.push({ i: c.length, s: 'x' + c.length });
         } catch (e) {
-          return e === null ? 'NULL' : e.name + ': ' + e.message;
+          globalThis.caught = e === null ? 'NULL' : e.name + ': ' + e.message;
         }
       })()
-    `);
-    const msg = result.consume((h) => h.toString());
-    expect(msg).toBe('InternalError: out of memory');
+    `));
+    expect(vm.evalCode('typeof caught').consume((h) => h.toString())).toBe('undefined');
 
     // Uncaught OOM surfaces host-side with a real name/message too.
     using vm2 = await QuickJS.create({
@@ -144,19 +156,13 @@ describe('memoryLimit', () => {
     expect(vm2.evalCode('x').consume(h => h.toNumber())).toBe(1);
 
     // Should hit the tighter limit
-    const result = vm2.evalCode(`
-      try {
-        var arr = [];
-        for (var i = 0; i < 100000; i++) {
-          arr.push("x".repeat(1000));
-        }
-        "ok";
-      } catch (e) {
-        e.message;
+    expectUncaughtOOM(() => vm2.evalCode(`
+      var arr = [];
+      for (var i = 0; i < 100000; i++) {
+        arr.push("x".repeat(1000));
       }
-    `);
-    const msg = result.consume(h => h.toString());
-    expect(msg).not.toBe('ok');
+    `));
+    expect(vm2.evalCode('arr.length').consume(h => h.toNumber())).toBeLessThan(100000);
   });
 });
 
