@@ -567,9 +567,19 @@ size_t qjs_get_gc_threshold(void) {
 }
 
 /*
+ * Bytes currently allocated by the runtime, as tracked by our malloc
+ * functions (the counter memoryLimit is enforced against). O(1), unlike
+ * qjs_compute_memory_usage, which walks the whole heap.
+ */
+__attribute__((export_name("qjs_get_allocated_size")))
+size_t qjs_get_allocated_size(void) {
+    return qjs_mem_used;
+}
+
+/*
  * Compute memory usage statistics and write them into a caller-provided
  * buffer as an array of int64_t values. The buffer must hold at least
- * QJS_MEMORY_USAGE_FIELD_COUNT int64_t values (currently 24 fields).
+ * QJS_MEMORY_USAGE_FIELD_COUNT int64_t values (currently 27 fields).
  *
  * Fields (in order):
  *   0: malloc_size       1: malloc_limit      2: memory_used_size
@@ -582,6 +592,7 @@ size_t qjs_get_gc_threshold(void) {
  *  20: c_func_count     21: array_count       22: fast_array_count
  *  23: fast_array_elements
  *  24: binary_object_count  25: binary_object_size
+ *  26: allocated_size (qjs_mem_used; see qjs_get_allocated_size)
  */
 __attribute__((export_name("qjs_compute_memory_usage")))
 void qjs_compute_memory_usage(int64_t *out) {
@@ -616,6 +627,7 @@ void qjs_compute_memory_usage(int64_t *out) {
     out[23] = s.fast_array_elements;
     out[24] = s.binary_object_count;
     out[25] = s.binary_object_size;
+    out[26] = (int64_t)qjs_mem_used;
 }
 
 __attribute__((export_name("qjs_destroy")))

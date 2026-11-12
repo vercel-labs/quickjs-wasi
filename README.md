@@ -344,6 +344,8 @@ try {
 
 The limit is re-applied after `QuickJS.restore()`, so you can use a different limit for restored VMs than the original.
 
+To read how much memory the runtime has allocated, use `vm.getAllocatedSize()`: it returns the bytes counted against `memoryLimit` in constant time, so it's cheap enough to sample on every host call. `vm.getMemoryUsage()` returns a full breakdown (objects, strings, shapes, functions) but walks the whole heap, so its cost grows with heap size.
+
 ### Interrupt handler
 
 Prevent infinite loops and enforce execution timeouts:

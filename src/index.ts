@@ -214,6 +214,11 @@ export interface MemoryUsage {
   binaryObjectCount: number;
   /** Binary object memory size */
   binaryObjectSize: number;
+  /**
+   * Bytes currently allocated from WASM linear memory. This is the value
+   * `memoryLimit` is enforced against. Same value as `vm.getAllocatedSize()`.
+   */
+  allocatedSize: number;
 }
 
 export interface QuickJSOptions {
@@ -485,6 +490,7 @@ interface QuickJSExports {
   qjs_run_gc(): void;
   qjs_set_gc_threshold(threshold: number): void;
   qjs_get_gc_threshold(): number;
+  qjs_get_allocated_size(): number;
   qjs_compute_memory_usage(outPtr: number): void;
 
   // Snapshot support
@@ -1385,10 +1391,10 @@ export class QuickJS {
    */
   getMemoryUsage(): MemoryUsage {
     this.assertNotDisposed();
-    // Allocate a buffer for 26 int64 fields (26 * 8 = 208 bytes)
-    const bufPtr = this.exports.wasm_malloc(26 * 8);
+    // Allocate a buffer for 27 int64 fields (27 * 8 = 216 bytes)
+    const bufPtr = this.exports.wasm_malloc(27 * 8);
     this.exports.qjs_compute_memory_usage(bufPtr);
-    const view = new BigInt64Array(this.exports.memory.buffer, bufPtr, 26);
+    const view = new BigInt64Array(this.exports.memory.buffer, bufPtr, 27);
     const result: MemoryUsage = {
       mallocSize: Number(view[0]),
       mallocLimit: Number(view[1]),
@@ -1416,9 +1422,30 @@ export class QuickJS {
       fastArrayElements: Number(view[23]),
       binaryObjectCount: Number(view[24]),
       binaryObjectSize: Number(view[25]),
+      allocatedSize: Number(view[26]),
     };
     this.exports.wasm_free(bufPtr);
     return result;
+  }
+
+  /**
+   * Bytes currently allocated from WASM linear memory by the QuickJS
+   * runtime: the value `memoryLimit` is enforced against.
+   *
+   * Constant-time: it reads a counter updated on every allocation and
+   * free. Use it for frequent sampling (for example, on every host call).
+   * `getMemoryUsage()` walks the whole heap to build its breakdown, so its
+   * cost grows with heap size.
+   *
+   * This is not the same number as `getMemoryUsage().mallocSize`, which
+   * counts the bytes QuickJS hands out. This value also counts allocator
+   * rounding and partially filled small-object arenas, so the two differ
+   * slightly (typically by a few percent on a large heap).
+   */
+  getAllocatedSize(): number {
+    this.assertNotDisposed();
+    // size_t is u32 on wasm32; read it unsigned so values above 2 GiB stay positive.
+    return this.exports.qjs_get_allocated_size() >>> 0;
   }
 
   /**

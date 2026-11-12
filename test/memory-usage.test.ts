@@ -128,6 +128,7 @@ describe('vm.getMemoryUsage()', () => {
       'jsFuncPc2lineCount', 'jsFuncPc2lineSize',
       'cFuncCount', 'arrayCount', 'fastArrayCount',
       'fastArrayElements', 'binaryObjectCount', 'binaryObjectSize',
+      'allocatedSize',
     ] as const;
 
     for (const field of fields) {
