@@ -1,5 +1,13 @@
 # quickjs-wasi
 
+## 3.7.0
+
+### Minor Changes
+
+- [#67](https://github.com/vercel-labs/quickjs-wasi/pull/67) [`1acb242`](https://github.com/vercel-labs/quickjs-wasi/commit/1acb24256fa2d09e0449bc5baea5e64227de8e13) Thanks [@ethndotsh](https://github.com/ethndotsh)! - Add `vm.getAllocatedSize()`, a constant-time read of the bytes the runtime has allocated: the value `memoryLimit` is enforced against. Unlike `vm.getMemoryUsage()`, which walks the whole heap, its cost doesn't grow with heap size, so it suits frequent sampling. `getMemoryUsage()` also reports the same value as a new `allocatedSize` field.
+
+- [#65](https://github.com/vercel-labs/quickjs-wasi/pull/65) [`13c0813`](https://github.com/vercel-labs/quickjs-wasi/commit/13c0813c31750ddd6983f49e4f0d23c733800c7a) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Update QuickJS-NG from v0.17.0 to v0.18.0. Out-of-memory errors (`InternalError: out of memory`) can no longer be caught by guest code: guest `catch`/`finally` blocks are skipped and the error propagates to the host as a `JSException`, leaving the VM usable. The release also includes fixes for `String.prototype.repeat`, `Reflect.set`, computed property assignment order, template literal conversion, `Date.parse` with Unicode spaces, and several memory leaks.
+
 ## 3.6.4
 
 ### Patch Changes
